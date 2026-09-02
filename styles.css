@@ -214,3 +214,94 @@
   color: var(--text-warning);
   font-size: var(--font-ui-smaller);
 }
+
+/* ── The declared shapes ─────────────────────────────────────────────────────
+   A timeline stacks, which is the panel rule above. The other two arrange the
+   same panel markup differently; the shape comes from the engine's `kind`
+   (ADR-0001) and the placement from `src/ui/arrangement.ts`. No colour here that
+   the theme does not own, so both themes stay the theme's problem. */
+
+/* One column per panel, side by side, scrolling sideways rather than squeezing
+   below reading width — the result view lives in a sidebar leaf. */
+.chain-runner-panels--columns {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-3);
+  overflow-x: auto;
+}
+
+.chain-runner-column {
+  flex: 1 1 0;
+  min-width: 13em;
+}
+
+/* The converging panel is what the branches were run to produce: wider than the
+   branches that feed it, and bold through the panel's own `--join` rule. */
+.chain-runner-column--wide {
+  flex-grow: 1.75;
+  min-width: 18em;
+}
+
+.chain-runner-column .chain-runner-panel {
+  margin-bottom: 0;
+}
+
+/* Rounds down the left, the one being read on the right. */
+.chain-runner-panels--sidebar {
+  display: grid;
+  grid-template-columns: minmax(6em, 10em) minmax(0, 1fr);
+  gap: var(--size-4-3);
+  align-items: start;
+}
+
+.chain-runner-rounds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
+.chain-runner-round {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-2-2);
+  padding: var(--size-2-2) var(--size-4-1);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-round:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* The round in the detail pane, marked the way Obsidian marks an active row. */
+.chain-runner-round--selected {
+  background-color: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+/* A round that has not run yet is a row you can still open; it just has nothing
+   in it, and reads that way. */
+.chain-runner-round--pending .chain-runner-round-name {
+  color: var(--text-faint);
+}
+
+.chain-runner-round--errored .chain-runner-round-name {
+  color: var(--text-error);
+}
+
+.chain-runner-round--empty .chain-runner-round-name {
+  color: var(--text-warning);
+}
+
+.chain-runner-round-lines {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.chain-runner-detail .chain-runner-panel {
+  margin-bottom: 0;
+}

@@ -1,4 +1,5 @@
 import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
+import { arrangeRun, type Arrangement, type RoundEntry } from './arrangement'
 import { noticeFor } from './panelCopy'
 import { createThrottle } from './throttle'
 import type { RunPanel } from '../run/panels'
@@ -36,6 +37,14 @@ export class RunResultView extends ItemView {
    * elements it rendered into.
    */
   private renderHost: Component | undefined
+  /**
+   * The round the reader clicked in a sidebar layout, if they have clicked one.
+   *
+   * Unset means the detail pane follows the run — which is what a reader wants
+   * until the moment they go back to look at an earlier round, and what they
+   * want again on the next run.
+   */
+  private pickedRound: number | undefined
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf)
@@ -69,6 +78,9 @@ export class RunResultView extends ItemView {
    * it landed.
    */
   show(result: RunResult, sourcePath: string): void {
+    // A run that has just started is a new run, and the round the reader was
+    // reading belonged to the last one.
+    if (result.status === 'running' && this.result?.status !== 'running') this.pickedRound = undefined
     this.result = result
     this.sourcePath = sourcePath
     if (result.status === 'running') {
@@ -95,10 +107,55 @@ export class RunResultView extends ItemView {
     }
 
     this.drawHeader(contentEl, this.result)
-    const panels = contentEl.createDiv({ cls: 'chain-runner-panels' })
-    for (const panel of this.result.layout.panels) this.drawPanel(panels, panel, this.result.status)
     if (this.result.layout.panels.length === 0) {
-      panels.createDiv({ cls: 'chain-runner-empty', text: 'Nothing has run yet.' })
+      contentEl.createDiv({ cls: 'chain-runner-empty', text: 'Nothing has run yet.' })
+      return
+    }
+    this.drawArrangement(contentEl, arrangeRun(this.result.layout, this.pickedRound), this.result.status)
+  }
+
+  /**
+   * The panels in the shape the chain asked for. Which shape that is comes from
+   * the engine's `kind`, and where each panel lands from `arrangeRun` — this
+   * decides nothing beyond which elements the arrangement becomes.
+   */
+  private drawArrangement(parent: HTMLElement, arrangement: Arrangement, status: RunStatus): void {
+    if (arrangement.kind === 'columns') {
+      const columns = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--columns' })
+      for (const column of arrangement.columns) {
+        const el = columns.createDiv({ cls: 'chain-runner-column' })
+        if (column.wide) el.addClass('chain-runner-column--wide')
+        this.drawPanel(el, column.panel, status)
+      }
+      return
+    }
+
+    if (arrangement.kind === 'sidebar') {
+      const split = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--sidebar' })
+      const list = split.createDiv({ cls: 'chain-runner-rounds' })
+      for (const entry of arrangement.rounds) this.drawRound(list, entry)
+      const detail = split.createDiv({ cls: 'chain-runner-detail' })
+      if (arrangement.detail) this.drawPanel(detail, arrangement.detail, status)
+      return
+    }
+
+    const panels = parent.createDiv({ cls: 'chain-runner-panels' })
+    for (const panel of arrangement.panels) this.drawPanel(panels, panel, status)
+  }
+
+  /** One row of the round list: which round it is, how much it holds, and how it went. */
+  private drawRound(parent: HTMLElement, entry: RoundEntry): void {
+    const { panel } = entry
+    const el = parent.createDiv({ cls: `chain-runner-round chain-runner-round--${panel.state}` })
+    if (entry.selected) el.addClass('chain-runner-round--selected')
+    el.createSpan({ cls: 'chain-runner-round-name', text: panel.name })
+    el.createSpan({ cls: 'chain-runner-round-lines', text: panel.lines ? `${panel.lines} ln` : '—' })
+    // Picking a round is the reader taking over from the run; redraw at once
+    // rather than through the throttle, so the click feels like a click.
+    el.onclick = (): void => {
+      this.pickedRound = entry.index
+      this.throttle.cancel()
+      this.draw()
     }
   }
 

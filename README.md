@@ -57,10 +57,12 @@ Two things the picker says before you commit to a run: a chain that declares a d
 
 | Chain declares | Panels |
 | --- | --- |
-| `view: timeline` | One per hop, last one emphasised — the surviving skeleton. |
-| `view: columns` | One per branch, plus the `role: join` panel emphasised. |
-| `view: sidebar` | One per loop round. |
-| nothing | The run trace: one panel per node that ran, in the order it ran. |
+| `view: timeline` | Stacked, one per hop, last one emphasised — the surviving skeleton. |
+| `view: columns` | Side by side, one column per branch; the `role: join` column is wider and its heading bold. |
+| `view: sidebar` | Rounds down the left, the one you are reading in a detail pane. |
+| nothing | The run trace, stacked: one panel per node that ran, in the order it ran. |
+
+The shape is the engine's `kind` and the panels are the engine's panels; the plugin only decides where each one lands, in `src/ui/arrangement.ts`. A columns layout streams like any other — a branch still writing shows its tokens in its own column. In a sidebar layout the detail pane follows the front of the run — the round being written, or the last one that landed — until you click a round, and it follows again on the next run.
 
 A panel shows the section its port asked for, resolved the way the engine resolves an edge — so a panel here holds what the next hop actually received, and matches the same run opened in maestro-playground.
 
@@ -112,6 +114,7 @@ src/
     seed.ts               what a run reads: the selection, or the note
   ui/
     pickerModel.ts        the picker's groups and order
+    arrangement.ts        where a layout's panels go: stacked, columns, or rounds
     chainPicker.ts        the chain and parameter modals
     panelCopy.ts          what a panel says when it has nothing to show
     throttle.ts           how often the result view redraws
@@ -173,9 +176,11 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 5b. **A selection.** Select one paragraph of the note and run the command. Expect the header to read `seed: <note>.md (selection)`, and the run to be about that paragraph rather than the whole note. With nothing selected, expect `seed: <note>.md` and no qualifier.
 6. **A chain with a dropdown.** Pick one that declares a `parameter`. Expect a second modal asking for it before the run, the value in the result header, and the same name and value on the run when it is opened in the playground's history.
 6b. **A chain that pins its own files.** One with no `seed` node should carry the *reads its own files* line in the picker.
+6c. **A columns chain.** Pick a `view: columns` chain. Expect the branches side by side rather than stacked, the `role: join` column wider than them with its heading bold, and each column streaming its own hop's tokens as it writes.
+6d. **A sidebar chain.** Pick a `view: sidebar` chain. Expect the rounds listed down the left and one of them open on the right; expect the detail pane to move to the round being written as the loop runs, and to stay on a round you click until the next run.
 7. **A chain declaring no view.** Expect the run trace fallback and a line saying so, not an empty view.
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
-9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning` and `--text-error`.
+9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning` and `--text-error`. Check all three shapes: the selected round's row uses `--background-modifier-active-hover` and the hover uses `--background-modifier-hover`, both the theme's own.
 
 ### Last recorded run
 
@@ -193,4 +198,5 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 | `launchRun` against a real chain | **not run** — it spends model tokens; covered against the fake engine for every event type |
 | Part two, in a vault | run 2026-09-02 in the `test_chain` vault (Excalidraw installed alongside): plugin loads, settings tab present, pill and offline notice behave. Not itemised step by step. |
 | Run meta records the parameter | verified read-only, 2026-09-02: `POST /api/run` reads `paramValue` and writes `parameter: { name, value }` onto the run (`app/api/run/route.ts`), and two runs on disk carry it — e.g. `2026-09-02-jFKjsR`, `{ name: 'target audience', value: 'your mom' }`. Not re-attested by a plugin-launched run, which would spend model tokens. |
+| Columns and sidebar shapes (steps 6c, 6d, 9) | **not run** — the arrangement is covered pure in `tests/arrangement.test.ts` for all three kinds, but no live run in a vault has drawn a `columns` or `sidebar` chain, and neither shape has been looked at in both themes. |
 | Part three, the quick path | run 2026-09-02 in the `test_chain` vault against a live engine — twice: once on the ported layout model, and again after the engine began streaming `layout` frames (ADR-0017). Chains ran and their results drew correctly both times. The run opened in the playground's own history from the id the result header shows (step 4). Not itemised step by step; the capability refusal (step 4b) is not separately attested. |
