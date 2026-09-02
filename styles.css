@@ -242,9 +242,6 @@
   min-width: 18em;
 }
 
-.chain-runner-column .chain-runner-panel {
-  margin-bottom: 0;
-}
 
 /* Rounds down the left, the one being read on the right. */
 .chain-runner-panels--sidebar {
@@ -283,9 +280,17 @@
   font-weight: var(--font-semibold);
 }
 
+/* The iteration, because a loop runs one node over and over and every round can
+   carry the same name. */
+.chain-runner-round-number {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
 /* A round that has not run yet is a row you can still open; it just has nothing
-   in it, and reads that way. */
-.chain-runner-round--pending .chain-runner-round-name {
+   in it, and reads that way. Same for one control flow went around. */
+.chain-runner-round--pending .chain-runner-round-name,
+.chain-runner-round--skipped .chain-runner-round-name {
   color: var(--text-faint);
 }
 
@@ -297,11 +302,21 @@
   color: var(--text-warning);
 }
 
+.chain-runner-round-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chain-runner-round-lines {
   color: var(--text-faint);
   flex-shrink: 0;
 }
 
+/* A column and a detail pane each hold one panel; the stack's gap below it is
+   the stack's, not the panel's. */
+.chain-runner-column .chain-runner-panel,
 .chain-runner-detail .chain-runner-panel {
   margin-bottom: 0;
 }

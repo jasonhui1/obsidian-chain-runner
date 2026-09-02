@@ -19,8 +19,9 @@ const STATUS_LABEL: Record<RunStatus, string> = {
  *
  * The view decides nothing about the run. It is handed a `RunResult` and draws
  * it; what the panels are, what state each is in and what a state says all come
- * from `src/run/`, where they are checkable without a vault. What lands here is
- * the two things only a view can do: markdown, and how often to redraw.
+ * from `src/run/`, and where each panel lands from `./arrangement`, all of them
+ * checkable without a vault. What lands here is the three things only a view can
+ * do: markdown, how often to redraw, and what a click means.
  */
 export class RunResultView extends ItemView {
   private result: RunResult | undefined
@@ -78,9 +79,11 @@ export class RunResultView extends ItemView {
    * it landed.
    */
   show(result: RunResult, sourcePath: string): void {
-    // A run that has just started is a new run, and the round the reader was
-    // reading belonged to the last one.
-    if (result.status === 'running' && this.result?.status !== 'running') this.pickedRound = undefined
+    // The round the reader was reading belonged to the run before this one. A
+    // launch's first draw is the one moment a running run has no panels — the
+    // engine's first frame has not landed — and that holds for a run started
+    // while the last one was still going, which a status edge would miss.
+    if (result.status === 'running' && result.layout.panels.length === 0) this.pickedRound = undefined
     this.result = result
     this.sourcePath = sourcePath
     if (result.status === 'running') {
@@ -124,7 +127,7 @@ export class RunResultView extends ItemView {
       const columns = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--columns' })
       for (const column of arrangement.columns) {
         const el = columns.createDiv({ cls: 'chain-runner-column' })
-        if (column.wide) el.addClass('chain-runner-column--wide')
+        if (column.converging) el.addClass('chain-runner-column--wide')
         this.drawPanel(el, column.panel, status)
       }
       return
@@ -148,8 +151,14 @@ export class RunResultView extends ItemView {
     const { panel } = entry
     const el = parent.createDiv({ cls: `chain-runner-round chain-runner-round--${panel.state}` })
     if (entry.selected) el.addClass('chain-runner-round--selected')
+    // A loop runs one node over and over, so every round can carry the same
+    // name; the iteration is the only thing that tells the rows apart. It is
+    // 0-based on the wire and 1-based to read.
+    if (entry.round !== undefined) {
+      el.createSpan({ cls: 'chain-runner-round-number', text: String(entry.round + 1) })
+    }
     el.createSpan({ cls: 'chain-runner-round-name', text: panel.name })
-    el.createSpan({ cls: 'chain-runner-round-lines', text: panel.lines ? `${panel.lines} ln` : '—' })
+    this.drawLines(el, 'chain-runner-round-lines', panel)
     // Picking a round is the reader taking over from the run; redraw at once
     // rather than through the throttle, so the click feels like a click.
     el.onclick = (): void => {
@@ -187,13 +196,18 @@ export class RunResultView extends ItemView {
     }
   }
 
+  /** How much a panel holds, in the one wording both the panel head and a round row use. */
+  private drawLines(parent: HTMLElement, cls: string, panel: RunPanel): void {
+    parent.createSpan({ cls, text: panel.lines ? `${panel.lines} ln` : '—' })
+  }
+
   private drawPanel(parent: HTMLElement, panel: RunPanel, status: RunStatus): void {
     const el = parent.createDiv({ cls: `chain-runner-panel chain-runner-panel--${panel.state}` })
     if (panel.emphasis) el.addClass(`chain-runner-panel--${panel.emphasis}`)
 
     const head = el.createDiv({ cls: 'chain-runner-panel-head' })
     head.createSpan({ cls: 'chain-runner-panel-name', text: panel.name })
-    head.createSpan({ cls: 'chain-runner-panel-lines', text: panel.lines ? `${panel.lines} ln` : '—' })
+    this.drawLines(head, 'chain-runner-panel-lines', panel)
 
     const notice = noticeFor(panel, status)
     if (notice) {

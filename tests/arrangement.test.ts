@@ -53,8 +53,8 @@ describe('arrangeRun: columns', () => {
     ])
   })
 
-  it('widens the converging panel and nothing else', () => {
-    expect(columnsOf(arrangeRun(layout('columns', branches))).map(column => column.wide)).toEqual([
+  it('marks the converging panel and nothing else', () => {
+    expect(columnsOf(arrangeRun(layout('columns', branches))).map(column => column.converging)).toEqual([
       false,
       false,
       true,
@@ -63,12 +63,20 @@ describe('arrangeRun: columns', () => {
 
   it('takes the emphasis from the engine rather than the position', () => {
     const joinFirst = [panel({ name: 'together', node: 'join', emphasis: 'join' }), panel({ name: 'left', node: 'a' })]
-    expect(columnsOf(arrangeRun(layout('columns', joinFirst))).map(column => column.wide)).toEqual([true, false])
+    expect(columnsOf(arrangeRun(layout('columns', joinFirst))).map(column => column.converging)).toEqual([true, false])
   })
 
-  it('leaves a columns chain with no join panel with no wide column', () => {
+  it('leaves a columns chain with no join panel with nothing converging', () => {
     const noJoin = [panel({ name: 'left', node: 'a' }), panel({ name: 'right', node: 'b', emphasis: 'last' })]
-    expect(columnsOf(arrangeRun(layout('columns', noJoin))).every(column => !column.wide)).toBe(true)
+    expect(columnsOf(arrangeRun(layout('columns', noJoin))).every(column => !column.converging)).toBe(true)
+  })
+
+  it('carries a branch that is still writing into its own column', () => {
+    const writing = [panel({ name: 'left', node: 'a', streaming: 'half a sen' }), panel({ name: 'right', node: 'b' })]
+    expect(columnsOf(arrangeRun(layout('columns', writing))).map(column => column.panel.streaming)).toEqual([
+      'half a sen',
+      undefined,
+    ])
   })
 })
 

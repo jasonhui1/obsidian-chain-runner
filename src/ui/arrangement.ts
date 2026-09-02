@@ -14,8 +14,8 @@ import type { RunLayout, RunPanel } from '../run/panels'
 /** One column of a `columns` layout. */
 export interface Column {
   panel: RunPanel
-  /** The converging panel: the one the branches were run to produce. */
-  wide: boolean
+  /** The panel the branches converge on — the one they were all run to produce. */
+  converging: boolean
 }
 
 /** One row of a `sidebar` layout's round list. */
@@ -41,8 +41,8 @@ export type Arrangement =
  * of the run is what keeps the detail pane showing something happening rather
  * than an empty panel the reader has to click away from.
  */
-function following(panels: RunPanel[]): number {
-  const writing = panels.findLastIndex(panel => panel.streaming !== undefined && panel.streaming !== '')
+function frontOfRun(panels: RunPanel[]): number {
+  const writing = panels.findLastIndex(panel => Boolean(panel.streaming))
   if (writing !== -1) return writing
   const landed = panels.findLastIndex(panel => panel.state !== 'pending')
   return landed === -1 ? 0 : landed
@@ -51,7 +51,7 @@ function following(panels: RunPanel[]): number {
 /** The reader's pick when they have made one and it still exists, else the front of the run. */
 function selectedRound(panels: RunPanel[], picked: number | undefined): number {
   if (picked !== undefined && picked >= 0 && picked < panels.length) return picked
-  return following(panels)
+  return frontOfRun(panels)
 }
 
 /**
@@ -63,7 +63,7 @@ function selectedRound(panels: RunPanel[], picked: number | undefined): number {
  */
 export function arrangeRun(layout: RunLayout, picked?: number): Arrangement {
   if (layout.kind === 'columns') {
-    return { kind: 'columns', columns: layout.panels.map(panel => ({ panel, wide: panel.emphasis === 'join' })) }
+    return { kind: 'columns', columns: layout.panels.map(panel => ({ panel, converging: panel.emphasis === 'join' })) }
   }
 
   if (layout.kind === 'sidebar') {

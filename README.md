@@ -123,7 +123,7 @@ src/
     settingsTab.ts, statusPill.ts
 ```
 
-`src/run/` holds no Obsidian import: what a stream of engine events means, and what panels it becomes, is decided there and checked without a vault. The view is left with the two things only a view can do — markdown, and how often to redraw.
+`src/run/` holds no Obsidian import: what a stream of engine events means, and what panels it becomes, is decided there and checked without a vault. `src/ui/arrangement.ts` is vault-free too, and for the same reason — it is a drawing decision rather than a run one, so it sits in `src/ui/`, but where a panel lands is checkable without Obsidian and is checked that way. What is left in the view itself is the three things only a view can do: markdown, how often to redraw, and what a click means.
 
 `src/ui/quickRun.ts` is where the two meet, and the decisions it makes — which note, how much of it, whether to ask for the dropdown — are driven in `tests/quickRunner.test.ts` against `tests/obsidian.ts`, a stub that records modals instead of drawing them (aliased over `obsidian` in `vitest.config.ts`). Typechecking still runs against the real module, so a stub that drifts from Obsidian's API fails `tsc` rather than passing a green suite.
 
@@ -180,7 +180,7 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 6d. **A sidebar chain.** Pick a `view: sidebar` chain. Expect the rounds listed down the left and one of them open on the right; expect the detail pane to move to the round being written as the loop runs, and to stay on a round you click until the next run.
 7. **A chain declaring no view.** Expect the run trace fallback and a line saying so, not an empty view.
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
-9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning` and `--text-error`. Check all three shapes: the selected round's row uses `--background-modifier-active-hover` and the hover uses `--background-modifier-hover`, both the theme's own.
+9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes.
 
 ### Last recorded run
 
