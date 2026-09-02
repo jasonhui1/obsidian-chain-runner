@@ -73,6 +73,18 @@ export function momentOf(chain: ChainSummary): string {
   return chain.moment || chain.description || ''
 }
 
+/**
+ * The dropdown a chain must be asked for before it can run, or `undefined` when
+ * there is nothing to ask. A chain reads its parameter as an input, so running
+ * one with the value unset runs a different chain than the reader picked — but a
+ * dropdown declared with no options has no value to offer, and asking for one
+ * would be a modal with nothing in it.
+ */
+export function parameterToAsk(chain: ChainSummary): ChainParameter | undefined {
+  const parameter = chain.parameter
+  return parameter && parameter.options.length > 0 ? parameter : undefined
+}
+
 export interface AgentOutput {
   nodeId?: string
   agentName: string

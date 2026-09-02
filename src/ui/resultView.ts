@@ -2,7 +2,7 @@ import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLea
 import { noticeFor } from './panelCopy'
 import { createThrottle } from './throttle'
 import type { RunPanel } from '../run/panels'
-import type { RunResult, RunStatus } from '../run/session'
+import { seedLine, type RunResult, type RunStatus } from '../run/session'
 
 export const RESULT_VIEW_TYPE = 'chain-runner-result'
 
@@ -115,7 +115,7 @@ export class RunResultView extends ItemView {
     if (result.moment) header.createDiv({ cls: 'chain-runner-run-moment', text: result.moment })
 
     const meta = header.createDiv({ cls: 'chain-runner-run-meta' })
-    meta.createSpan({ text: `seed: ${result.seedSource}` })
+    meta.createSpan({ text: seedLine(result.seed) })
     if (result.parameter) meta.createSpan({ text: `${result.parameter.name}: ${result.parameter.value}` })
     if (result.runId) meta.createSpan({ text: result.runId })
 

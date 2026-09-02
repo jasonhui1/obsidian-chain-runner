@@ -45,9 +45,13 @@ Any plugin action taken while the engine is offline shows a `engine offline` not
 
 **Chain Runner: Run chain on this note** takes the note you are reading — or the selection, when you have one — and runs a chain against it. Nothing is drawn; the result reads in the right sidebar.
 
+**What the run reads.** With nothing selected the whole note is the seed, minus its frontmatter: tags, aliases and dates are the vault's bookkeeping, not part of the argument the chain is asked to read. Select a passage and that passage is the seed instead, left exactly as it was highlighted — frontmatter inside a selection was selected on purpose. The result header names the note either way, and adds `(selection)` when the run covered less than it: `seed: premise.md (selection)`.
+
 **Picking a chain.** The picker groups chains under the four headings the engine's own picker uses: 洞見 (insight), 產出 (production), 壓力測試 (stress-test), and `unclassified` for a chain that declares no `purpose`. Under each name sits the chain's `moment` in grey — the situation that should make you reach for it — falling back to its `description`. Typing filters across every group at once, matching the name, the slug, the moment and the description; a heading with nothing left under it disappears.
 
 Two things the picker says before you commit to a run: a chain that declares a dropdown asks for its value first, because a chain reads its parameter as an input; and a chain that declares no seed node is marked *reads its own files — this note is not used*, since it runs off the files it pins and the note you invoked it on reaches nothing.
+
+**The dropdown.** A chain declaring a `parameter` gets one more suggester — the same modal shape as the picker, with the chain's own options — and the run starts on the pick. A chain declaring none launches straight from the picker, and a dropdown declared with no options is not asked for, since there would be nothing in the modal. The value goes out with the run as `paramValue`, so the engine records it on the run alongside the seed, and the header shows it next to the seed line.
 
 **Reading the result.** One panel per output the chain declares, in the order it declared them, drawn in the shape it asked for:
 
@@ -105,7 +109,7 @@ src/
     section.ts            section addressing, for scoping a half-written hop
     panels.ts             the engine's panels, plus live tokens and the trace fallback
     session.ts            the event fold, and the result the view renders
-    seed.ts               what a note contributes to a run
+    seed.ts               what a run reads: the selection, or the note
   ui/
     pickerModel.ts        the picker's groups and order
     chainPicker.ts        the chain and parameter modals
@@ -164,7 +168,8 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 3. **A declared timeline.** Pick a `view: timeline` chain. Expect: the sidebar opens; one panel per declared output appears at once, the last one emphasised; each fills in as its hop lands; tokens appear as the hop writes them, smoothly rather than in a jerk per token.
 4. **The same run in the playground.** When it finishes, open the run id the header shows in maestro-playground's history. Expect the same panels, in the same order, with the same panel emphasised and the same text in each.
 5. **Panel states.** Run a chain whose hop drops a section a later port asks for, and one whose hop fails. Expect *nothing survived* and *this hop failed* respectively, the second carrying the engine's message, and any hop the run never reached reading *never ran* once it settles.
-6. **A chain with a dropdown.** Pick one that declares a `parameter`. Expect a second modal asking for it before the run, and the value in the result header.
+5b. **A selection.** Select one paragraph of the note and run the command. Expect the header to read `seed: <note>.md (selection)`, and the run to be about that paragraph rather than the whole note. With nothing selected, expect `seed: <note>.md` and no qualifier.
+6. **A chain with a dropdown.** Pick one that declares a `parameter`. Expect a second modal asking for it before the run, the value in the result header, and the same name and value on the run when it is opened in the playground's history.
 6b. **A chain that pins its own files.** One with no `seed` node should carry the *reads its own files* line in the picker.
 7. **A chain declaring no view.** Expect the run trace fallback and a line saying so, not an empty view.
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
@@ -185,4 +190,5 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 | `listChains` at a stopped port | `EngineOfflineError` |
 | `launchRun` against a real chain | **not run** — it spends model tokens; covered against the fake engine for every event type |
 | Part two, in a vault | run 2026-09-02 in the `test_chain` vault (Excalidraw installed alongside): plugin loads, settings tab present, pill and offline notice behave. Not itemised step by step. |
+| Run meta records the parameter | verified read-only, 2026-09-02: `POST /api/run` reads `paramValue` and writes `parameter: { name, value }` onto the run (`app/api/run/route.ts`), and two runs on disk carry it — e.g. `2026-09-02-jFKjsR`, `{ name: 'target audience', value: 'your mom' }`. Not re-attested by a plugin-launched run, which would spend model tokens. |
 | Part three, the quick path | run 2026-09-02 in the `test_chain` vault against a live engine — twice: once on the ported layout model, and again after the engine began streaming `layout` frames (ADR-0017). Chains ran and their results drew correctly both times. The run opened in the playground's own history from the id the result header shows (step 4). Not itemised step by step; the capability refusal (step 4b) is not separately attested. |

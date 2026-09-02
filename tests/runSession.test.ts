@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { applyRunEvent, buildRunResult, emptyRunState, settleRun, type RunState } from '@/run/session'
+import {
+  applyRunEvent,
+  buildRunResult,
+  emptyRunState,
+  seedLine,
+  settleRun,
+  type RunState,
+} from '@/run/session'
 import type { AgentOutput, ChainSummary, RunEvent } from '@/engine/types'
+
+/** The common case: no selection, so the whole note is the seed. */
+const NOTE_SEED = { source: 'premise.md', from: 'note' } as const
 
 const CHAIN: ChainSummary = {
   slug: 'relay',
@@ -105,7 +115,7 @@ describe('applyRunEvent', () => {
 
 describe('buildRunResult', () => {
   const result = (state: RunState, paramValue?: string) =>
-    buildRunResult({ chain: CHAIN, seedSource: 'premise.md', state, paramValue })
+    buildRunResult({ chain: CHAIN, seed: NOTE_SEED, state, paramValue })
 
   it('is running until the stream closes', () => {
     expect(result(fold(start('first'))).status).toBe('running')
@@ -134,24 +144,33 @@ describe('buildRunResult', () => {
     expect(result(emptyRunState())).toMatchObject({
       chainName: 'Telephone Relay',
       moment: 'finalizing a doc, not sure it holds up',
-      seedSource: 'premise.md',
+      seed: { source: 'premise.md', from: 'note' },
     })
   })
 
   it('falls back to the chain description when it states no moment', () => {
     const chain: ChainSummary = { slug: 'x', name: 'X', description: 'the mechanism' }
-    const built = buildRunResult({ chain, seedSource: 'a.md', state: emptyRunState() })
+    const built = buildRunResult({ chain, seed: NOTE_SEED, state: emptyRunState() })
     expect(built.moment).toBe('the mechanism')
   })
 
   it('shows the dropdown the chain declared and what it was set to', () => {
     const chain: ChainSummary = { ...CHAIN, parameter: { name: 'audience', options: ['execs'] } }
-    const built = buildRunResult({ chain, seedSource: 'a.md', state: emptyRunState(), paramValue: 'execs' })
+    const built = buildRunResult({ chain, seed: NOTE_SEED, state: emptyRunState(), paramValue: 'execs' })
     expect(built.parameter).toEqual({ name: 'audience', value: 'execs' })
   })
 
   it('has no parameter when the chain declares none', () => {
     expect(result(emptyRunState(), 'ignored').parameter).toBeUndefined()
+  })
+
+  it('carries the seed as the selection when that is what was run', () => {
+    const built = buildRunResult({
+      chain: CHAIN,
+      seed: { source: 'premise.md', from: 'selection' },
+      state: emptyRunState(),
+    })
+    expect(built.seed).toEqual({ source: 'premise.md', from: 'selection' })
   })
 
   it('draws the engine panels, with live tokens laid over the one still writing', () => {
@@ -163,5 +182,15 @@ describe('buildRunResult', () => {
     expect(built.layout.kind).toBe('timeline')
     expect(built.layout.panels.map(p => p.name)).toEqual(['hop 1', 'skeleton'])
     expect(built.layout.panels[0].streaming).toBe('half')
+  })
+})
+
+describe('seedLine', () => {
+  it('names the note a whole-note run read', () => {
+    expect(seedLine(NOTE_SEED)).toBe('seed: premise.md')
+  })
+
+  it('says a selection was run, since the run then covers less than the note', () => {
+    expect(seedLine({ source: 'premise.md', from: 'selection' })).toBe('seed: premise.md (selection)')
   })
 })

@@ -1,4 +1,5 @@
 import { buildRunPanels, emptyRunNodes, type RunLayout, type RunNodes } from './panels'
+import type { SeedOrigin } from './seed'
 import { isEvent, momentOf, type ChainSummary, type LayoutModel, type RunEvent } from '../engine/types'
 
 /**
@@ -106,13 +107,32 @@ export function settleRun(state: RunState, error?: string): RunState {
   return { ...state, settled: true, error: state.error ?? error }
 }
 
+/** The seed of a run, as the header names it: which note, and how much of it. */
+export interface RunSeed {
+  /** The note the run was invoked on. */
+  source: string
+  from: SeedOrigin
+}
+
+/**
+ * The header's one line about the seed. A selection run covers less than the
+ * note it was taken from, so it says which of the two happened; a whole-note run
+ * needs no qualifier, and adding one to every run would say nothing.
+ */
+export function seedLine(seed: RunSeed): string {
+  return seed.from === 'selection' ? `seed: ${seed.source} (selection)` : `seed: ${seed.source}`
+}
+
 /** Everything the result view renders, for a run at one moment. */
 export interface RunResult {
   chainName: string
   /** The situation this chain is for; its description when it states no moment. */
   moment: string
-  /** Where the seed came from — the note this was run on. */
-  seedSource: string
+  /**
+   * Where the seed came from: the note the run was invoked on, and whether the
+   * whole of it was read or only the passage that was selected.
+   */
+  seed: RunSeed
   /** The dropdown the chain declared and what it was set to, when it declared one. */
   parameter?: { name: string; value: string }
   status: RunStatus
@@ -131,18 +151,18 @@ function hopFailure(state: RunState): string | undefined {
 
 export function buildRunResult(input: {
   chain: ChainSummary
-  seedSource: string
+  seed: RunSeed
   state: RunState
   /** What the chain's dropdown was set to; ignored by a chain that declares none. */
   paramValue?: string
 }): RunResult {
-  const { chain, seedSource, state, paramValue } = input
+  const { chain, seed, state, paramValue } = input
   const error = state.error ?? hopFailure(state)
 
   const result: RunResult = {
     chainName: chain.name,
     moment: momentOf(chain),
-    seedSource,
+    seed,
     status: !state.settled ? 'running' : error ? 'failed' : 'done',
     layout: buildRunPanels(chain, state.layout, state.nodes),
   }

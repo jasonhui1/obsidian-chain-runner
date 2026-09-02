@@ -11,3 +11,25 @@ const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/
 export function seedFromNote(text: string): string {
   return text.replace(FRONTMATTER, '').trim()
 }
+
+/** Where a run's seed came from — the whole note, or the passage in front of you. */
+export type SeedOrigin = 'selection' | 'note'
+
+/** The text a run was given, and what it was taken from. */
+export interface Seed {
+  text: string
+  from: SeedOrigin
+}
+
+/**
+ * What to run a chain on: the selection when there is one, the note otherwise.
+ *
+ * A selection is left as it was made — frontmatter inside one was selected on
+ * purpose, and stripping it would run something other than what was highlighted.
+ * Only a whole-note seed gets the vault's bookkeeping taken off.
+ */
+export function chooseSeed(input: { selection?: string; noteText: string }): Seed {
+  const selection = (input.selection ?? '').trim()
+  if (selection !== '') return { text: selection, from: 'selection' }
+  return { text: seedFromNote(input.noteText), from: 'note' }
+}

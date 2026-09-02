@@ -70,7 +70,8 @@ async function watchRun(): Promise<RunState[]> {
   return frames
 }
 
-const result = (state: RunState) => buildRunResult({ chain: CHAIN, seedSource: 'premise.md', state })
+const result = (state: RunState) =>
+  buildRunResult({ chain: CHAIN, seed: { source: 'premise.md', from: 'note' }, state })
 
 describe('a run on the wire, as the view reads it', () => {
   beforeEach(() => {
@@ -170,5 +171,54 @@ describe('a run the engine could not finish', () => {
     engine.runFrames = [frame({ type: 'error', error: 'no such chain' })]
     const frames = await watchRun()
     expect(result(frames[frames.length - 1]).layout.panels).toEqual([])
+  })
+})
+
+describe('a chain that declares a dropdown', () => {
+  const PARAMETERISED: ChainSummary = { ...CHAIN, parameter: { name: 'lens', options: ['sceptic'] } }
+
+  beforeEach(() => {
+    engine.runFrames = [frame({ type: 'run_complete', runId: '2026-09-02-ab12c' })]
+  })
+
+  it('sends the value with the run, so the chain reads the parameter it declared', async () => {
+    const run = client.launchRun({
+      chainName: 'Telephone Relay',
+      seedPrompt: 'the selection',
+      paramValue: 'sceptic',
+    })
+    for await (const event of run) expect(event.type).toBe('run_complete')
+    expect(JSON.parse(engine.requests[0].body)).toEqual({
+      chainName: 'Telephone Relay',
+      seedPrompt: 'the selection',
+      paramValue: 'sceptic',
+    })
+  })
+
+  it('reads the parameter back off the run the engine recorded', async () => {
+    engine.runMeta = {
+      runId: '2026-09-02-ab12c',
+      chainName: 'Telephone Relay',
+      seedPrompt: 'the selection',
+      parameter: { name: 'lens', value: 'sceptic' },
+      startedAt: '2026-09-02T00:00:00.000Z',
+      status: 'complete',
+      agentOutputs: [],
+    }
+    const meta = await client.getRun('2026-09-02-ab12c')
+    expect(meta.parameter).toEqual({ name: 'lens', value: 'sceptic' })
+  })
+
+  it('shows the name and the value in the header, next to the seed', () => {
+    const built = buildRunResult({
+      chain: PARAMETERISED,
+      seed: { source: 'premise.md', from: 'selection' },
+      state: emptyRunState(),
+      paramValue: 'sceptic',
+    })
+    expect(built).toMatchObject({
+      seed: { source: 'premise.md', from: 'selection' },
+      parameter: { name: 'lens', value: 'sceptic' },
+    })
   })
 })

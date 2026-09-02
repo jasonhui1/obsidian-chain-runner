@@ -4,9 +4,9 @@ import type { RunResultView } from './resultView'
 import { engineFailureMessage } from '../engine/guard'
 import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
 import { applyRunEvent, buildRunResult, emptyRunState, settleRun } from '../run/session'
-import { seedFromNote } from '../run/seed'
+import { chooseSeed, type Seed } from '../run/seed'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary } from '../engine/types'
+import { parameterToAsk, type ChainSummary } from '../engine/types'
 
 /**
  * Said when the engine does not stream layout frames. Named as the thing that is
@@ -30,8 +30,8 @@ export interface QuickRunDeps {
 /** One run, as the reader assembled it: what to run, on what, with what set. */
 interface QuickRun {
   chain: ChainSummary
-  /** The note's text, or the selection when there was one. */
-  seed: string
+  /** The note's text, or the selection when there was one, and which of the two. */
+  seed: Seed
   note: TFile
   /** The chain's dropdown, when it declares one. */
   paramValue?: string
@@ -56,7 +56,9 @@ export class QuickRunner {
       return
     }
     const seed = await this.seedFrom(note)
-    if (seed === '') {
+    if (seed.text === '') {
+      // A selection that is only whitespace is no selection at all, so an empty
+      // seed here is always an empty note.
       this.deps.notify('This note is empty')
       return
     }
@@ -87,11 +89,12 @@ export class QuickRunner {
   }
 
   /** The selection when there is one, so a passage can be run without splitting the note. */
-  private async seedFrom(note: TFile): Promise<string> {
+  private async seedFrom(note: TFile): Promise<Seed> {
     const editor = this.deps.app.workspace.getActiveViewOfType(MarkdownView)?.editor
-    const selection = editor?.getSelection() ?? ''
-    if (selection.trim() !== '') return selection.trim()
-    return seedFromNote(await this.deps.app.vault.cachedRead(note))
+    return chooseSeed({
+      selection: editor?.getSelection(),
+      noteText: await this.deps.app.vault.cachedRead(note),
+    })
   }
 
   /**
@@ -100,8 +103,8 @@ export class QuickRunner {
    * different chain than the reader picked.
    */
   private pickParameter(run: QuickRun): void {
-    const parameter = run.chain.parameter
-    if (!parameter || parameter.options.length === 0) {
+    const parameter = parameterToAsk(run.chain)
+    if (!parameter) {
       void this.launch(run)
       return
     }
@@ -123,12 +126,16 @@ export class QuickRunner {
     this.inFlight = controller
 
     let state = emptyRunState()
-    const show = (): void => view.show(buildRunResult({ chain, seedSource: note.name, state, paramValue }), note.path)
+    const show = (): void =>
+      view.show(
+        buildRunResult({ chain, seed: { source: note.name, from: seed.from }, state, paramValue }),
+        note.path,
+      )
     show()
 
     let failure: string | undefined
     try {
-      const request = { chainName: chain.name, seedPrompt: seed, ...(paramValue ? { paramValue } : {}) }
+      const request = { chainName: chain.name, seedPrompt: seed.text, ...(paramValue ? { paramValue } : {}) }
       for await (const event of this.deps.engine.launchRun(request, controller.signal)) {
         state = applyRunEvent(state, event)
         show()
