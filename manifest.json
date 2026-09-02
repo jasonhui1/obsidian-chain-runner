@@ -1,0 +1,9 @@
+{
+  "id": "chain-runner",
+  "name": "Chain Runner",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "Run maestro-playground insight chains against vault material, on an Excalidraw drawing.",
+  "author": "Jason Hui",
+  "isDesktopOnly": true
+}

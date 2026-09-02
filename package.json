@@ -1,0 +1,29 @@
+{
+  "name": "obsidian-chain-runner",
+  "version": "0.1.0",
+  "description": "Run maestro-playground insight chains against vault material, on an Excalidraw drawing.",
+  "main": "main.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src tests scripts",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.17.0",
+    "obsidian": "^1.7.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,18 @@
+/* Obsidian's own variables only, so the pill follows the active theme in both
+   light and dark rather than carrying colours of its own. */
+
+.chain-runner-engine-pill {
+  cursor: default;
+}
+
+.chain-runner-engine-pill--online {
+  color: var(--text-success);
+}
+
+.chain-runner-engine-pill--offline {
+  color: var(--text-error);
+}
+
+.chain-runner-engine-pill--unknown {
+  color: var(--text-faint);
+}
