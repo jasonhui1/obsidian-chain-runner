@@ -2,7 +2,7 @@
 
 An Obsidian plugin that pairs vault material with [maestro-playground](https://github.com/jasonhui1/maestro-playground) insight chains.
 
-The plugin loads, knows whether the engine is up, and can run a chain on the note in front of you — the **quick path** — reading the result in the right sidebar.
+The plugin loads, knows whether the engine is up, and can run a chain on the note in front of you — the **quick path** — reading the result in the right sidebar. It can also put a **chain node** on an Excalidraw drawing: a box naming the chain, with its dropdown and a `▶ Run` link.
 
 ## Dependencies
 
@@ -40,6 +40,7 @@ Any plugin action taken while the engine is offline shows a `engine offline` not
 | Command | What it does |
 | --- | --- |
 | **Chain Runner: Run chain on this note** | The quick path, below. |
+| **Chain Runner: Add chain node** | Puts a chain node on the Excalidraw drawing in front of you. |
 | **Chain Runner: List chains on the engine** | Fetches the workspace's chains and shows the count in a notice. The smoke test below uses it. |
 
 ## The quick path
@@ -114,6 +115,31 @@ This needs the Excalidraw plugin, 2.0.0 or newer; without it the action says so 
 
 Starting a second run replaces the first — the sidebar holds one view, and the run it was showing is aborted rather than raced.
 
+## Chain nodes on a drawing
+
+**Chain Runner: Add chain node** puts one chain on the drawing you are looking at:
+
+```
+╭────────────────────────────╮
+│ ⛓ Five Personas            │
+│ when a premise feels safe  │
+│ audience ▾ engineers       │
+│                    ▶ Run   │
+╰────────────────────────────╯
+```
+
+The picker is the quick path's, with the same four purpose headings and the same grey `moment` under each name — only the question differs, and a chain that reads no seed is marked *reads its own files — bound inputs are not used*. A chain declaring a dropdown asks for its value before the node is placed, so a node arrives ready rather than half-set. The node lands **at the cursor**, grouped, and the drawing is saved.
+
+**Two links, and neither opens anything.** `audience ▾ engineers` re-asks the chain's own options and rewrites the value where it stands; `▶ Run` is intercepted and, for now, says that running a node arrives in the next ticket. Every element of a node swallows its click, so a node that has been copied or half-deleted can never open a browser tab or make a note in the vault. Following a link on an Excalidraw canvas is **Ctrl/Cmd+click** (or the element's link icon) — a plain click only selects.
+
+**What the drawing stores.** Each of the node's five elements carries the same stamp in Excalidraw's `customData`: which node it belongs to, which part of the node it is, the chain's slug and name, and the parameter's name and value. `customData` survives moving, copying and a file reload, so a node keeps working across all three, and a value set on it is still there after Obsidian restarts. Copying a node copies the stamp too, so both copies claim one id — Excalidraw re-makes the *group* on copy, and that is what keeps a rewritten parameter on the copy you clicked.
+
+**Colours are Excalidraw's, not Obsidian's.** A canvas element cannot read a CSS variable, and Excalidraw inverts its whole canvas in dark mode — so the node uses that palette's own ink, grey and blue, and reads correctly in both themes because the canvas, not the plugin, does the flipping. Everything else in the plugin still uses Obsidian's variables.
+
+**Where it works.** Adding a node needs the drawing **open as its own tab**: the command acts on the tab in front of you, and a drawing embedded in a markdown note is a markdown tab. Clicks on a node work in both — the spike found the link hook fires inside an embedded drawing exactly as it does in a standalone one (`docs/spike-ea.md`, Q4; only Live Preview was exercised).
+
+Excalidraw 2.0.0 or newer is required, and the version is checked before anything is placed — an older one says so in a notice and nothing is drawn.
+
 ## Development
 
 ```bash
@@ -152,16 +178,20 @@ src/
     pickerModel.ts        the picker's groups and order
     arrangement.ts        where a layout's panels go: stacked, columns, or rounds
     drawingChoices.ts     which drawings the send-to-drawing suggester offers, in order
+    chainNode.ts          what a chain node is: its elements, its stamp, its rewrites
     chainPicker.ts        the chain and parameter modals
     drawingPicker.ts      the drawing suggester
     panelCopy.ts          what a panel says when it has nothing to show
     throttle.ts           how often the result view redraws
     resultView.ts         the right-sidebar view
     keepPiece.ts          the two panel actions: write the note, put it on a drawing
+    chainNodes.ts         the add command, and what a click on a node's links means
     excalidraw.ts         the Excalidraw plugin, as this plugin reaches it
     quickRun.ts           the command: note → picker → stream → view
     settingsTab.ts, statusPill.ts
 ```
+
+`src/ui/chainNode.ts` is pure in the same way: what a node holds, where each line sits, and what changes when its parameter is rewritten are decisions, checked in `tests/chainNode.test.ts` without a drawing. `src/ui/chainNodes.ts` holds what is asked before a node is placed and what each link click means, driven against a fake surface in `tests/chainNodes.test.ts`.
 
 `src/run/outputNote.ts` and `src/ui/drawingChoices.ts` are pure for the same reason the rest of `src/run/` is: what a kept note is called and what it says, and which drawing is offered first, are decisions rather than vault operations. `src/ui/keepPiece.ts` is the seam that holds the vault writes, driven in `tests/keepPiece.test.ts`; `src/ui/excalidraw.ts` holds every fact about the other plugin — its id, its version floor, the calls the spike found work — so a change on their side is a change in one file on ours.
 

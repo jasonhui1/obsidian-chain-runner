@@ -11,14 +11,34 @@ import type { ChainSummary } from '../engine/types'
  * inside the first row of its group instead — every row stays selectable, and
  * the headings never move under the reader's cursor.
  */
+/**
+ * What the picker asks and what it warns about — the two lines that differ
+ * between running a chain on a note and adding one to a drawing. Everything
+ * else about the modal is the same in both places, so only these are passed.
+ */
+export interface ChainPickerOptions {
+  placeholder?: string
+  /** Said under a chain that reads no seed; named for what it will not read here. */
+  unseeded?: string
+}
+
+const DEFAULT_OPTIONS: Required<ChainPickerOptions> = {
+  placeholder: 'Run which chain on this note?',
+  unseeded: 'reads its own files — this note is not used',
+}
+
 export class ChainPicker extends SuggestModal<PickerRow> {
+  private readonly options: Required<ChainPickerOptions>
+
   constructor(
     app: App,
     private readonly chains: ChainSummary[],
     private readonly onPick: (chain: ChainSummary) => void,
+    options: ChainPickerOptions = {},
   ) {
     super(app)
-    this.setPlaceholder('Run which chain on this note?')
+    this.options = { ...DEFAULT_OPTIONS, ...options }
+    this.setPlaceholder(this.options.placeholder)
     this.emptyStateText = 'No chain matches'
     // Enough that a workspace of a few dozen chains is not silently truncated.
     this.limit = 100
@@ -34,12 +54,9 @@ export class ChainPicker extends SuggestModal<PickerRow> {
     el.createDiv({ cls: 'chain-runner-suggestion-name', text: row.chain.name })
     if (row.note) el.createDiv({ cls: 'chain-runner-suggestion-note', text: row.note })
     // Said before the run rather than discovered after it: this chain reads the
-    // files it pins, and the note the command was invoked on reaches nothing.
+    // files it pins, and whatever it was pointed at reaches nothing.
     if (!row.readsNote) {
-      el.createDiv({
-        cls: 'chain-runner-suggestion-warning',
-        text: 'reads its own files — this note is not used',
-      })
+      el.createDiv({ cls: 'chain-runner-suggestion-warning', text: this.options.unseeded })
     }
   }
 

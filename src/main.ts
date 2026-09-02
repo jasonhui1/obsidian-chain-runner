@@ -4,7 +4,8 @@ import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
 import { withDefaults, type ChainRunnerSettings } from './settings'
-import { createDrawingSurface } from './ui/excalidraw'
+import { ChainNodes, newNodeId } from './ui/chainNodes'
+import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
 import { KeepPiece } from './ui/keepPiece'
 import { QuickRunner } from './ui/quickRun'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
@@ -63,7 +64,28 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the command that started it; unloading the plugin ends it.
     this.register(() => this.quickRun.stop())
 
+    const nodes = new ChainNodes({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      surface: createNodeSurface(this.app),
+      newNodeId,
+    })
+    // Excalidraw is not necessarily loaded while this one is loading, and the
+    // hook lives on its plugin instance — so it is installed once the workspace
+    // has finished coming up rather than here.
+    this.app.workspace.onLayoutReady(() => {
+      this.register(registerLinkHook(this.app, element => nodes.handleLinkClick(element)))
+    })
+
     this.addSettingTab(new ChainRunnerSettingTab(this.app, this))
+
+    this.addCommand({
+      id: 'add-chain-node',
+      name: 'Add chain node',
+      callback: () => void nodes.add(),
+    })
 
     this.addCommand({
       id: 'run-chain-on-note',
