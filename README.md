@@ -114,4 +114,4 @@ npm run smoke -- --launch                    # also launchRun — spends real mo
 | `ping` at a stopped port | `false` |
 | `listChains` at a stopped port | `EngineOfflineError` |
 | `launchRun` against a real chain | **not run** — it spends model tokens; covered against the fake engine for every event type |
-| Part two, in a vault | **not yet run** |
+| Part two, in a vault | run 2026-09-02 in the `test_chain` vault (Excalidraw installed alongside): plugin loads, settings tab present, pill and offline notice behave. Not itemised step by step. |
