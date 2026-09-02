@@ -120,6 +120,10 @@ src/
 
 The panel builder is **ported** from maestro-playground's `lib/layoutModel.ts` rather than fetched from `GET /api/runs/:id/layout`, because that route only answers for a run already written to disk and the quick path needs panels while the run is still streaming. The port keeps the engine's ports, states and emphasis, so the same run reads the same on both surfaces. The one addition is a `streaming` field: tokens a hop has produced, scoped to the panel's own socket, shown only while the panel is still `pending`.
 
+**The port can drift, and would drift silently.** The engine's copy is the authority — it is what the playground's own result view draws, and what anyone comparing the two windows will treat as correct. Nothing enforces the agreement: no shared package, no version check, no test spanning both repos. A rule changed there (a fourth layout kind, a different line between `empty` and `errored`) leaves the plugin drawing the old one, and it will not throw — a panel will just say the wrong thing about a hop, in a view whose whole job is to tell you what happened to your document.
+
+What holds it together is only this: `tests/runLayout.test.ts` mirrors every case in the engine's `tests/layout-model.test.ts`, case for case, so re-running both after an engine change is the check. Two of the engine's cases are deliberately not mirrored — they cover `isRenderableLayout`, which decides whether a *reopened past* run is too stale to draw, and this plugin only ever draws a run it watched happen. That makes drift findable by someone who suspects it. It does not prevent it.
+
 The network sits behind `HttpTransport` for two reasons. Obsidian's `requestUrl` cannot stream a response body, and a renderer `fetch` to `localhost` is a cross-origin request the engine sets no CORS headers for — so the runtime implementation goes through Node's `http` directly. And with the seam there, the tests drive the real client against a real local server (`tests/fakeEngine.ts`) rather than a stubbed `fetch`.
 
 ## Manual smoke against a live engine

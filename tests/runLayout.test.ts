@@ -65,6 +65,40 @@ ${SUMMARY}`)] }))
   })
 })
 
+describe('buildRunLayout: a declared timeline, continued', () => {
+  it('follows the declared order, whatever order the outputs arrived in', () => {
+    const outputs = [output('third', SUMMARY), output('first', SUMMARY)]
+    expect(buildRunLayout(timeline, run({ outputs })).panels.map(p => p.name))
+      .toEqual(['hop 1', 'hop 2', 'skeleton'])
+  })
+
+  it('shows the whole output for a port that names no socket', () => {
+    const whole: ChainSummary = { ...timeline, outputs: [{ name: 'all of it', node: 'first' }] }
+    expect(buildRunLayout(whole, run({ outputs: [output('first', `chatter
+${SUMMARY}`)] })).panels[0].text)
+      .toContain('chatter')
+  })
+
+  it('shows one panel for a loop-body node, not one per round', () => {
+    const outputs = [output('first', SUMMARY, { round: 0 }), output('first', SUMMARY, { round: 1 })]
+    expect(buildRunLayout(timeline, run({ outputs })).panels).toHaveLength(3)
+  })
+})
+
+describe('buildRunLayout: a half-declaration', () => {
+  it('is undeclared when a chain names outputs but no view to place them in', () => {
+    const noView: ChainSummary = { ...timeline, view: undefined }
+    expect(buildRunLayout(noView, run({ started: [started('first')] })).kind).toBe('undeclared')
+  })
+
+  it('is undeclared when a view declares no outputs to be its panels', () => {
+    for (const view of ['timeline', 'columns', 'sidebar'] as const) {
+      const noPorts: ChainSummary = { slug: 'x', name: 'X', view }
+      expect(buildRunLayout(noPorts, run()).kind).toBe('undeclared')
+    }
+  })
+})
+
 describe('buildRunLayout: panel states', () => {
   it('is empty when a finished hop dropped the section the chain asked for', () => {
     const layout = buildRunLayout(timeline, run({ outputs: [output('first', 'no headings here')] }))
@@ -121,6 +155,11 @@ describe('buildRunLayout: columns and sidebar', () => {
     expect(layout.panels.map(p => p.emphasis)).toEqual([undefined, undefined, 'join'])
   })
 
+  it('renders a columns chain with no join port as its columns and nothing beneath', () => {
+    const noJoin: ChainSummary = { ...columns, outputs: columns.outputs!.slice(0, 2) }
+    expect(buildRunLayout(noJoin, run()).panels.map(p => p.emphasis)).toEqual([undefined, undefined])
+  })
+
   const sidebar: ChainSummary = {
     slug: 'loop',
     name: 'Sharpen',
@@ -132,6 +171,24 @@ describe('buildRunLayout: columns and sidebar', () => {
     const outputs = [output('body', 'first pass', { round: 0 }), output('body', 'second pass', { round: 1 })]
     const layout = buildRunLayout(sidebar, run({ outputs }))
     expect(layout.panels.map(p => p.name)).toEqual(['draft · round 1', 'draft · round 2'])
+  })
+
+  it('treats an output with no round as round 0', () => {
+    const layout = buildRunLayout(sidebar, run({ outputs: [output('body', 'one pass')] }))
+    expect(layout.panels.map(p => p.name)).toEqual(['draft · round 1'])
+  })
+
+  it('shows a round reported twice as its last write, since a retry is not a round', () => {
+    const outputs = [output('body', 'first try', { round: 0 }), output('body', 'second try', { round: 0 })]
+    expect(buildRunLayout(sidebar, run({ outputs })).panels.map(p => p.text)).toEqual(['second try'])
+  })
+
+  it('reads a round that errored as errored on its own row', () => {
+    const outputs = [
+      output('body', 'fine', { round: 0 }),
+      output('body', '', { round: 1, status: 'error', error: 'the model refused' }),
+    ]
+    expect(buildRunLayout(sidebar, run({ outputs })).panels.map(p => p.state)).toEqual(['filled', 'errored'])
   })
 
   it('shows the first round streaming before it has reported', () => {
