@@ -143,9 +143,34 @@
 .chain-runner-panel-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: var(--size-4-2);
   padding-bottom: var(--size-2-2);
+}
+
+/* ── Keeping a piece ─────────────────────────────────────────────────────────
+   Two words rather than icons: what each does is the whole of what it says, and
+   an icon here would need a tooltip to say the same thing. Muted until hovered,
+   because the panel's text is what the reader came for. */
+
+.chain-runner-panel-actions {
+  display: flex;
+  gap: var(--size-2-3);
+}
+
+.chain-runner-panel-action {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  height: auto;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-panel-action:hover {
+  background: none;
+  box-shadow: none;
+  color: var(--text-accent);
 }
 
 .chain-runner-panel-name {
@@ -165,6 +190,10 @@
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
   flex-shrink: 0;
+  /* Pushed to the right of the head whether or not the two actions follow it, so
+     a panel worth keeping and one that is not read the same until the eye
+     reaches the end of the row. */
+  margin-left: auto;
 }
 
 .chain-runner-panel-notice {

@@ -76,6 +76,17 @@ export class App {}
 export class TFile {
   path = ''
   name = ''
+  basename = ''
   extension = 'md'
+  stat = { ctime: 0, mtime: 0, size: 0 }
+}
+export class TFolder {
+  path = ''
+  name = ''
 }
 export class MarkdownView {}
+
+/** Obsidian's own path tidy, narrowed to what the vault writes go through. */
+export function normalizePath(path: string): string {
+  return path.replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '')
+}

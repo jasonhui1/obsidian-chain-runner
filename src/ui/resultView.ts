@@ -7,6 +7,16 @@ import { seedLine, type RunResult, type RunStatus } from '../run/session'
 
 export const RESULT_VIEW_TYPE = 'chain-runner-result'
 
+/**
+ * What a reader can do with one panel: keep it as a note, or put it on a
+ * drawing. Both write to the vault, so neither is the view's to do — it draws
+ * the two words and says which panel was clicked.
+ */
+export interface PanelActions {
+  saveAsNote: (panel: RunPanel, run: RunResult) => void
+  sendToDrawing: (panel: RunPanel, run: RunResult) => void
+}
+
 const STATUS_LABEL: Record<RunStatus, string> = {
   running: 'running',
   done: 'done',
@@ -46,9 +56,15 @@ export class RunResultView extends ItemView {
    * want again on the next run.
    */
   private pickedRound: number | undefined
+  /** What the two panel actions do. Unset until the plugin hands them over. */
+  private actions: PanelActions | undefined
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf)
+  }
+
+  setActions(actions: PanelActions): void {
+    this.actions = actions
   }
 
   override getViewType(): string {
@@ -201,6 +217,32 @@ export class RunResultView extends ItemView {
     parent.createSpan({ cls, text: panel.lines ? `${panel.lines} ln` : '—' })
   }
 
+  /**
+   * The two things a reader can do with a panel worth keeping.
+   *
+   * Offered on a settled, filled panel of a run that has an id, and on no other:
+   * an output note is stamped with the run id, and the engine reports that when
+   * the run finishes. So the actions appear as the run lands, which is also when
+   * a reader has read enough to want one.
+   */
+  private drawActions(parent: HTMLElement, panel: RunPanel): void {
+    const run = this.result
+    if (!this.actions || !run?.runId || panel.state !== 'filled') return
+    const actions = parent.createDiv({ cls: 'chain-runner-panel-actions' })
+    this.drawAction(actions, 'Save as note', () => this.actions?.saveAsNote(panel, run))
+    this.drawAction(actions, 'Send to drawing', () => this.actions?.sendToDrawing(panel, run))
+  }
+
+  private drawAction(parent: HTMLElement, label: string, run: () => void): void {
+    const el = parent.createEl('button', { cls: 'chain-runner-panel-action', text: label })
+    el.onclick = (event): void => {
+      // The panel is not itself clickable, but a round row above it is; a click
+      // on an action is about the action and nothing else.
+      event.stopPropagation()
+      run()
+    }
+  }
+
   private drawPanel(parent: HTMLElement, panel: RunPanel, status: RunStatus): void {
     const el = parent.createDiv({ cls: `chain-runner-panel chain-runner-panel--${panel.state}` })
     if (panel.emphasis) el.addClass(`chain-runner-panel--${panel.emphasis}`)
@@ -208,6 +250,7 @@ export class RunResultView extends ItemView {
     const head = el.createDiv({ cls: 'chain-runner-panel-head' })
     head.createSpan({ cls: 'chain-runner-panel-name', text: panel.name })
     this.drawLines(head, 'chain-runner-panel-lines', panel)
+    this.drawActions(head, panel)
 
     const notice = noticeFor(panel, status)
     if (notice) {

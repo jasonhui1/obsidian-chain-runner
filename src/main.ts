@@ -4,6 +4,8 @@ import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
 import { withDefaults, type ChainRunnerSettings } from './settings'
+import { createDrawingSurface } from './ui/excalidraw'
+import { KeepPiece } from './ui/keepPiece'
 import { QuickRunner } from './ui/quickRun'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
@@ -36,7 +38,20 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => this.status.stop())
     this.status.start()
 
-    this.registerView(RESULT_VIEW_TYPE, leaf => new RunResultView(leaf))
+    const keep = new KeepPiece({
+      app: this.app,
+      notify: message => new Notice(message),
+      folder: () => this.settings.outputFolder,
+      drawing: createDrawingSurface(this.app),
+    })
+    this.registerView(RESULT_VIEW_TYPE, leaf => {
+      const view = new RunResultView(leaf)
+      view.setActions({
+        saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
+        sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
+      })
+      return view
+    })
     this.quickRun = new QuickRunner({
       app: this.app,
       engine: this.engine,

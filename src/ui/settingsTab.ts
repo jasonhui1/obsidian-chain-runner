@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from 'obsidian'
-import { normaliseEngineUrl } from '../settings'
+import { normaliseEngineUrl, normaliseOutputFolder } from '../settings'
 import type ChainRunnerPlugin from '../main'
 
 export class ChainRunnerSettingTab extends PluginSettingTab {
@@ -31,6 +31,24 @@ export class ChainRunnerSettingTab extends PluginSettingTab {
         text.inputEl.addEventListener('blur', () => {
           text.setValue(this.plugin.settings.engineUrl)
           void this.plugin.status.refresh()
+        })
+      })
+
+    new Setting(containerEl)
+      .setName('Output folder')
+      .setDesc('Where a panel saved as a note goes. Each run gets a folder of its own inside it.')
+      .addText(text => {
+        text
+          .setPlaceholder('chains/runs')
+          .setValue(this.plugin.settings.outputFolder)
+          .onChange(async value => {
+            this.plugin.settings.outputFolder = normaliseOutputFolder(value)
+            await this.plugin.saveSettings()
+          })
+        // Normalising mid-word would fight the cursor, the same way the URL box
+        // does; the box is rewritten to what was stored once it is left.
+        text.inputEl.addEventListener('blur', () => {
+          text.setValue(this.plugin.settings.outputFolder)
         })
       })
   }

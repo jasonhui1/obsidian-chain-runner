@@ -15,8 +15,9 @@ The plugin loads, knows whether the engine is up, and can run a chain on the not
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Engine URL | `http://localhost:3000` | Where maestro-playground is listening. |
+| Output folder | `chains/runs` | Where a panel kept as a note is written. Each run gets a folder of its own inside it. |
 
-A URL typed without a scheme gets `http://`; a trailing slash is dropped; emptying the box restores the default. The tidied value is written back into the box, and the engine re-checked, when the field is left — not on every keystroke.
+A URL typed without a scheme gets `http://`; a trailing slash is dropped; emptying the box restores the default. The tidied value is written back into the box, and the engine re-checked, when the field is left — not on every keystroke. The output folder is tidied the same way, and emptying it restores the default rather than writing run notes loose in the vault root.
 
 ## Status bar
 
@@ -75,6 +76,40 @@ A panel shows the section its port asked for, resolved the way the engine resolv
 | *this hop failed* | The hop errored; the engine's own message follows. |
 | *skipped* | Control flow went the other way. |
 
+### Keeping a piece
+
+A panel worth keeping has two actions in its heading: **Save as note** and **Send to drawing**.
+
+Both appear on a **filled panel of a run that has finished**, and on no other. An output note is stamped with the run id, and the engine reports the run id when the run completes — so before that there is nothing to stamp. A panel that is empty, errored, skipped or still writing has nothing worth keeping either.
+
+**The output-note convention.** Every surface that keeps a piece of a run — these two actions now, the drawing's embeddables later — writes the same note:
+
+```
+chains/runs/<runId>/<output>.md
+
+---
+run: "2026-09-02-ab12c"
+chain: "Five Personas"
+output: "Optimist"
+---
+
+<the hop's text, exactly as the panel showed it>
+```
+
+- **The folder** is the **Output folder** setting, with a folder per run inside it. Missing folders are created.
+- **The filename** is the chain's own name for the output — case, spaces and all — with only what a filename cannot hold (`\ / : * ? " < > | # ^ [ ]`) replaced by a dash. A name left with nothing after that is filed as `output.md`.
+- **The frontmatter** is those three keys and no others, every value quoted, so a chain named `2026-09-02` stays a string.
+- **The body** is the hop's text untouched. A hop that wrote its own frontmatter or its own heading keeps it, below this one.
+- **A collision gets a suffix** — `Optimist 2.md`, `Optimist 3.md` — *unless* the note already there says exactly this, in which case it is reused. So saving a panel and then sending the same panel to a drawing leaves one note, not two copies of one hop.
+
+The whole convention is `src/run/outputNote.ts`: a panel and a run's meta in, a file path and a file's content out, checked in `tests/outputNote.test.ts` without a vault.
+
+**Save as note** writes the note and opens it in a new tab.
+
+**Send to drawing** writes the same note, then asks which drawing to put it on: the drawings open right now first, then the ones opened recently in the order they were read, then the rest newest-written first. The note lands on the picked drawing as an **embeddable at the cursor**, and the drawing is saved. A drawing that is not open is opened first — Excalidraw's `ExcalidrawAutomate` can only be pointed at a live view.
+
+This needs the Excalidraw plugin, 2.0.0 or newer; without it the action says so and writes nothing. `docs/spike-ea.md` records why those are the calls: the version floor, the mandatory `setView` on every entry point, and the observation that an embeddable re-renders live when the note behind it is written.
+
 **The run is the engine's.** `POST /api/run` records it like any other, so it appears in maestro-playground's history with a normal run id. The plugin keeps no second run store.
 
 Starting a second run replaces the first — the sidebar holds one view, and the run it was showing is aborted rather than raced.
@@ -112,16 +147,23 @@ src/
     panels.ts             the engine's panels, plus live tokens and the trace fallback
     session.ts            the event fold, and the result the view renders
     seed.ts               what a run reads: the selection, or the note
+    outputNote.ts         the output-note convention: path, frontmatter, collisions
   ui/
     pickerModel.ts        the picker's groups and order
     arrangement.ts        where a layout's panels go: stacked, columns, or rounds
+    drawingChoices.ts     which drawings the send-to-drawing suggester offers, in order
     chainPicker.ts        the chain and parameter modals
+    drawingPicker.ts      the drawing suggester
     panelCopy.ts          what a panel says when it has nothing to show
     throttle.ts           how often the result view redraws
     resultView.ts         the right-sidebar view
+    keepPiece.ts          the two panel actions: write the note, put it on a drawing
+    excalidraw.ts         the Excalidraw plugin, as this plugin reaches it
     quickRun.ts           the command: note → picker → stream → view
     settingsTab.ts, statusPill.ts
 ```
+
+`src/run/outputNote.ts` and `src/ui/drawingChoices.ts` are pure for the same reason the rest of `src/run/` is: what a kept note is called and what it says, and which drawing is offered first, are decisions rather than vault operations. `src/ui/keepPiece.ts` is the seam that holds the vault writes, driven in `tests/keepPiece.test.ts`; `src/ui/excalidraw.ts` holds every fact about the other plugin — its id, its version floor, the calls the spike found work — so a change on their side is a change in one file on ours.
 
 `src/run/` holds no Obsidian import: what a stream of engine events means, and what panels it becomes, is decided there and checked without a vault. `src/ui/arrangement.ts` is vault-free too, and for the same reason — it is a drawing decision rather than a run one, so it sits in `src/ui/`, but where a panel lands is checkable without Obsidian and is checked that way. What is left in the view itself is the three things only a view can do: markdown, how often to redraw, and what a click means.
 
@@ -179,8 +221,12 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 6c. **A columns chain.** Pick a `view: columns` chain. Expect the branches side by side rather than stacked, the `role: join` column wider than them with its heading bold, and each column streaming its own hop's tokens as it writes.
 6d. **A sidebar chain.** Pick a `view: sidebar` chain. Expect the rounds listed down the left and one of them open on the right; expect the detail pane to move to the round being written as the loop runs, and to stay on a round you click until the next run.
 7. **A chain declaring no view.** Expect the run trace fallback and a line saying so, not an empty view.
+7b. **Save as note.** With a finished run on screen, click **Save as note** in a filled panel's heading. Expect a note at `chains/runs/<runId>/<output>.md`, opened in a new tab, carrying `run`, `chain` and `output` in its frontmatter and the panel's text below. Click it again: expect the same one note, not a second. Expect neither action to appear on a panel while the run is still going, nor on an empty, errored or skipped one.
+7c. **A collision.** Write your own note at that exact path, then save the panel again. Expect `<output> 2.md` beside it and your note untouched.
+7d. **Send to drawing.** With an Excalidraw drawing open, click **Send to drawing**. Expect the drawing listed first and marked *open now*, the note to land as an embeddable at the cursor, the drawing to be saved, and the embeddable to show the note's text. Close and reopen the drawing: expect the embeddable still there.
+7e. **Without Excalidraw.** Disable the Excalidraw plugin and click **Send to drawing**. Expect one notice saying it is not installed, and no note written.
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
-9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes.
+9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes, and the two panel actions hovered and not.
 
 ### Last recorded run
 
