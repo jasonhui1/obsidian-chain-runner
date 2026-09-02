@@ -8,6 +8,13 @@ import { seedFromNote } from '../run/seed'
 import type { EngineClient } from '../engine/client'
 import type { ChainSummary } from '../engine/types'
 
+/**
+ * Said when the engine does not stream layout frames. Named as the thing that is
+ * missing rather than as a failure, because the fix is on the engine's side.
+ */
+export const UNSUPPORTED_ENGINE =
+  'This engine is too old for Chain Runner: it does not stream layout frames. Update maestro-playground.'
+
 export interface QuickRunDeps {
   app: App
   engine: EngineClient
@@ -54,14 +61,23 @@ export class QuickRunner {
       return
     }
 
-    const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
-    if (!chains) return
-    if (chains.length === 0) {
+    const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
+    if (!workspace) return
+    // The panels are the engine's to project (ADR-0017). An engine too old to
+    // stream them cannot be drawn for, and saying so is the whole point of
+    // feature-detecting: the alternative is a view quietly showing a stale rule.
+    if (!workspace.capabilities.runLayoutFrames) {
+      this.deps.notify(UNSUPPORTED_ENGINE)
+      return
+    }
+    if (workspace.chains.length === 0) {
       this.deps.notify('No chains in the workspace')
       return
     }
 
-    new ChainPicker(this.deps.app, chains, chain => this.pickParameter({ chain, seed, note })).open()
+    new ChainPicker(this.deps.app, workspace.chains, chain =>
+      this.pickParameter({ chain, seed, note }),
+    ).open()
   }
 
   /** Drops the run in flight — the plugin is unloading, or a new run replaced it. */

@@ -1,4 +1,4 @@
-import type { RunPanel } from '../run/layout'
+import type { RunPanel } from '../run/panels'
 import type { RunStatus } from '../run/session'
 
 /**

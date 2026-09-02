@@ -103,6 +103,12 @@ export type PanelState = 'pending' | 'empty' | 'errored' | 'skipped' | 'filled'
 
 export interface LayoutPanel {
   name: string
+  /**
+   * The inner node this panel's port binds to. A live view overlays tokens onto
+   * the panel currently writing, and token events are keyed by `nodeId`; without
+   * this the only join would be the display name (ADR-0017).
+   */
+  node: string
   text: string
   lines: number
   state: PanelState
@@ -114,6 +120,17 @@ export interface LayoutPanel {
 export interface LayoutModel {
   kind: LayoutKind
   panels: LayoutPanel[]
+}
+
+/**
+ * What this engine can do, for a client that ships separately from it. Read from
+ * `/api/workspace` and feature-detected rather than pinned to a version, so an
+ * old engine fails loudly instead of this plugin drawing a rule it no longer
+ * owns (ADR-0017).
+ */
+export interface Capabilities {
+  /** `/api/run` streams `layout` frames, and every panel carries `node`. */
+  runLayoutFrames?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain and supplies its inputs. */
@@ -152,6 +169,19 @@ export interface AgentDoneEvent {
   output: AgentOutput
 }
 
+/**
+ * The panels, as the engine itself projects them — one frame before the first
+ * hop and one after every `agent_done` (ADR-0017).
+ *
+ * This is why the plugin holds no copy of `buildLayoutModel`. The rule has one
+ * implementation and one owner; a chain edited in the workspace changes what is
+ * drawn here without this repo being touched.
+ */
+export interface LayoutFrameEvent {
+  type: 'layout'
+  model: LayoutModel
+}
+
 export interface RunCompleteEvent {
   type: 'run_complete'
   runId: string
@@ -177,6 +207,7 @@ export type KnownRunEvent =
   | AgentStartEvent
   | TokenEvent
   | AgentDoneEvent
+  | LayoutFrameEvent
   | RunCompleteEvent
   | RunErrorEvent
 

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { noticeFor } from '@/ui/panelCopy'
-import type { RunPanel } from '@/run/layout'
+import type { RunPanel } from '@/run/panels'
 
 const panel = (over: Partial<RunPanel>): RunPanel =>
-  ({ name: 'hop 1', text: '', lines: 0, state: 'pending', ...over })
+  ({ name: 'hop 1', node: 'first', text: '', lines: 0, state: 'pending', ...over })
 
 describe('noticeFor', () => {
   it('says nothing about a panel that has content', () => {

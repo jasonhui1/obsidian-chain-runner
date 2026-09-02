@@ -34,6 +34,9 @@ function done(nodeId: string, output: string, over: Partial<AgentOutput> = {}): 
   }
 }
 
+/** One panel as the engine sends it: pending, and carrying the node it binds to. */
+const PANEL = { name: 'hop 1', node: 'first', text: '', lines: 0, state: 'pending' as const }
+
 const start = (nodeId: string): RunEvent => ({ type: 'agent_start', agentName: `${nodeId}-agent`, nodeId, step: 0 })
 const token = (nodeId: string, text: string, over: Record<string, unknown> = {}): RunEvent =>
   ({ type: 'token', nodeId, token: text, ...over })
@@ -60,10 +63,21 @@ describe('applyRunEvent', () => {
     expect(state.nodes.streaming.first).toBe('said')
   })
 
-  it('drops the partial once the node reports, so nothing shows twice', () => {
+  it('keeps the partial past agent_done, since the layout frame lands a beat later', () => {
     const state = fold(start('first'), token('first', 'half'), done('first', 'whole'))
-    expect(state.nodes.streaming.first).toBeUndefined()
+    expect(state.nodes.streaming.first).toBe('half')
     expect(state.nodes.outputs).toHaveLength(1)
+  })
+
+  it('takes the panels from the engine layout frame', () => {
+    const model = { kind: 'timeline' as const, panels: [] }
+    expect(fold({ type: 'layout', model }).layout).toEqual(model)
+  })
+
+  it('keeps only the newest frame, since each carries the whole projection', () => {
+    const first = { kind: 'timeline' as const, panels: [] }
+    const second = { kind: 'timeline' as const, panels: [PANEL] }
+    expect(fold({ type: 'layout', model: first }, { type: 'layout', model: second }).layout).toEqual(second)
   })
 
   it('starts a node clean when it runs again, so a second round does not read the first', () => {
@@ -140,8 +154,12 @@ describe('buildRunResult', () => {
     expect(result(emptyRunState(), 'ignored').parameter).toBeUndefined()
   })
 
-  it('builds the panels the chain declared', () => {
-    const built = result(fold(start('first'), token('first', '## Summary\nhalf')))
+  it('draws the engine panels, with live tokens laid over the one still writing', () => {
+    const model = {
+      kind: 'timeline' as const,
+      panels: [PANEL, { ...PANEL, name: 'skeleton', node: 'second', emphasis: 'last' as const }],
+    }
+    const built = result(fold({ type: 'layout', model }, start('first'), token('first', '## Summary\nhalf')))
     expect(built.layout.kind).toBe('timeline')
     expect(built.layout.panels.map(p => p.name)).toEqual(['hop 1', 'skeleton'])
     expect(built.layout.panels[0].streaming).toBe('half')

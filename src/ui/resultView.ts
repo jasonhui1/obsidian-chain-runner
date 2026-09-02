@@ -1,7 +1,7 @@
 import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
 import { noticeFor } from './panelCopy'
 import { createThrottle } from './throttle'
-import type { RunPanel } from '../run/layout'
+import type { RunPanel } from '../run/panels'
 import type { RunResult, RunStatus } from '../run/session'
 
 export const RESULT_VIEW_TYPE = 'chain-runner-result'

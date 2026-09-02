@@ -5,11 +5,27 @@ import {
   type HttpRequest,
   type HttpTransport,
 } from './transport'
-import type { ChainPort, ChainSummary, ChainView, LayoutModel, RunEvent, RunMeta, RunRequest } from './types'
+import type {
+  Capabilities,
+  ChainPort,
+  ChainSummary,
+  ChainView,
+  LayoutModel,
+  RunEvent,
+  RunMeta,
+  RunRequest,
+} from './types'
 
 /** Shapes the engine returns that the client narrows before handing on. */
 interface WorkspaceResponse {
   chains?: RawChain[]
+  capabilities?: Capabilities
+}
+
+/** The workspace as this plugin reads it: what it can run, and what the engine can do. */
+export interface Workspace {
+  chains: ChainSummary[]
+  capabilities: Capabilities
 }
 
 interface RawChain {
@@ -51,10 +67,22 @@ export class EngineClient {
     private readonly transport: HttpTransport,
   ) {}
 
+  /**
+   * The workspace, with the engine's own account of what it supports. An engine
+   * too old to report `capabilities` yields an empty one, which reads as
+   * supporting nothing — the caller decides whether that is fatal (ADR-0017).
+   */
+  async loadWorkspace(): Promise<Workspace> {
+    const workspace = await this.getJson<WorkspaceResponse>('/api/workspace')
+    return {
+      chains: (workspace.chains ?? []).map(summarise),
+      capabilities: workspace.capabilities ?? {},
+    }
+  }
+
   /** Chains the workspace holds, narrowed to what the add-chain picker shows. */
   async listChains(): Promise<ChainSummary[]> {
-    const workspace = await this.getJson<WorkspaceResponse>('/api/workspace')
-    return (workspace.chains ?? []).map(summarise)
+    return (await this.loadWorkspace()).chains
   }
 
   async getRun(runId: string): Promise<RunMeta> {

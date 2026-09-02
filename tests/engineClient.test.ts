@@ -80,6 +80,22 @@ describe('listChains', () => {
   })
 })
 
+describe('loadWorkspace capabilities', () => {
+  it('reports what the engine says it can do', async () => {
+    expect((await client.loadWorkspace()).capabilities).toEqual({ runLayoutFrames: true })
+  })
+
+  it('reads an engine too old to say anything as supporting nothing', async () => {
+    engine.capabilities = undefined
+    expect((await client.loadWorkspace()).capabilities).toEqual({})
+  })
+
+  it('does not invent support the engine did not claim', async () => {
+    engine.capabilities = {}
+    expect((await client.loadWorkspace()).capabilities.runLayoutFrames).toBeUndefined()
+  })
+})
+
 describe('getRun', () => {
   it('returns the run meta', async () => {
     engine.runMeta = { runId: '2026-09-02-ab12c', chainName: 'Five Personas', status: 'complete', agentOutputs: [] }

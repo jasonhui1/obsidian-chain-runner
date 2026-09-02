@@ -19,6 +19,8 @@ export class FakeEngine {
   /** Frames `POST /api/run` writes, in order. `null` closes the stream. */
   runFrames: (string | null)[] = []
   chains: unknown[] = []
+  /** What the engine says it can do; a version too old to say reports nothing. */
+  capabilities: unknown = { runLayoutFrames: true }
   runMeta: unknown = {}
   layout: unknown = { kind: 'undeclared', panels: [] }
   /** When set, every route answers with this status and body instead. */
@@ -56,7 +58,7 @@ export class FakeEngine {
       } else if (req.method === 'POST' && path === '/api/run') {
         this.streamRun(res)
       } else if (path === '/api/workspace') {
-        this.json(res, { chains: this.chains, agents: [] })
+        this.json(res, { chains: this.chains, agents: [], capabilities: this.capabilities })
       } else if (path.endsWith('/layout')) {
         this.json(res, this.layout)
       } else if (path.startsWith('/api/runs/')) {

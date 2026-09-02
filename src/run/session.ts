@@ -1,5 +1,5 @@
-import { buildRunLayout, emptyRunNodes, type RunLayout, type RunNodes } from './layout'
-import { isEvent, momentOf, type ChainSummary, type RunEvent } from '../engine/types'
+import { buildRunPanels, emptyRunNodes, type RunLayout, type RunNodes } from './panels'
+import { isEvent, momentOf, type ChainSummary, type LayoutModel, type RunEvent } from '../engine/types'
 
 /**
  * A run as the result view watches it happen.
@@ -18,6 +18,11 @@ export type RunStatus = 'running' | 'done' | 'failed'
 
 export interface RunState {
   nodes: RunNodes
+  /**
+   * The engine's own panels, from the last `layout` frame. Absent only before the
+   * first one, which the engine sends before the run's first hop (ADR-0017).
+   */
+  layout?: LayoutModel
   /** The engine's id for this run, which arrives at the end. */
   runId?: string
   /** What the run reported as an event, or what stopped the caller reaching it. */
@@ -41,13 +46,6 @@ function withStarted(nodes: RunNodes, nodeId: string, agentName: string): RunNod
   return nodes.started.some(node => node.nodeId === nodeId)
     ? nodes.started
     : [...nodes.started, { nodeId, agentName }]
-}
-
-/** Drops a node's partial text without leaving a key behind for a panel to read. */
-function withoutStreaming(streaming: Record<string, string>, nodeId: string): Record<string, string> {
-  const next = { ...streaming }
-  delete next[nodeId]
-  return next
 }
 
 export function applyRunEvent(state: RunState, event: RunEvent): RunState {
@@ -76,14 +74,21 @@ export function applyRunEvent(state: RunState, event: RunEvent): RunState {
     return {
       ...state,
       nodes: {
+        ...state.nodes,
         outputs: [...state.nodes.outputs, { ...event.output, nodeId: event.nodeId }],
-        // The settled output is the panel's text from here on; the partial would
-        // otherwise show beside it.
-        streaming: withoutStreaming(state.nodes.streaming, event.nodeId),
+        // The partial is kept, not dropped: the engine's `layout` frame lands a
+        // beat after `agent_done`, and clearing here would blank the panel for
+        // that beat. It stops being read the moment the panel is no longer
+        // pending, and `agent_start` clears it when the node runs again.
         started: withStarted(state.nodes, event.nodeId, event.output.agentName),
       },
     }
   }
+
+  // The panels are the engine's answer, not a projection recomputed here: one
+  // rule, one owner, and a chain edited in the workspace redraws this view
+  // without the plugin changing (ADR-0017).
+  if (isEvent(event, 'layout')) return { ...state, layout: event.model }
 
   if (isEvent(event, 'run_complete')) return { ...state, runId: event.runId }
   if (isEvent(event, 'error')) return { ...state, error: event.error }
@@ -139,7 +144,7 @@ export function buildRunResult(input: {
     moment: momentOf(chain),
     seedSource,
     status: !state.settled ? 'running' : error ? 'failed' : 'done',
-    layout: buildRunLayout(chain, state.nodes),
+    layout: buildRunPanels(chain, state.layout, state.nodes),
   }
   if (error) result.error = error
   if (state.runId) result.runId = state.runId

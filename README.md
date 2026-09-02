@@ -102,8 +102,8 @@ src/
     status.ts           the online-offline poll loop
     guard.ts            the offline guard every action goes through
   run/
-    section.ts            section addressing, ported from the engine's graph.ts
-    layout.ts             the panels a run reads in, ported from lib/layoutModel.ts
+    section.ts            section addressing, for scoping a half-written hop
+    panels.ts             the engine's panels, plus live tokens and the trace fallback
     session.ts            the event fold, and the result the view renders
     seed.ts               what a note contributes to a run
   ui/
@@ -118,11 +118,14 @@ src/
 
 `src/run/` holds no Obsidian import: what a stream of engine events means, and what panels it becomes, is decided there and checked without a vault. The view is left with the two things only a view can do — markdown, and how often to redraw.
 
-The panel builder is **ported** from maestro-playground's `lib/layoutModel.ts` rather than fetched from `GET /api/runs/:id/layout`, because that route only answers for a run already written to disk and the quick path needs panels while the run is still streaming. The port keeps the engine's ports, states and emphasis, so the same run reads the same on both surfaces. The one addition is a `streaming` field: tokens a hop has produced, scoped to the panel's own socket, shown only while the panel is still `pending`.
+**The engine projects the panels; the plugin draws them.** `POST /api/run` streams a `layout` frame — one before the first hop, one after every `agent_done` — carrying the engine's own `buildLayoutModel` output (maestro-playground ADR-0017). The plugin holds no copy of that rule, so a chain edited in the workspace changes what is drawn here without this repo being touched.
 
-**The port can drift, and would drift silently.** The engine's copy is the authority — it is what the playground's own result view draws, and what anyone comparing the two windows will treat as correct. Nothing enforces the agreement: no shared package, no version check, no test spanning both repos. A rule changed there (a fourth layout kind, a different line between `empty` and `errored`) leaves the plugin drawing the old one, and it will not throw — a panel will just say the wrong thing about a hop, in a view whose whole job is to tell you what happened to your document.
+`src/run/panels.ts` adds only the two things the engine has no reason to know about:
 
-What holds it together is only this: `tests/runLayout.test.ts` mirrors every case in the engine's `tests/layout-model.test.ts`, case for case, so re-running both after an engine change is the check. Two of the engine's cases are deliberately not mirrored — they cover `isRenderableLayout`, which decides whether a *reopened past* run is too stale to draw, and this plugin only ever draws a run it watched happen. That makes drift findable by someone who suspects it. It does not prevent it.
+- **Live tokens.** A panel still `pending` is handed what its node has written since it started, keyed by the panel's `node`. The partial is scoped to the socket the port asked for, so a panel never shows a blob it then replaces with a section of itself — except where two ports on one node disagree about the socket, where the raw partial is shown rather than a guessed one.
+- **The trace fallback.** A chain declaring no layout gets `{ kind: 'undeclared', panels: [] }`, which is the cue to draw one panel per node that ran rather than a frame still to come.
+
+**Feature-detected, not version-pinned.** `GET /api/workspace` reports `capabilities`. The quick path checks `runLayoutFrames` before opening the picker and refuses to run without it — an engine too old should stop you, not let the view draw a rule it no longer owns.
 
 The network sits behind `HttpTransport` for two reasons. Obsidian's `requestUrl` cannot stream a response body, and a renderer `fetch` to `localhost` is a cross-origin request the engine sets no CORS headers for — so the runtime implementation goes through Node's `http` directly. And with the seam there, the tests drive the real client against a real local server (`tests/fakeEngine.ts`) rather than a stubbed `fetch`.
 
