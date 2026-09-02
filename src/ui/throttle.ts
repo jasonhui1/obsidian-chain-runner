@@ -10,9 +10,7 @@ export const RENDER_INTERVAL_MS = 100
 export interface Throttle {
   /** Runs now if the interval has passed, otherwise holds this call for its end. */
   run(work: () => void): void
-  /** Runs what is held, now. The last frame of a run goes through this. */
-  flush(): void
-  /** Drops what is held — the view is going away. */
+  /** Drops what is held: the view is going away, or is about to draw something newer. */
   cancel(): void
 }
 
@@ -41,11 +39,6 @@ export function createThrottle(intervalMs: number = RENDER_INTERVAL_MS): Throttl
     run(work) {
       if (timer === undefined) fire(work)
       else held = work
-    },
-    flush() {
-      const pending = held
-      held = undefined
-      if (pending) pending()
     },
     cancel() {
       held = undefined

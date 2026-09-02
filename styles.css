@@ -207,3 +207,10 @@
 .chain-runner-panel--pending .chain-runner-panel-body {
   color: var(--text-muted);
 }
+
+/* Amber has one meaning in the picker too: you are about to run something that
+   will not read what you are looking at. */
+.chain-runner-suggestion-warning {
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+}

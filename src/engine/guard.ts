@@ -8,9 +8,9 @@ export const OFFLINE_NOTICE = 'engine offline'
  * What to say about a failure that is the engine's rather than the plugin's, and
  * `undefined` for anything else — which is a bug and belongs thrown.
  *
- * The guard below turns this into a notice. A caller that also has somewhere to
- * *show* the failure, like the result view, reads it directly rather than
- * re-deriving the same two cases.
+ * The guard below turns this into a notice. The quick path, which also has
+ * somewhere to *show* the failure, reads it directly rather than re-deriving
+ * the same two cases.
  */
 export function engineFailureMessage(error: unknown): string | undefined {
   if (error instanceof EngineOfflineError) return OFFLINE_NOTICE

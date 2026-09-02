@@ -32,6 +32,11 @@ async function offlineClient(): Promise<EngineClient> {
 }
 
 describe('listChains', () => {
+  it('drops a view it cannot draw, which is the same to it as none at all', async () => {
+    engine.chains = [{ slug: 'x', name: 'X', view: 'kanban', outputs: [{ name: 'a', node: 'a' }] }]
+    expect((await client.listChains())[0].view).toBeUndefined()
+  })
+
   it('returns each chain narrowed to what the picker shows', async () => {
     engine.chains = [
       {
@@ -43,10 +48,10 @@ describe('listChains', () => {
         parameter: { name: 'audience', options: ['engineers', 'execs'], node: 'param' },
         view: 'timeline',
         outputs: [{ name: 'skeleton', node: 'third', socket: 'summary', role: 'join' }],
-        nodes: [],
+        nodes: [{ id: 'seed', kind: 'seed' }, { id: 'third', kind: 'agent' }],
         edges: [],
       },
-      { slug: 'bare', name: 'Bare', description: '', nodes: [], edges: [] },
+      { slug: 'bare', name: 'Bare', description: '', nodes: [{ id: 'pinned', kind: 'context' }], edges: [] },
     ]
     expect(await client.listChains()).toEqual([
       {
@@ -58,8 +63,9 @@ describe('listChains', () => {
         parameter: { name: 'audience', options: ['engineers', 'execs'] },
         view: 'timeline',
         outputs: [{ name: 'skeleton', node: 'third', socket: 'summary', role: 'join' }],
+        seeded: true,
       },
-      { slug: 'bare', name: 'Bare' },
+      { slug: 'bare', name: 'Bare', seeded: false },
     ])
   })
 

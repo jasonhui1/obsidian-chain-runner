@@ -1,4 +1,4 @@
-import type { ChainPurpose, ChainSummary } from '../engine/types'
+import { momentOf, type ChainPurpose, type ChainSummary } from '../engine/types'
 
 /**
  * What the chain picker shows, and in what order — decided here so the modal is
@@ -30,6 +30,12 @@ export interface PickerRow {
   groupStart: boolean
   /** The situation the chain is for; its description when it states no moment. */
   note: string
+  /**
+   * Whether the note this was invoked on reaches the chain at all. A chain that
+   * declares no seed node reads the files it pins instead, and running it on a
+   * note without saying so would look like the note was ignored.
+   */
+  readsNote: boolean
 }
 
 /**
@@ -55,9 +61,7 @@ function scoreOf(chain: ChainSummary, match: Matcher): number | null {
   return best
 }
 
-function noteOf(chain: ChainSummary): string {
-  return chain.moment || chain.description || ''
-}
+
 
 /**
  * The picker's rows for what was typed: groups in heading order, and within a
@@ -83,7 +87,10 @@ export function pickerRows(chains: ChainSummary[], query: string, fuzzy: FuzzySe
       chain,
       heading,
       groupStart: index === 0,
-      note: noteOf(chain),
+      note: momentOf(chain),
+      // A workspace too old to report its nodes says nothing either way; the
+      // common case is a chain that takes a seed, so that is what is assumed.
+      readsNote: chain.seeded !== false,
     }))
   })
 }

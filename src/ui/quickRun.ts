@@ -1,8 +1,8 @@
 import { MarkdownView, TFile, type App } from 'obsidian'
 import { ChainPicker, ParameterPicker } from './chainPicker'
 import type { RunResultView } from './resultView'
-import { engineFailureMessage, OFFLINE_NOTICE } from '../engine/guard'
-import { RequestAbortedError } from '../engine/transport'
+import { engineFailureMessage } from '../engine/guard'
+import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
 import { applyRunEvent, buildRunResult, emptyRunState, settleRun } from '../run/session'
 import { seedFromNote } from '../run/seed'
 import type { EngineClient } from '../engine/client'
@@ -18,6 +18,16 @@ export interface QuickRunDeps {
   notify: (message: string) => void
   /** Moves the status pill offline on first-hand evidence, rather than at the next poll. */
   markOffline: () => void
+}
+
+/** One run, as the reader assembled it: what to run, on what, with what set. */
+interface QuickRun {
+  chain: ChainSummary
+  /** The note's text, or the selection when there was one. */
+  seed: string
+  note: TFile
+  /** The chain's dropdown, when it declares one. */
+  paramValue?: string
 }
 
 /**
@@ -51,7 +61,7 @@ export class QuickRunner {
       return
     }
 
-    new ChainPicker(this.deps.app, chains, chain => this.pickParameter(chain, seed, note)).open()
+    new ChainPicker(this.deps.app, chains, chain => this.pickParameter({ chain, seed, note })).open()
   }
 
   /** Drops the run in flight — the plugin is unloading, or a new run replaced it. */
@@ -73,18 +83,19 @@ export class QuickRunner {
    * before the run rather than left empty — an unanswered parameter runs a
    * different chain than the reader picked.
    */
-  private pickParameter(chain: ChainSummary, seed: string, note: TFile): void {
-    const parameter = chain.parameter
+  private pickParameter(run: QuickRun): void {
+    const parameter = run.chain.parameter
     if (!parameter || parameter.options.length === 0) {
-      void this.launch(chain, seed, note)
+      void this.launch(run)
       return
     }
-    new ParameterPicker(this.deps.app, parameter.name, parameter.options, value => {
-      void this.launch(chain, seed, note, value)
+    new ParameterPicker(this.deps.app, parameter.name, parameter.options, paramValue => {
+      void this.launch({ ...run, paramValue })
     }).open()
   }
 
-  private async launch(chain: ChainSummary, seed: string, note: TFile, paramValue?: string): Promise<void> {
+  private async launch(run: QuickRun): Promise<void> {
+    const { chain, seed, note, paramValue } = run
     const view = await this.deps.openResultView()
     if (!view) {
       this.deps.notify('No room in the sidebar for the result')
@@ -111,7 +122,7 @@ export class QuickRunner {
       if (error instanceof RequestAbortedError) return
       failure = engineFailureMessage(error)
       if (failure === undefined) throw error
-      if (failure === OFFLINE_NOTICE) this.deps.markOffline()
+      if (error instanceof EngineOfflineError) this.deps.markOffline()
       this.deps.notify(failure)
     } finally {
       if (this.inFlight === controller) {

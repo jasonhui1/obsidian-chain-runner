@@ -45,6 +45,15 @@ describe('pickerRows: no query', () => {
   it('falls back to the description when a chain states no moment', () => {
     expect(rows[3].note).toBe('no purpose declared')
   })
+
+  it('says a chain that declares no seed will not read the note it was run on', () => {
+    const pinned: ChainSummary[] = [{ slug: 'p', name: 'Pinned', seeded: false }]
+    expect(pickerRows(pinned, '', substring)[0].readsNote).toBe(false)
+  })
+
+  it('assumes a chain reads the note when the workspace said nothing either way', () => {
+    expect(rows[0].readsNote).toBe(true)
+  })
 })
 
 describe('pickerRows: a query', () => {

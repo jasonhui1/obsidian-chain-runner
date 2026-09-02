@@ -148,16 +148,21 @@ export function buildRunLayout(chain: ChainSummary, run: RunNodes): RunLayout {
   const ports = chain.outputs ?? []
   if (ports.length === 0) return { kind: 'undeclared', panels: tracePanels(run) }
 
-  if (chain.view === 'timeline') {
-    const panels = portPanels(ports, run)
-    // The last hop is what survived the relay, whatever it holds.
-    panels[panels.length - 1].emphasis = 'last'
-    return { kind: 'timeline', panels }
+  switch (chain.view) {
+    case 'timeline': {
+      const panels = portPanels(ports, run)
+      // The last hop is what survived the relay, whatever it holds.
+      panels[panels.length - 1].emphasis = 'last'
+      return { kind: 'timeline', panels }
+    }
+    // A columns chain with no `role: join` port renders its columns and nothing
+    // beneath them — there is no "last panel" fallback here.
+    case 'columns':
+      return { kind: 'columns', panels: portPanels(ports, run) }
+    case 'sidebar':
+      return { kind: 'sidebar', panels: roundPanels(ports, run) }
+    // Ports without a view are a half-declaration: they name panels but place none.
+    case undefined:
+      return { kind: 'undeclared', panels: tracePanels(run) }
   }
-  // A columns chain with no `role: join` port renders its columns and nothing
-  // beneath them — there is no "last panel" fallback here.
-  if (chain.view === 'columns') return { kind: 'columns', panels: portPanels(ports, run) }
-  if (chain.view === 'sidebar') return { kind: 'sidebar', panels: roundPanels(ports, run) }
-
-  return { kind: 'undeclared', panels: tracePanels(run) }
 }

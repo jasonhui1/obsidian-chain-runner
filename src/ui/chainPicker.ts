@@ -33,6 +33,14 @@ export class ChainPicker extends SuggestModal<PickerRow> {
     if (row.groupStart) el.createDiv({ cls: 'chain-runner-suggestion-heading', text: row.heading })
     el.createDiv({ cls: 'chain-runner-suggestion-name', text: row.chain.name })
     if (row.note) el.createDiv({ cls: 'chain-runner-suggestion-note', text: row.note })
+    // Said before the run rather than discovered after it: this chain reads the
+    // files it pins, and the note the command was invoked on reaches nothing.
+    if (!row.readsNote) {
+      el.createDiv({
+        cls: 'chain-runner-suggestion-warning',
+        text: 'reads its own files — this note is not used',
+      })
+    }
   }
 
   onChooseSuggestion(row: PickerRow): void {

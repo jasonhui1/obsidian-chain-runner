@@ -1,5 +1,5 @@
 import { buildRunLayout, emptyRunNodes, type RunLayout, type RunNodes } from './layout'
-import { isEvent, type ChainSummary, type RunEvent } from '../engine/types'
+import { isEvent, momentOf, type ChainSummary, type RunEvent } from '../engine/types'
 
 /**
  * A run as the result view watches it happen.
@@ -136,7 +136,7 @@ export function buildRunResult(input: {
 
   const result: RunResult = {
     chainName: chain.name,
-    moment: chain.moment || chain.description || '',
+    moment: momentOf(chain),
     seedSource,
     status: !state.settled ? 'running' : error ? 'failed' : 'done',
     layout: buildRunLayout(chain, state.nodes),

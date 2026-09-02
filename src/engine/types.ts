@@ -32,6 +32,12 @@ export interface ChainPort {
 }
 
 /**
+ * A layout a chain may declare. A `view:` the plugin does not know is dropped at
+ * the client boundary, so everything above reads the three it can draw.
+ */
+export type ChainView = 'timeline' | 'columns' | 'sidebar'
+
+/**
  * A chain as the picker and the result view need it.
  *
  * `view` and `outputs` are the chain's layout declaration. The plugin reads them
@@ -48,9 +54,23 @@ export interface ChainSummary {
   purpose?: ChainPurpose
   parameter?: ChainParameter
   /** The result layout the chain opts into; absent means it declares none. */
-  view?: string
+  view?: ChainView
+  /**
+   * Whether the chain reads a seed at all. One that declares no seed node reads
+   * the files it pins instead, and the note it was run on reaches nothing.
+   */
+  seeded?: boolean
   /** The panels of that layout, in reading order. */
   outputs?: ChainPort[]
+}
+
+/**
+ * The situation a chain is for, in its own words — what the picker leads with
+ * and the result header repeats. `description` is the mechanism, and is the
+ * fallback for a chain that states no moment.
+ */
+export function momentOf(chain: ChainSummary): string {
+  return chain.moment || chain.description || ''
 }
 
 export interface AgentOutput {

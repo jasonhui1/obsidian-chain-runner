@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
+import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
 import { noticeFor } from './panelCopy'
 import { createThrottle } from './throttle'
 import type { RunPanel } from '../run/layout'
@@ -26,6 +26,16 @@ export class RunResultView extends ItemView {
   /** The note the run was seeded from; markdown links resolve relative to it. */
   private sourcePath = ''
   private readonly throttle = createThrottle()
+  /**
+   * Owns the render children of the draw on screen.
+   *
+   * `MarkdownRenderer.render` registers a child on the component it is handed,
+   * and at ten draws a second a long run would leave hundreds of them attached
+   * to the view until it closed — exactly the cost the throttle exists to avoid.
+   * Each draw gets its own host, and the previous one is unloaded with the
+   * elements it rendered into.
+   */
+  private renderHost: Component | undefined
 
   constructor(leaf: WorkspaceLeaf) {
     super(leaf)
@@ -71,6 +81,8 @@ export class RunResultView extends ItemView {
 
   private draw(): void {
     const { contentEl } = this
+    if (this.renderHost) this.removeChild(this.renderHost)
+    this.renderHost = this.addChild(new Component())
     contentEl.empty()
     contentEl.addClass('chain-runner-result')
 
@@ -136,6 +148,6 @@ export class RunResultView extends ItemView {
     const body = el.createDiv({ cls: 'chain-runner-panel-body' })
     // Each draw builds its own body, so a render that resolves after the next
     // draw writes into an element already off the page rather than over the new one.
-    void MarkdownRenderer.render(this.app, text, body, this.sourcePath, this)
+    void MarkdownRenderer.render(this.app, text, body, this.sourcePath, this.renderHost ?? this)
   }
 }

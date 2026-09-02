@@ -5,7 +5,7 @@ import {
   type HttpRequest,
   type HttpTransport,
 } from './transport'
-import type { ChainPort, ChainSummary, LayoutModel, RunEvent, RunMeta, RunRequest } from './types'
+import type { ChainPort, ChainSummary, ChainView, LayoutModel, RunEvent, RunMeta, RunRequest } from './types'
 
 /** Shapes the engine returns that the client narrows before handing on. */
 interface WorkspaceResponse {
@@ -22,6 +22,8 @@ interface RawChain {
   parameter?: { name: string; options: string[]; node?: string }
   view?: string
   outputs?: ChainPort[]
+  /** The chain's graph. Only the node kinds are read, to see whether it takes a seed. */
+  nodes?: { kind?: string }[]
 }
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -146,13 +148,20 @@ function summarise(chain: RawChain): ChainSummary {
   }
   // A chain's layout is half `view` and half `outputs`; the result view needs both
   // to draw the panels the engine would draw for the same run.
-  if (chain.view !== undefined) summary.view = chain.view
-  if (chain.outputs !== undefined) summary.outputs = chain.outputs.map(port)
+  const view = declaredView(chain.view)
+  if (view !== undefined) summary.view = view
+  if (chain.outputs !== undefined) summary.outputs = chain.outputs.map(summarisePort)
+  if (chain.nodes !== undefined) summary.seeded = chain.nodes.some(node => node.kind === 'seed')
   return summary
 }
 
+/** A `view:` this plugin cannot draw is the same to it as none at all. */
+function declaredView(view: string | undefined): ChainView | undefined {
+  return view === 'timeline' || view === 'columns' || view === 'sidebar' ? view : undefined
+}
+
 /** A port arrives with keys the panels never read; copying keeps the summary comparable. */
-function port(raw: ChainPort): ChainPort {
+function summarisePort(raw: ChainPort): ChainPort {
   const kept: ChainPort = { name: raw.name, node: raw.node }
   if (raw.socket !== undefined) kept.socket = raw.socket
   if (raw.role !== undefined) kept.role = raw.role

@@ -35,22 +35,6 @@ describe('createThrottle', () => {
     expect(later).toHaveBeenCalledTimes(1)
   })
 
-  it('flushes what is held, so the last frame of a run is never the one dropped', () => {
-    const throttle = createThrottle(100)
-    const last = vi.fn()
-    throttle.run(() => {})
-    throttle.run(last)
-    throttle.flush()
-    expect(last).toHaveBeenCalledTimes(1)
-    vi.advanceTimersByTime(100)
-    expect(last).toHaveBeenCalledTimes(1)
-  })
-
-  it('flushes to nothing when nothing is held', () => {
-    const throttle = createThrottle(100)
-    expect(() => throttle.flush()).not.toThrow()
-  })
-
   it('cancels what is held', () => {
     const throttle = createThrottle(100)
     const dropped = vi.fn()

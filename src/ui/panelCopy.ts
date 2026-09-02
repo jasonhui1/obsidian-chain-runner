@@ -15,8 +15,8 @@ export interface PanelNotice {
   tone: PanelTone
 }
 
-const NOTICE: Record<Exclude<PanelTone, 'writing'>, PanelNotice> = {
-  waiting: { text: 'waiting', tone: 'waiting' },
+/** The three outcomes a settled hop can leave a panel in. */
+const NOTICE: Record<'empty' | 'errored' | 'skipped', PanelNotice> = {
   empty: { text: 'nothing survived — this hop dropped the section the chain asked it for', tone: 'empty' },
   errored: { text: 'this hop failed', tone: 'errored' },
   skipped: { text: 'skipped — the branch went the other way', tone: 'skipped' },
@@ -29,8 +29,8 @@ export function noticeFor(panel: RunPanel, status: RunStatus): PanelNotice | nul
   // A settled run has nothing left to wait for, so a pending panel here is a node
   // that never ran rather than one still coming.
   if (panel.state === 'pending') {
-    return status === 'running' ? NOTICE.waiting : { text: 'never ran', tone: 'waiting' }
+    return { text: status === 'running' ? 'waiting' : 'never ran', tone: 'waiting' }
   }
-  const notice = NOTICE[panel.state === 'empty' ? 'empty' : panel.state === 'skipped' ? 'skipped' : 'errored']
+  const notice = NOTICE[panel.state]
   return panel.error ? { ...notice, text: `${notice.text} — ${panel.error}` } : notice
 }
