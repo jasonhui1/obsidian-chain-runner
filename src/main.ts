@@ -74,9 +74,18 @@ export default class ChainRunnerPlugin extends Plugin {
     })
     // Excalidraw is not necessarily loaded while this one is loading, and the
     // hook lives on its plugin instance — so it is installed once the workspace
-    // has finished coming up rather than here.
+    // has finished coming up rather than here. The disposer is registered now
+    // rather than then: a plugin disabled before layout-ready would otherwise
+    // install a hook after its own unload and never take it off again.
+    let removeLinkHook: (() => void) | undefined
+    let unloaded = false
+    this.register(() => {
+      unloaded = true
+      removeLinkHook?.()
+    })
     this.app.workspace.onLayoutReady(() => {
-      this.register(registerLinkHook(this.app, element => nodes.handleLinkClick(element)))
+      if (unloaded) return
+      removeLinkHook = registerLinkHook(this.app, (element, view) => nodes.handleLinkClick(element, view))
     })
 
     this.addSettingTab(new ChainRunnerSettingTab(this.app, this))

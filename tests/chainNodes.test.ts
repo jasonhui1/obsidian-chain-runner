@@ -37,7 +37,7 @@ let chains: ChainSummary[]
 let online: boolean
 let notices: string[]
 let placed: ChainNodeElement[][]
-let parameterSet: { nodeId: string; value: string }[]
+let parameterSet: { nodeId: string; value: string; on?: unknown }[]
 let onDrawing: string[]
 let unavailable: string | undefined
 let drawingOpen: boolean
@@ -53,9 +53,9 @@ function makeNodes(): ChainNodes {
       placed.push(elements)
       return Promise.resolve()
     },
-    setParameter: (target, value) => {
+    setParameter: (target, value, on) => {
       if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
-      parameterSet.push({ nodeId: target.nodeId, value })
+      parameterSet.push({ nodeId: target.nodeId, value, on })
       return Promise.resolve(true)
     },
   }
@@ -182,6 +182,26 @@ describe('clicking the node’s links', () => {
     await flush()
 
     expect(parameterSet).toEqual([{ nodeId: 'n-1', value: 'founders' }])
+  })
+
+  it('rewrites on the drawing the click came from, not on the tab in front', async () => {
+    // A drawing embedded in a note is not a tab, and the hook hands over the
+    // view the click happened in — which is the only handle on that one.
+    const embedded = { embedded: true }
+    makeNodes().handleLinkClick(element(), embedded)
+    await flush()
+    lastModal()?.choose(0)
+    await flush()
+
+    expect(parameterSet[0]?.on).toBe(embedded)
+  })
+
+  it('says what is missing when Excalidraw is too old to rewrite with', async () => {
+    unavailable = 'This Excalidraw is too old'
+    makeNodes().handleLinkClick(element())
+    await flush()
+    expect(notices).toEqual(['This Excalidraw is too old'])
+    expect(openedModals).toEqual([])
   })
 
   it('asks nothing while the engine is offline', async () => {

@@ -1,7 +1,7 @@
 import type { App } from 'obsidian'
 import { ChainPicker, ParameterPicker } from './chainPicker'
-import { buildChainNode, chainNodeData, type MaybeNodeElement, type NodeTarget } from './chainNode'
-import type { NodeSurface } from './excalidraw'
+import { buildChainNode, chainNodeData, type ChainNodeData, type MaybeNodeElement } from './chainNode'
+import type { DrawingView, NodeSurface } from './excalidraw'
 import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
 
@@ -93,19 +93,15 @@ export class ChainNodes {
    * link: a reader who copies a node and pastes it somewhere odd should never
    * find one of our links opening a browser or making a note.
    */
-  handleLinkClick(element: MaybeNodeElement): boolean {
+  handleLinkClick(element: MaybeNodeElement, view?: DrawingView): boolean {
     const data = chainNodeData(element)
     // Not ours: a wiki link the reader drew themselves, and theirs to follow.
     if (!data) return true
     if (data.role === 'run') this.deps.notify(RUN_NOT_WIRED)
-    if (data.role === 'parameter') {
-      // The clicked element's groups come along, so a node that was copied is
-      // rewritten on its own rather than on both copies (`./chainNode.ts`).
-      void this.editParameter(data.chain, data.chainName, {
-        nodeId: data.nodeId,
-        ...(element.groupIds ? { groupIds: element.groupIds } : {}),
-      })
-    }
+    // The element and the view it was clicked in both travel on: the groups tell
+    // one copy of a node from another, and the view is the only handle on a
+    // drawing embedded in a note, which is not a tab to be looked up.
+    if (data.role === 'parameter') void this.editParameter(data, element, view)
     return false
   }
 
@@ -122,21 +118,26 @@ export class ChainNodes {
   }
 
   private async put(chain: ChainSummary, parameterValue: string | undefined): Promise<void> {
-    const elements = buildChainNode(chain, { nodeId: this.deps.newNodeId(), ...(parameterValue ? { parameterValue } : {}) })
-    try {
-      await this.deps.surface.place(elements)
-    } catch (error) {
-      this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
-    }
+    const nodeId = this.deps.newNodeId()
+    await this.onDrawing(() =>
+      this.deps.surface.place(buildChainNode(chain, { nodeId, ...(parameterValue ? { parameterValue } : {}) })),
+    )
   }
 
   /** The dropdown line: the chain's own options, and the pick written back in place. */
-  private async editParameter(slug: string, chainName: string, target: NodeTarget): Promise<void> {
+  private async editParameter(data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView): Promise<void> {
+    // Checked on this path too, and not only on the command: a drawing made by a
+    // newer Chain Runner can be opened on an Excalidraw too old to edit it with.
+    const unavailable = this.deps.surface.unavailable()
+    if (unavailable) {
+      this.deps.notify(unavailable)
+      return
+    }
     const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
     if (!chains) return
-    const chain = chains.find(one => one.slug === slug)
+    const chain = chains.find(one => one.slug === data.chain)
     if (!chain) {
-      this.deps.notify(CHAIN_GONE(chainName))
+      this.deps.notify(CHAIN_GONE(data.chainName))
       return
     }
     const parameter = parameterToAsk(chain)
@@ -144,14 +145,18 @@ export class ChainNodes {
       this.deps.notify(NO_PARAMETER(chain.name))
       return
     }
+    const target = { nodeId: data.nodeId, ...(element.groupIds ? { groupIds: element.groupIds } : {}) }
     new ParameterPicker(this.deps.app, parameter.name, parameter.options, value => {
-      void this.rewrite(target, value)
+      void this.onDrawing(async () => {
+        if (!(await this.deps.surface.setParameter(target, value, view))) this.deps.notify(NODE_GONE)
+      })
     }).open()
   }
 
-  private async rewrite(target: NodeTarget, value: string): Promise<void> {
+  /** Runs something against the drawing, saying so rather than throwing when it cannot. */
+  private async onDrawing(action: () => Promise<void>): Promise<void> {
     try {
-      if (!(await this.deps.surface.setParameter(target, value))) this.deps.notify(NODE_GONE)
+      await action()
     } catch (error) {
       this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
     }

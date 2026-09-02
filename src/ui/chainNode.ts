@@ -143,6 +143,7 @@ export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): 
   const lines: ChainNodeElement[] = []
   let y = PADDING
 
+  const lineWidth = WIDTH - PADDING * 2
   const line = (role: ChainNodeRole, text: string, fontSize: number, strokeColor: string, link?: string): void => {
     const height = Math.round(fontSize * LINE_HEIGHT)
     lines.push({
@@ -150,9 +151,9 @@ export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): 
       shape: 'text',
       x: PADDING,
       y,
-      width: WIDTH - PADDING * 2,
+      width: lineWidth,
       height,
-      text,
+      text: oneLine(text, fontSize, lineWidth),
       fontSize,
       textAlign: 'left',
       strokeColor,
@@ -164,9 +165,9 @@ export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): 
 
   line('title', `${TITLE_MARK} ${chain.name}`, TITLE_SIZE, INK)
   // The situation the chain is for, in the chain's own words — the same line the
-  // picker shows in grey, so a node reads the way it was chosen.
+  // picker shows in grey, quoted the way the screen in #1 quotes it.
   const moment = momentOf(chain)
-  if (moment) line('moment', moment, LINE_SIZE, GREY)
+  if (moment) line('moment', `“${moment}”`, LINE_SIZE, GREY)
   if (parameter) {
     line('parameter', parameterLabel(parameter.name, options.parameterValue), LINE_SIZE, LINK_BLUE, PARAMETER_LINK)
   }
@@ -207,6 +208,23 @@ export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): 
 /** Roughly how wide a label draws at this size; Excalidraw re-measures on its own. */
 function textWidth(text: string, fontSize: number): number {
   return Math.round(text.length * fontSize * GLYPH_WIDTH)
+}
+
+/**
+ * A line trimmed to what fits on one, with an ellipsis where it was cut.
+ *
+ * Excalidraw wraps text to the width it is given, and a wrapped line would push
+ * the ones below it out through the bottom of the box — a chain with a long name
+ * or a two-sentence moment would stop being one box. The box is a label rather
+ * than the text itself: the chain's full name is a click away in the picker, and
+ * the node has to stay the size the reader placed.
+ *
+ * The width is an estimate (`GLYPH_WIDTH`), so this is a guard against a runaway
+ * line rather than a precise fit.
+ */
+function oneLine(text: string, fontSize: number, width: number): string {
+  const fits = Math.floor(width / (fontSize * GLYPH_WIDTH))
+  return text.length <= fits ? text : `${text.slice(0, Math.max(1, fits - 1)).trimEnd()}…`
 }
 
 /**

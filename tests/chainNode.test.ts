@@ -51,12 +51,12 @@ describe('building a chain node', () => {
   it('shows the chain name and its moment', () => {
     const elements = build()
     expect(byRole(elements, 'title').text).toContain('Five Personas')
-    expect(byRole(elements, 'moment').text).toBe('when a premise feels safe')
+    expect(byRole(elements, 'moment').text).toBe('“when a premise feels safe”')
   })
 
   it('falls back to the description when the chain states no moment', () => {
-    const elements = build({ moment: undefined, description: 'five personas over a premise' })
-    expect(byRole(elements, 'moment').text).toBe('five personas over a premise')
+    const elements = build({ moment: undefined, description: 'five personas, one premise' })
+    expect(byRole(elements, 'moment').text).toBe('“five personas, one premise”')
   })
 
   it('leaves the moment line out when the chain says neither', () => {
@@ -114,6 +114,21 @@ describe('building a chain node', () => {
     const leftPadding = byRole(elements, 'title').x - box.x
     expect(run.x).toBeGreaterThan(box.x + box.width / 2)
     expect(box.x + box.width - (run.x + run.width)).toBeCloseTo(leftPadding, 5)
+  })
+
+  it('trims a line too long to fit, rather than letting it wrap out of the box', () => {
+    const elements = build({ name: 'A'.repeat(200), moment: 'B'.repeat(200) })
+    const title = byRole(elements, 'title')
+    const moment = byRole(elements, 'moment')
+    expect(title.text?.endsWith('…')).toBe(true)
+    expect(moment.text?.endsWith('…')).toBe(true)
+    // Still one line each, so the box is the height the builder said it was.
+    expect(title.text?.length).toBeLessThan(60)
+    expect(moment.text?.length).toBeLessThan(60)
+  })
+
+  it('leaves a line that already fits exactly as it is', () => {
+    expect(byRole(build(), 'title').text).toBe('⛓ Five Personas')
   })
 
   it('draws the moment greyer than the title', () => {

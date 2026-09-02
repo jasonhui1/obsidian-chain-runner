@@ -100,6 +100,14 @@ export interface DrawingSurface {
   place(drawing: DrawingChoice, note: TFile): Promise<void>
 }
 
+/**
+ * A live Excalidraw view, as this plugin passes one around: opaque, because the
+ * only thing done with it is handing it back to `setView`. A click arrives with
+ * the view it happened in, which is the only way to reach a drawing embedded in
+ * a note — that one is not a tab, so it can never be found by looking at tabs.
+ */
+export type DrawingView = unknown
+
 /** What the chain-node actions need a drawing to do. */
 export interface NodeSurface {
   /** Why Excalidraw cannot be used, or `undefined` when it can. */
@@ -109,10 +117,10 @@ export interface NodeSurface {
   /** Puts a built node on that drawing, at the cursor, and saves. */
   place(elements: ChainNodeElement[]): Promise<void>
   /**
-   * Rewrites a node's parameter where it stands. `false` means the node is no
-   * longer on the drawing — deleted, or on a drawing that is no longer in front.
+   * Rewrites a node's parameter where it stands, on `on` when a click named the
+   * view it happened in. `false` means the node is no longer there.
    */
-  setParameter(target: NodeTarget, value: string): Promise<boolean>
+  setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
 }
 
 export const NO_EXCALIDRAW =
@@ -121,11 +129,7 @@ export const OLD_EXCALIDRAW = `This Excalidraw is too old for Chain Runner; upda
 
 export function createDrawingSurface(app: App): DrawingSurface {
   return {
-    unavailable: () => {
-      const ea = automate(app)
-      if (!ea) return NO_EXCALIDRAW
-      return ea.verifyMinimumPluginVersion(MINIMUM_VERSION) ? undefined : OLD_EXCALIDRAW
-    },
+    unavailable: () => unavailableReason(app),
     choices: () =>
       drawingChoices({
         files: app.vault
@@ -154,15 +158,21 @@ export function createDrawingSurface(app: App): DrawingSurface {
   }
 }
 
-/** Said when a chain-node action runs with something other than a drawing in front. */
-export const NOT_A_DRAWING = 'The drawing this node was on is no longer the tab in front.'
+/** Said when a chain-node action cannot find the drawing it is meant to act on. */
+export const NOT_A_DRAWING = 'Open the Excalidraw drawing as its own tab to do that.'
 
 export function createNodeSurface(app: App): NodeSurface {
-  /** The one place a node action reaches Excalidraw: the handle, bound to the tab in front. */
-  const bind = (): ExcalidrawAutomate => {
+  /**
+   * The one place a node action reaches Excalidraw: the handle, bound to a view.
+   *
+   * A click hands over the view it happened in, and that one is used in
+   * preference to the tab in front — a drawing embedded in a note is not a tab,
+   * so looking for one would refuse a click that plainly arrived from a drawing.
+   */
+  const bind = (on?: DrawingView): ExcalidrawAutomate => {
     const ea = automate(app)
     if (!ea) throw new Error(NO_EXCALIDRAW)
-    const view = activeDrawing(app)
+    const view = on ?? activeDrawing(app)
     if (!view) throw new Error(NOT_A_DRAWING)
     ea.reset()
     // The binding goes stale whenever the reader switches tabs, so it is set at
@@ -172,11 +182,7 @@ export function createNodeSurface(app: App): NodeSurface {
   }
 
   return {
-    unavailable: () => {
-      const ea = automate(app)
-      if (!ea) return NO_EXCALIDRAW
-      return ea.verifyMinimumPluginVersion(MINIMUM_VERSION) ? undefined : OLD_EXCALIDRAW
-    },
+    unavailable: () => unavailableReason(app),
 
     hasActiveDrawing: () => activeDrawing(app) !== undefined,
 
@@ -190,8 +196,8 @@ export function createNodeSurface(app: App): NodeSurface {
       await ea.addElementsToView(true, true)
     },
 
-    setParameter: async (target, value) => {
-      const ea = bind()
+    setParameter: async (target, value, on) => {
+      const ea = bind(on)
       const edits = parameterEdits(ea.getViewElements(), target, value)
       if (edits.length === 0) return false
       // Editing in place rather than adding: the copies keep their ids, so
@@ -211,6 +217,13 @@ export function createNodeSurface(app: App): NodeSurface {
       return true
     },
   }
+}
+
+/** Why Excalidraw cannot be used right now, or `undefined` when it can. */
+function unavailableReason(app: App): string | undefined {
+  const ea = automate(app)
+  if (!ea) return NO_EXCALIDRAW
+  return ea.verifyMinimumPluginVersion(MINIMUM_VERSION) ? undefined : OLD_EXCALIDRAW
 }
 
 /** Adds one of the node's elements, and stamps it with what the node stores. */
@@ -246,12 +259,17 @@ function drawRect(ea: ExcalidrawAutomate, element: ChainNodeElement): string {
  * installed, and the returned function puts that hook back. EA holds one hook,
  * so a plugin that installs its own after this one wins until it unloads.
  */
-export function registerLinkHook(app: App, handler: (element: MaybeNodeElement) => boolean): () => void {
+export function registerLinkHook(
+  app: App,
+  handler: (element: MaybeNodeElement, view: DrawingView) => boolean,
+): () => void {
   const ea = automate(app)
   if (!ea) return () => {}
   const previous = ea.onLinkClickHook
   ea.onLinkClickHook = (element, linkText, event, view, self) => {
-    if (!handler(element)) return false
+    // The view the click happened in goes to the handler: it is the only handle
+    // on a drawing embedded in a note, which is not a tab and cannot be found.
+    if (!handler(element, view)) return false
     return previous ? previous(element, linkText, event, view, self) : true
   }
   return () => {
