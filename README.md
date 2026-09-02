@@ -2,7 +2,7 @@
 
 An Obsidian plugin that pairs vault material with [maestro-playground](https://github.com/jasonhui1/maestro-playground) insight chains.
 
-This first slice is the floor everything else stands on: the plugin loads, it knows whether the engine is up, and it can talk to it.
+The plugin loads, knows whether the engine is up, and can run a chain on the note in front of you — the **quick path** — reading the result in the right sidebar.
 
 ## Dependencies
 
@@ -38,7 +38,38 @@ Any plugin action taken while the engine is offline shows a `engine offline` not
 
 | Command | What it does |
 | --- | --- |
+| **Chain Runner: Run chain on this note** | The quick path, below. |
 | **Chain Runner: List chains on the engine** | Fetches the workspace's chains and shows the count in a notice. The smoke test below uses it. |
+
+## The quick path
+
+**Chain Runner: Run chain on this note** takes the note you are reading — or the selection, when you have one — and runs a chain against it. Nothing is drawn; the result reads in the right sidebar.
+
+**Picking a chain.** The picker groups chains under the four headings the engine's own picker uses: 洞見 (insight), 產出 (production), 壓力測試 (stress-test), and `unclassified` for a chain that declares no `purpose`. Under each name sits the chain's `moment` in grey — the situation that should make you reach for it — falling back to its `description`. Typing filters across every group at once, matching the name, the slug, the moment and the description; a heading with nothing left under it disappears. A chain that declares a dropdown asks for it before the run, because a chain reads its parameter as an input.
+
+**Reading the result.** One panel per output the chain declares, in the order it declared them, drawn in the shape it asked for:
+
+| Chain declares | Panels |
+| --- | --- |
+| `view: timeline` | One per hop, last one emphasised — the surviving skeleton. |
+| `view: columns` | One per branch, plus the `role: join` panel emphasised. |
+| `view: sidebar` | One per loop round. |
+| nothing | The run trace: one panel per node that ran, in the order it ran. |
+
+A panel shows the section its port asked for, resolved the way the engine resolves an edge — so a panel here holds what the next hop actually received, and matches the same run opened in maestro-playground.
+
+| Panel state | What it means |
+| --- | --- |
+| *writing…* | The hop is streaming; what you see is what it has written so far. |
+| *waiting* | The run has not reached this hop yet. |
+| *never ran* | The run settled without reaching it. |
+| *nothing survived* | The hop finished and dropped the section the chain asked it for. |
+| *this hop failed* | The hop errored; the engine's own message follows. |
+| *skipped* | Control flow went the other way. |
+
+**The run is the engine's.** `POST /api/run` records it like any other, so it appears in maestro-playground's history with a normal run id. The plugin keeps no second run store.
+
+Starting a second run replaces the first — the sidebar holds one view, and the run it was showing is aborted rather than raced.
 
 ## Development
 
@@ -68,9 +99,24 @@ src/
     client.ts           listChains / launchRun / getRun / getLayout / ping
     status.ts           the online-offline poll loop
     guard.ts            the offline guard every action goes through
+  run/
+    section.ts            section addressing, ported from the engine's graph.ts
+    layout.ts             the panels a run reads in, ported from lib/layoutModel.ts
+    session.ts            the event fold, and the result the view renders
+    seed.ts               what a note contributes to a run
   ui/
+    pickerModel.ts        the picker's groups and order
+    chainPicker.ts        the chain and parameter modals
+    panelCopy.ts          what a panel says when it has nothing to show
+    throttle.ts           how often the result view redraws
+    resultView.ts         the right-sidebar view
+    quickRun.ts           the command: note → picker → stream → view
     settingsTab.ts, statusPill.ts
 ```
+
+`src/run/` holds no Obsidian import: what a stream of engine events means, and what panels it becomes, is decided there and checked without a vault. The view is left with the two things only a view can do — markdown, and how often to redraw.
+
+The panel builder is **ported** from maestro-playground's `lib/layoutModel.ts` rather than fetched from `GET /api/runs/:id/layout`, because that route only answers for a run already written to disk and the quick path needs panels while the run is still streaming. The port keeps the engine's ports, states and emphasis, so the same run reads the same on both surfaces. The one addition is a `streaming` field: tokens a hop has produced, scoped to the panel's own socket, shown only while the panel is still `pending`.
 
 The network sits behind `HttpTransport` for two reasons. Obsidian's `requestUrl` cannot stream a response body, and a renderer `fetch` to `localhost` is a cross-origin request the engine sets no CORS headers for — so the runtime implementation goes through Node's `http` directly. And with the seam there, the tests drive the real client against a real local server (`tests/fakeEngine.ts`) rather than a stubbed `fetch`.
 
@@ -100,6 +146,20 @@ npm run smoke -- --launch                    # also launchRun — spends real mo
 6. **Wrong URL.** Set **Engine URL** to `http://localhost:3999`. The pill goes offline without a restart. Set it back; it comes online.
 7. **Both themes.** Switch between light and dark (**Settings → Appearance**). The pill stays legible in each; it uses `--text-success`, `--text-error`, `--text-faint` and no colours of its own.
 
+### Part three — the quick path, by hand
+
+This half spends model tokens: every step from 3 onwards starts a real run.
+
+1. **The picker.** Open a note with something in it and run **Chain Runner: Run chain on this note**. Expect the four purpose headings, each chain's name with its moment in grey beneath, and a `moment` that matches what the playground's own launch form shows for the same chain.
+2. **Fuzzy search.** Type a fragment of a chain's *moment* rather than its name. Expect it to survive the filter, and expect headings with nothing left under them to disappear rather than sit empty.
+3. **A declared timeline.** Pick a `view: timeline` chain. Expect: the sidebar opens; one panel per declared output appears at once, the last one emphasised; each fills in as its hop lands; tokens appear as the hop writes them, smoothly rather than in a jerk per token.
+4. **The same run in the playground.** When it finishes, open the run id the header shows in maestro-playground's history. Expect the same panels, in the same order, with the same panel emphasised and the same text in each.
+5. **Panel states.** Run a chain whose hop drops a section a later port asks for, and one whose hop fails. Expect *nothing survived* and *this hop failed* respectively, the second carrying the engine's message, and any hop the run never reached reading *never ran* once it settles.
+6. **A chain with a dropdown.** Pick one that declares a `parameter`. Expect a second modal asking for it before the run, and the value in the result header.
+7. **A chain declaring no view.** Expect the run trace fallback and a line saying so, not an empty view.
+8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
+9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning` and `--text-error`.
+
 ### Last recorded run
 
 2026-09-02, against maestro-playground (Next.js 16.2.2) at `http://localhost:3000`, 14 chains in the workspace.
@@ -115,3 +175,4 @@ npm run smoke -- --launch                    # also launchRun — spends real mo
 | `listChains` at a stopped port | `EngineOfflineError` |
 | `launchRun` against a real chain | **not run** — it spends model tokens; covered against the fake engine for every event type |
 | Part two, in a vault | run 2026-09-02 in the `test_chain` vault (Excalidraw installed alongside): plugin loads, settings tab present, pill and offline notice behave. Not itemised step by step. |
+| Part three, the quick path | **not run** — every step from 3 onwards starts a real chain run and spends model tokens. The wire-to-panels path is covered against the fake engine end to end (`tests/quickPath.test.ts`). |

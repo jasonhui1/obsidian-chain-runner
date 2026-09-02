@@ -1,9 +1,11 @@
-import { Notice, Plugin } from 'obsidian'
+import { Notice, Plugin, type WorkspaceLeaf } from 'obsidian'
 import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
 import { withDefaults, type ChainRunnerSettings } from './settings'
+import { QuickRunner } from './ui/quickRun'
+import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { renderStatusPill } from './ui/statusPill'
 
@@ -16,6 +18,7 @@ export default class ChainRunnerPlugin extends Plugin {
   withEngine!: ReturnType<typeof createEngineGuard>
 
   private pill: HTMLElement | undefined
+  private quickRun!: QuickRunner
 
   override async onload(): Promise<void> {
     this.settings = withDefaults(await this.loadData())
@@ -33,7 +36,25 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => this.status.stop())
     this.status.start()
 
+    this.registerView(RESULT_VIEW_TYPE, leaf => new RunResultView(leaf))
+    this.quickRun = new QuickRunner({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      openResultView: () => this.openResultView(),
+      notify: message => new Notice(message),
+      markOffline: () => this.status.markOffline(),
+    })
+    // A run outlives the command that started it; unloading the plugin ends it.
+    this.register(() => this.quickRun.stop())
+
     this.addSettingTab(new ChainRunnerSettingTab(this.app, this))
+
+    this.addCommand({
+      id: 'run-chain-on-note',
+      name: 'Run chain on this note',
+      callback: () => void this.quickRun.start(),
+    })
 
     // The one action this ticket ships: proof the client reaches a live engine,
     // and the offline path something can be exercised against (#3).
@@ -47,6 +68,21 @@ export default class ChainRunnerPlugin extends Plugin {
         })
       },
     })
+  }
+
+  /**
+   * The result view, opened in the right sidebar or brought back to the front.
+   *
+   * One view, reused: a second run replaces what the first showed rather than
+   * stacking another tab beside it.
+   */
+  private async openResultView(): Promise<RunResultView | undefined> {
+    const open = this.app.workspace.getLeavesOfType(RESULT_VIEW_TYPE)
+    const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
+    if (!leaf) return undefined
+    if (open.length === 0) await leaf.setViewState({ type: RESULT_VIEW_TYPE, active: false })
+    await this.app.workspace.revealLeaf(leaf)
+    return leaf.view instanceof RunResultView ? leaf.view : undefined
   }
 
   /**

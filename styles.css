@@ -16,3 +16,194 @@
 .chain-runner-engine-pill--unknown {
   color: var(--text-faint);
 }
+
+/* ── The chain picker ────────────────────────────────────────────────────────
+   The heading is drawn inside the first row of its group, because Obsidian's
+   suggest modals have no group headers and a header rendered as its own
+   suggestion would be a row the arrow keys stop on. */
+
+.chain-runner-suggestion-heading {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-bottom: var(--size-2-2);
+  margin-bottom: var(--size-2-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.suggestion-item:not(:first-child) .chain-runner-suggestion-heading {
+  margin-top: var(--size-4-2);
+}
+
+.chain-runner-suggestion-name {
+  color: var(--text-normal);
+}
+
+/* The moment is the secondary line: it says when to reach for the chain, and
+   should never compete with the name for the eye. */
+.chain-runner-suggestion-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* ── The result view ─────────────────────────────────────────────────────────
+   Obsidian's own variables throughout, so both themes are the theme's problem
+   and not this plugin's. Colour carries two things and nothing else: the run's
+   status, and a panel's outcome. */
+
+.chain-runner-result {
+  padding: var(--size-4-3);
+}
+
+.chain-runner-empty {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-run-header {
+  padding-bottom: var(--size-4-2);
+  margin-bottom: var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.chain-runner-run-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.chain-runner-run-name {
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.chain-runner-run-status {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.chain-runner-run-status--running {
+  color: var(--text-muted);
+}
+
+.chain-runner-run-status--done {
+  color: var(--text-success);
+}
+
+.chain-runner-run-status--failed {
+  color: var(--text-error);
+}
+
+.chain-runner-run-moment {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-top: var(--size-2-1);
+}
+
+.chain-runner-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-2-2);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-run-error {
+  margin-top: var(--size-2-2);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-run-note {
+  margin-top: var(--size-2-2);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+/* One panel per declared output, stacked: the sidebar is a column, so the
+   timeline reads top to bottom rather than left to right. */
+.chain-runner-panel {
+  padding-left: var(--size-4-3);
+  border-left: 2px solid var(--background-modifier-border);
+  margin-bottom: var(--size-4-4);
+}
+
+/* The surviving skeleton, and a columns chain's converging panel: the two
+   panels a layout says to read first. */
+.chain-runner-panel--last,
+.chain-runner-panel--join {
+  border-left-color: var(--text-accent);
+}
+
+.chain-runner-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding-bottom: var(--size-2-2);
+}
+
+.chain-runner-panel-name {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.chain-runner-panel--last .chain-runner-panel-name,
+.chain-runner-panel--join .chain-runner-panel-name {
+  color: var(--text-normal);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-panel-lines {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 0;
+}
+
+.chain-runner-panel-notice {
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-panel-notice--waiting,
+.chain-runner-panel-notice--skipped {
+  color: var(--text-faint);
+}
+
+.chain-runner-panel-notice--writing {
+  color: var(--text-muted);
+}
+
+/* Amber has one meaning here: a hop finished and dropped what it was asked for.
+   Red has one meaning: a hop failed. */
+.chain-runner-panel-notice--empty {
+  color: var(--text-warning);
+}
+
+.chain-runner-panel-notice--errored {
+  color: var(--text-error);
+}
+
+.chain-runner-panel-body {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-panel-body > :first-child {
+  margin-top: 0;
+}
+
+.chain-runner-panel-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* Nothing has settled here yet, so the text is a look at work in progress. */
+.chain-runner-panel--pending .chain-runner-panel-body {
+  color: var(--text-muted);
+}

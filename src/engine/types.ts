@@ -16,14 +16,41 @@ export interface ChainParameter {
   options: string[]
 }
 
-/** A chain as the add-chain picker needs it. */
+/**
+ * One of a chain's declared output sockets, and — under a declared `view` — one
+ * panel of its result (ADR-0015, ADR-0016).
+ */
+export interface ChainPort {
+  /** The chain's public name for this output; the panel's label. */
+  name: string
+  /** The inner node the port binds to. */
+  node: string
+  /** The section of that node's output the port carries; `output` means all of it. */
+  socket?: string
+  /** Marks the panel as a columns layout's converging panel. */
+  role?: 'join'
+}
+
+/**
+ * A chain as the picker and the result view need it.
+ *
+ * `view` and `outputs` are the chain's layout declaration. The plugin reads them
+ * so it can build the same panels the engine's `/layout` route builds, while the
+ * run is still streaming — that route only answers for a run already on disk.
+ */
 export interface ChainSummary {
   slug: string
   name: string
+  /** The mechanism, in the chain's own words; the picker's fallback for `moment`. */
+  description?: string
   /** The situation that should make you reach for this chain; display-only. */
   moment?: string
   purpose?: ChainPurpose
   parameter?: ChainParameter
+  /** The result layout the chain opts into; absent means it declares none. */
+  view?: string
+  /** The panels of that layout, in reading order. */
+  outputs?: ChainPort[]
 }
 
 export interface AgentOutput {
@@ -33,6 +60,8 @@ export interface AgentOutput {
   status: 'success' | 'error' | 'skipped'
   error?: string
   timestamp: string
+  /** Loop iteration, 0-based; set only on the outputs of a loop-body node. */
+  round?: number
   [key: string]: unknown
 }
 

@@ -4,6 +4,20 @@ import type { EngineState } from './status'
 /** The one thing the plugin says when the engine is not there. */
 export const OFFLINE_NOTICE = 'engine offline'
 
+/**
+ * What to say about a failure that is the engine's rather than the plugin's, and
+ * `undefined` for anything else — which is a bug and belongs thrown.
+ *
+ * The guard below turns this into a notice. A caller that also has somewhere to
+ * *show* the failure, like the result view, reads it directly rather than
+ * re-deriving the same two cases.
+ */
+export function engineFailureMessage(error: unknown): string | undefined {
+  if (error instanceof EngineOfflineError) return OFFLINE_NOTICE
+  if (error instanceof EngineHttpError) return `engine error ${error.status}: ${error.body || error.message}`
+  return undefined
+}
+
 export interface EngineGuardDeps {
   /** Checks the engine now; a stale poll is not good enough to act on. */
   refresh: () => Promise<EngineState>
@@ -29,16 +43,11 @@ export function createEngineGuard(deps: EngineGuardDeps) {
     try {
       return await action()
     } catch (error) {
-      if (error instanceof EngineOfflineError) {
-        deps.markOffline()
-        deps.notify(OFFLINE_NOTICE)
-        return undefined
-      }
-      if (error instanceof EngineHttpError) {
-        deps.notify(`engine error ${error.status}: ${error.body || error.message}`)
-        return undefined
-      }
-      throw error
+      const message = engineFailureMessage(error)
+      if (message === undefined) throw error
+      if (error instanceof EngineOfflineError) deps.markOffline()
+      deps.notify(message)
+      return undefined
     }
   }
 }

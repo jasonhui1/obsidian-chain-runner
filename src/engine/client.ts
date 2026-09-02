@@ -5,7 +5,7 @@ import {
   type HttpRequest,
   type HttpTransport,
 } from './transport'
-import type { ChainSummary, LayoutModel, RunEvent, RunMeta, RunRequest } from './types'
+import type { ChainPort, ChainSummary, LayoutModel, RunEvent, RunMeta, RunRequest } from './types'
 
 /** Shapes the engine returns that the client narrows before handing on. */
 interface WorkspaceResponse {
@@ -15,10 +15,13 @@ interface WorkspaceResponse {
 interface RawChain {
   slug: string
   name: string
+  description?: string
   moment?: string
   purpose?: ChainSummary['purpose']
   /** The engine's parameter also names the node it feeds; the picker does not need that. */
   parameter?: { name: string; options: string[]; node?: string }
+  view?: string
+  outputs?: ChainPort[]
 }
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -133,12 +136,27 @@ function withTrailingSlash(base: string): string {
 
 function summarise(chain: RawChain): ChainSummary {
   const summary: ChainSummary = { slug: chain.slug, name: chain.name }
+  // Every chain carries a `description`; an empty one is the same as none to the
+  // picker, which falls back to it only when there is something to fall back to.
+  if (chain.description) summary.description = chain.description
   if (chain.moment !== undefined) summary.moment = chain.moment
   if (chain.purpose !== undefined) summary.purpose = chain.purpose
   if (chain.parameter) {
     summary.parameter = { name: chain.parameter.name, options: chain.parameter.options }
   }
+  // A chain's layout is half `view` and half `outputs`; the result view needs both
+  // to draw the panels the engine would draw for the same run.
+  if (chain.view !== undefined) summary.view = chain.view
+  if (chain.outputs !== undefined) summary.outputs = chain.outputs.map(port)
   return summary
+}
+
+/** A port arrives with keys the panels never read; copying keeps the summary comparable. */
+function port(raw: ChainPort): ChainPort {
+  const kept: ChainPort = { name: raw.name, node: raw.node }
+  if (raw.socket !== undefined) kept.socket = raw.socket
+  if (raw.role !== undefined) kept.role = raw.role
+  return kept
 }
 
 /** The engine sends only tagged objects; anything else on the wire is not ours. */

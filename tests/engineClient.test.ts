@@ -37,10 +37,12 @@ describe('listChains', () => {
       {
         slug: 'five-personas',
         name: 'Five Personas',
-        description: 'unused by the picker',
+        description: 'the mechanism, in the chain own words',
         moment: 'when a premise feels safe',
         purpose: 'insight',
         parameter: { name: 'audience', options: ['engineers', 'execs'], node: 'param' },
+        view: 'timeline',
+        outputs: [{ name: 'skeleton', node: 'third', socket: 'summary', role: 'join' }],
         nodes: [],
         edges: [],
       },
@@ -50,9 +52,12 @@ describe('listChains', () => {
       {
         slug: 'five-personas',
         name: 'Five Personas',
+        description: 'the mechanism, in the chain own words',
         moment: 'when a premise feels safe',
         purpose: 'insight',
         parameter: { name: 'audience', options: ['engineers', 'execs'] },
+        view: 'timeline',
+        outputs: [{ name: 'skeleton', node: 'third', socket: 'summary', role: 'join' }],
       },
       { slug: 'bare', name: 'Bare' },
     ])
