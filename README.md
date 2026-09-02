@@ -185,4 +185,4 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 | `listChains` at a stopped port | `EngineOfflineError` |
 | `launchRun` against a real chain | **not run** — it spends model tokens; covered against the fake engine for every event type |
 | Part two, in a vault | run 2026-09-02 in the `test_chain` vault (Excalidraw installed alongside): plugin loads, settings tab present, pill and offline notice behave. Not itemised step by step. |
-| Part three, the quick path | **not run** — every step from 3 onwards starts a real chain run and spends model tokens. The wire-to-panels path is covered against the fake engine end to end (`tests/quickPath.test.ts`). |
+| Part three, the quick path | run 2026-09-02 in the `test_chain` vault against a live engine — twice: once on the ported layout model, and again after the engine began streaming `layout` frames (ADR-0017). Chains ran and their results drew correctly both times. Not itemised step by step; the cross-surface check (step 4) and the capability refusal (step 4b) are not separately attested. |
