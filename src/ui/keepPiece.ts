@@ -1,4 +1,5 @@
 import { normalizePath, TFile, TFolder, type App } from 'obsidian'
+import type { DrawingChoice } from './drawingChoices'
 import { DrawingPicker } from './drawingPicker'
 import type { DrawingSurface } from './excalidraw'
 import { outputNoteContent, outputNotePath, resolveOutputPath, type OutputNoteMeta } from '../run/outputNote'
@@ -38,13 +39,21 @@ export class KeepPiece {
   }
 
   /**
-   * Writes the panel as a note and puts it on a drawing as an embeddable.
+   * Puts the panel on a drawing as an embeddable, writing its note on the way.
    *
-   * The note is written first and by the same rule, so a piece sent to a drawing
-   * and a piece saved are the same note — sending after saving reuses what is
-   * already there rather than leaving two copies of one hop.
+   * Everything that could stop the action is checked before the suggester opens,
+   * and the note is written after a drawing is picked — a reader who changes
+   * their mind at the modal should leave nothing behind in the vault.
+   *
+   * The note is written by the same rule `saveAsNote` uses, so a piece sent to a
+   * drawing and a piece saved are the same note: sending after saving reuses
+   * what is already there rather than leaving two copies of one hop.
    */
   async sendToDrawing(panel: RunPanel, run: RunResult): Promise<void> {
+    if (!run.runId) {
+      this.deps.notify(NOT_SETTLED)
+      return
+    }
     const unavailable = this.deps.drawing.unavailable()
     if (unavailable) {
       this.deps.notify(unavailable)
@@ -55,15 +64,15 @@ export class KeepPiece {
       this.deps.notify('No Excalidraw drawing in this vault to send it to')
       return
     }
-    const note = await this.write(panel, run)
-    if (!note) return
 
     new DrawingPicker(this.deps.app, choices, drawing => {
-      void this.place(drawing, note)
+      void this.place(drawing, panel, run)
     }).open()
   }
 
-  private async place(drawing: Parameters<DrawingSurface['place']>[0], note: TFile): Promise<void> {
+  private async place(drawing: DrawingChoice, panel: RunPanel, run: RunResult): Promise<void> {
+    const note = await this.write(panel, run)
+    if (!note) return
     try {
       await this.deps.drawing.place(drawing, note)
       this.deps.notify(`${note.basename} → ${drawing.name}`)
@@ -84,7 +93,7 @@ export class KeepPiece {
 
     try {
       await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
-      const path = await resolveOutputPath(wanted, content, part => this.read(part))
+      const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))
       const existing = this.deps.app.vault.getAbstractFileByPath(path)
       // The path either is free or already holds exactly this; a note that
       // already says it is kept as it is rather than rewritten.

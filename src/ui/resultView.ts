@@ -56,15 +56,13 @@ export class RunResultView extends ItemView {
    * want again on the next run.
    */
   private pickedRound: number | undefined
-  /** What the two panel actions do. Unset until the plugin hands them over. */
-  private actions: PanelActions | undefined
 
-  constructor(leaf: WorkspaceLeaf) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    /** What the two panel actions do. They write to the vault; the view does not. */
+    private readonly actions?: PanelActions,
+  ) {
     super(leaf)
-  }
-
-  setActions(actions: PanelActions): void {
-    this.actions = actions
   }
 
   override getViewType(): string {
@@ -233,13 +231,13 @@ export class RunResultView extends ItemView {
     this.drawAction(actions, 'Send to drawing', () => this.actions?.sendToDrawing(panel, run))
   }
 
-  private drawAction(parent: HTMLElement, label: string, run: () => void): void {
+  private drawAction(parent: HTMLElement, label: string, onClick: () => void): void {
     const el = parent.createEl('button', { cls: 'chain-runner-panel-action', text: label })
     el.onclick = (event): void => {
       // The panel is not itself clickable, but a round row above it is; a click
       // on an action is about the action and nothing else.
       event.stopPropagation()
-      run()
+      onClick()
     }
   }
 

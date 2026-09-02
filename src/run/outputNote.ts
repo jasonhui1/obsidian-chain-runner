@@ -32,9 +32,11 @@ const UNUSABLE = /[\\/:*?"<>|#^[\]]/g
  * what a filename cannot hold is replaced.
  */
 function fileName(name: string): string {
-  // A name with nothing left after the substitution — `///` — would file as
-  // `---.md`, a legal filename that says nothing. It gets a word instead.
-  if (name.replace(UNUSABLE, '').trim() === '') return 'output'
+  // A name none of whose characters is kept as itself — `///`, `...`, spaces —
+  // would file as `---.md` or, worse, as a hidden note called `.md`. Neither
+  // says anything, so it gets a word instead. Both the substitution and the trim
+  // below can empty a name, so both are asked here.
+  if (name.replace(UNUSABLE, '').replace(/[\s.]/g, '') === '') return 'output'
   // Leading and trailing dots and spaces are legal in a path and confusing in a
   // file list, so they go the way the unusable characters do.
   return name.replace(UNUSABLE, '-').replace(/^[\s.]+|[\s.]+$/g, '')
@@ -76,6 +78,9 @@ export function outputNoteContent(panel: RunPanel, meta: OutputNoteMeta): string
   return `${frontmatter.join('\n')}\n${panel.text.replace(/\n+$/, '')}\n`
 }
 
+/** How far the suffix walk goes before it gives up rather than spinning. */
+const MOST_SUFFIXES = 1000
+
 /**
  * The path to actually write to, given what the vault already holds.
  *
@@ -91,9 +96,13 @@ export async function resolveOutputPath(
   read: (path: string) => Promise<string | undefined>,
 ): Promise<string> {
   const stem = path.replace(/\.md$/, '')
-  for (let suffix = 1; ; suffix++) {
+  for (let suffix = 1; suffix <= MOST_SUFFIXES; suffix++) {
     const candidate = suffix === 1 ? path : `${stem} ${suffix}.md`
     const existing = await read(candidate)
     if (existing === undefined || existing === content) return candidate
   }
+  // Unreachable in a vault a person made: it would take a thousand notes of one
+  // name. It is here so a `read` that answers wrongly ends as a notice rather
+  // than as a loop that never returns.
+  throw new Error(`${path} and the ${MOST_SUFFIXES} names after it are all taken`)
 }

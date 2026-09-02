@@ -44,14 +44,14 @@ export default class ChainRunnerPlugin extends Plugin {
       folder: () => this.settings.outputFolder,
       drawing: createDrawingSurface(this.app),
     })
-    this.registerView(RESULT_VIEW_TYPE, leaf => {
-      const view = new RunResultView(leaf)
-      view.setActions({
-        saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
-        sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
-      })
-      return view
-    })
+    this.registerView(
+      RESULT_VIEW_TYPE,
+      leaf =>
+        new RunResultView(leaf, {
+          saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
+          sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
+        }),
+    )
     this.quickRun = new QuickRunner({
       app: this.app,
       engine: this.engine,

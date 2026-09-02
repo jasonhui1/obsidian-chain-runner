@@ -12,6 +12,9 @@ import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoi
 
 const PLUGIN_ID = 'obsidian-excalidraw-plugin'
 
+/** The view type Excalidraw registers. A drawing open as markdown is not one. */
+const EXCALIDRAW_VIEW = 'excalidraw'
+
 /**
  * Every call below predates 2.0, so this excludes the 1.x line without
  * excluding anyone on a current release. Verified against 2.26.4; raise it
@@ -110,11 +113,19 @@ function isDrawing(app: App, file: TFile): boolean {
 /** The drawings with a tab of their own right now, in the workspace's own order. */
 function openDrawings(app: App): string[] {
   const paths: string[] = []
-  app.workspace.iterateAllLeaves(leaf => {
-    const file = (leaf.view as { file?: TFile }).file
+  eachLeaf(app, (_leaf, file) => {
     if (file && isDrawing(app, file)) paths.push(file.path)
   })
   return paths
+}
+
+/**
+ * Every leaf and the file it holds. The cast is the one place this plugin
+ * assumes a view knows its file, which not every view does — so it is made once,
+ * here, rather than at each walk.
+ */
+function eachLeaf(app: App, visit: (leaf: WorkspaceLeaf, file: TFile | undefined) => void): void {
+  app.workspace.iterateAllLeaves(leaf => visit(leaf, (leaf.view as { file?: TFile }).file))
 }
 
 /**
@@ -136,17 +147,25 @@ async function openDrawing(app: App, path: string): Promise<unknown> {
   await app.workspace.revealLeaf(leaf)
 
   const deadline = Date.now() + VIEW_READY_TIMEOUT_MS
-  while (leaf.view.getViewType() !== 'excalidraw') {
+  while (leaf.view.getViewType() !== EXCALIDRAW_VIEW) {
     if (Date.now() > deadline) throw new Error('That drawing did not open as an Excalidraw view.')
     await new Promise(resolve => setTimeout(resolve, VIEW_READY_POLL_MS))
   }
   return leaf.view
 }
 
+/**
+ * The Excalidraw tab showing this drawing, if there is one.
+ *
+ * The view type is part of the match, not just the path: a `.excalidraw.md` can
+ * also be open as a plain markdown tab, and EA cannot be pointed at that one.
+ * Answering with it would wait out the readiness loop and then refuse a drawing
+ * that opens perfectly well in a tab of its own.
+ */
 function leafShowing(app: App, path: string): WorkspaceLeaf | undefined {
   let found: WorkspaceLeaf | undefined
-  app.workspace.iterateAllLeaves(leaf => {
-    if (!found && (leaf.view as { file?: TFile }).file?.path === path) found = leaf
+  eachLeaf(app, (leaf, file) => {
+    if (!found && file?.path === path && leaf.view.getViewType() === EXCALIDRAW_VIEW) found = leaf
   })
   return found
 }

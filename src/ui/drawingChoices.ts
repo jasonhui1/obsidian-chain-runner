@@ -2,8 +2,8 @@
  * Which drawings the "send to drawing" suggester offers, and in what order.
  *
  * The ticket asks for "an open or recent drawing", which is an ordering
- * decision and not a vault one — so it is made here, without Obsidian, and the
- * adapter above is left holding only the vault reads that feed it.
+ * decision and not a vault one — so it is made here, without Obsidian, and
+ * `./excalidraw.ts` is left holding only the vault reads that feed it.
  */
 
 /** A drawing in the vault, in the three facts the ordering reads. */

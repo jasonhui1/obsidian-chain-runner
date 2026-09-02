@@ -43,6 +43,9 @@ let placed: { drawing: string; note: string }[]
 let drawings: DrawingChoice[]
 let unavailable: string | undefined
 
+/** Lets the writes a picked drawing sets off finish before the assertions. */
+const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+
 const drawing = (path: string): DrawingChoice => ({
   path,
   name: path.slice(path.lastIndexOf('/') + 1),
@@ -153,11 +156,18 @@ describe('send to drawing', () => {
   it('writes the note and puts it on the drawing the reader picked', async () => {
     await makeKeep().sendToDrawing(panel(), result())
     lastModal()?.choose(0)
-    await Promise.resolve()
+    await flush()
 
     const path = 'chains/runs/2026-09-02-ab12c/Optimist.md'
     expect(notes[path]).toContain('It could work.')
     expect(placed).toEqual([{ drawing: 'boards/wall.excalidraw.md', note: path }])
+  })
+
+  it('leaves nothing behind when the reader dismisses the suggester', async () => {
+    await makeKeep().sendToDrawing(panel(), result())
+    await flush()
+    expect(notes).toEqual({})
+    expect(folders).toEqual([])
   })
 
   it('reuses the note a save already wrote rather than making a second', async () => {
@@ -165,9 +175,15 @@ describe('send to drawing', () => {
     await keep.saveAsNote(panel(), result())
     await keep.sendToDrawing(panel(), result())
     lastModal()?.choose(0)
-    await Promise.resolve()
+    await flush()
 
     expect(Object.keys(notes)).toEqual(['chains/runs/2026-09-02-ab12c/Optimist.md'])
+  })
+
+  it('says the run has no id before opening a suggester it cannot act on', async () => {
+    await makeKeep().sendToDrawing(panel(), result({ runId: undefined }))
+    expect(lastModal()).toBeUndefined()
+    expect(notices).toEqual([NOT_SETTLED])
   })
 
   it('says what is missing when the drawing surface cannot be used, and writes nothing', async () => {

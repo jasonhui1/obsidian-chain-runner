@@ -38,6 +38,10 @@ describe('outputNotePath', () => {
 
   it('falls back to a name rather than writing a nameless file', () => {
     expect(outputNotePath(panel({ name: '///' }), meta)).toBe('chains/runs/2026-09-02-ab12c/output.md')
+    // Nothing here is unusable, and nothing survives the trim either — a note
+    // called `.md` would be hidden as well as nameless.
+    expect(outputNotePath(panel({ name: '...' }), meta)).toBe('chains/runs/2026-09-02-ab12c/output.md')
+    expect(outputNotePath(panel({ name: '   ' }), meta)).toBe('chains/runs/2026-09-02-ab12c/output.md')
   })
 })
 
@@ -86,5 +90,11 @@ describe('resolveOutputPath', () => {
   it('reuses a note that already says exactly this, rather than writing it twice', async () => {
     const held = { 'runs/Optimist.md': 'a', 'runs/Optimist 2.md': 'text' }
     expect(await resolveOutputPath('runs/Optimist.md', 'text', reader(held))).toBe('runs/Optimist 2.md')
+  })
+
+  it('gives up rather than spinning, when every name it tries comes back taken', async () => {
+    await expect(resolveOutputPath('runs/Optimist.md', 'text', () => Promise.resolve('taken'))).rejects.toThrow(
+      /are all taken/,
+    )
   })
 })

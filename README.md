@@ -97,7 +97,7 @@ output: "Optimist"
 ```
 
 - **The folder** is the **Output folder** setting, with a folder per run inside it. Missing folders are created.
-- **The filename** is the chain's own name for the output — case, spaces and all — with only what a filename cannot hold (`\ / : * ? " < > | # ^ [ ]`) replaced by a dash. A name left with nothing after that is filed as `output.md`.
+- **The filename** is the chain's own name for the output — case, spaces and all — with only what a filename cannot hold (`\ / : * ? " < > | # ^ [ ]`) replaced by a dash, and dots and spaces trimmed off either end. A name left with nothing after that — `///`, or `...` — is filed as `output.md`.
 - **The frontmatter** is those three keys and no others, every value quoted, so a chain named `2026-09-02` stays a string.
 - **The body** is the hop's text untouched. A hop that wrote its own frontmatter or its own heading keeps it, below this one.
 - **A collision gets a suffix** — `Optimist 2.md`, `Optimist 3.md` — *unless* the note already there says exactly this, in which case it is reused. So saving a panel and then sending the same panel to a drawing leaves one note, not two copies of one hop.
@@ -106,7 +106,7 @@ The whole convention is `src/run/outputNote.ts`: a panel and a run's meta in, a 
 
 **Save as note** writes the note and opens it in a new tab.
 
-**Send to drawing** writes the same note, then asks which drawing to put it on: the drawings open right now first, then the ones opened recently in the order they were read, then the rest newest-written first. The note lands on the picked drawing as an **embeddable at the cursor**, and the drawing is saved. A drawing that is not open is opened first — Excalidraw's `ExcalidrawAutomate` can only be pointed at a live view.
+**Send to drawing** asks which drawing to put it on, and writes the same note once one is picked — dismissing the suggester leaves nothing behind. The drawings offered are: the drawings open right now first, then the ones opened recently in the order they were read, then the rest newest-written first. The note lands on the picked drawing as an **embeddable at the cursor**, and the drawing is saved. A drawing that is not open is opened first — Excalidraw's `ExcalidrawAutomate` can only be pointed at a live view.
 
 This needs the Excalidraw plugin, 2.0.0 or newer; without it the action says so and writes nothing. `docs/spike-ea.md` records why those are the calls: the version floor, the mandatory `setView` on every entry point, and the observation that an embeddable re-renders live when the note behind it is written.
 
@@ -223,7 +223,8 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 7. **A chain declaring no view.** Expect the run trace fallback and a line saying so, not an empty view.
 7b. **Save as note.** With a finished run on screen, click **Save as note** in a filled panel's heading. Expect a note at `chains/runs/<runId>/<output>.md`, opened in a new tab, carrying `run`, `chain` and `output` in its frontmatter and the panel's text below. Click it again: expect the same one note, not a second. Expect neither action to appear on a panel while the run is still going, nor on an empty, errored or skipped one.
 7c. **A collision.** Write your own note at that exact path, then save the panel again. Expect `<output> 2.md` beside it and your note untouched.
-7d. **Send to drawing.** With an Excalidraw drawing open, click **Send to drawing**. Expect the drawing listed first and marked *open now*, the note to land as an embeddable at the cursor, the drawing to be saved, and the embeddable to show the note's text. Close and reopen the drawing: expect the embeddable still there.
+7d. **Send to drawing.** With an Excalidraw drawing open, click **Send to drawing**. Expect the drawing listed first and marked *open now*, the note to land as an embeddable at the cursor, the drawing to be saved, and the embeddable to show the note's text. Close and reopen the drawing: expect the embeddable still there. Then click **Send to drawing** again and dismiss the suggester with Escape: expect no new note in the run's folder.
+7d-ii. **A drawing that is not open, and one open as markdown.** Send a piece to a drawing that has no tab: expect it to open and receive the embeddable. Then open a `.excalidraw.md` with **Open as markdown** and send a piece to it: expect a proper drawing view to open and receive it, not a three-second pause and a refusal.
 7e. **Without Excalidraw.** Disable the Excalidraw plugin and click **Send to drawing**. Expect one notice saying it is not installed, and no note written.
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
 9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes, and the two panel actions hovered and not.
