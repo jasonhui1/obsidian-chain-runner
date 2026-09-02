@@ -10,7 +10,7 @@ import {
 import type { AgentOutput, ChainSummary, RunEvent } from '@/engine/types'
 
 /** The common case: no selection, so the whole note is the seed. */
-const NOTE_SEED = { source: 'premise.md', from: 'note' } as const
+const NOTE_SEED = { note: 'premise.md', from: 'note' } as const
 
 const CHAIN: ChainSummary = {
   slug: 'relay',
@@ -144,7 +144,7 @@ describe('buildRunResult', () => {
     expect(result(emptyRunState())).toMatchObject({
       chainName: 'Telephone Relay',
       moment: 'finalizing a doc, not sure it holds up',
-      seed: { source: 'premise.md', from: 'note' },
+      seed: { note: 'premise.md', from: 'note' },
     })
   })
 
@@ -167,10 +167,10 @@ describe('buildRunResult', () => {
   it('carries the seed as the selection when that is what was run', () => {
     const built = buildRunResult({
       chain: CHAIN,
-      seed: { source: 'premise.md', from: 'selection' },
+      seed: { note: 'premise.md', from: 'selection' },
       state: emptyRunState(),
     })
-    expect(built.seed).toEqual({ source: 'premise.md', from: 'selection' })
+    expect(built.seed).toEqual({ note: 'premise.md', from: 'selection' })
   })
 
   it('draws the engine panels, with live tokens laid over the one still writing', () => {
@@ -191,6 +191,6 @@ describe('seedLine', () => {
   })
 
   it('says a selection was run, since the run then covers less than the note', () => {
-    expect(seedLine({ source: 'premise.md', from: 'selection' })).toBe('seed: premise.md (selection)')
+    expect(seedLine({ note: 'premise.md', from: 'selection' })).toBe('seed: premise.md (selection)')
   })
 })

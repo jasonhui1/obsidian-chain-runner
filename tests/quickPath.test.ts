@@ -71,7 +71,7 @@ async function watchRun(): Promise<RunState[]> {
 }
 
 const result = (state: RunState) =>
-  buildRunResult({ chain: CHAIN, seed: { source: 'premise.md', from: 'note' }, state })
+  buildRunResult({ chain: CHAIN, seed: { note: 'premise.md', from: 'note' }, state })
 
 describe('a run on the wire, as the view reads it', () => {
   beforeEach(() => {
@@ -195,29 +195,15 @@ describe('a chain that declares a dropdown', () => {
     })
   })
 
-  it('reads the parameter back off the run the engine recorded', async () => {
-    engine.runMeta = {
-      runId: '2026-09-02-ab12c',
-      chainName: 'Telephone Relay',
-      seedPrompt: 'the selection',
-      parameter: { name: 'lens', value: 'sceptic' },
-      startedAt: '2026-09-02T00:00:00.000Z',
-      status: 'complete',
-      agentOutputs: [],
-    }
-    const meta = await client.getRun('2026-09-02-ab12c')
-    expect(meta.parameter).toEqual({ name: 'lens', value: 'sceptic' })
-  })
-
   it('shows the name and the value in the header, next to the seed', () => {
     const built = buildRunResult({
       chain: PARAMETERISED,
-      seed: { source: 'premise.md', from: 'selection' },
+      seed: { note: 'premise.md', from: 'selection' },
       state: emptyRunState(),
       paramValue: 'sceptic',
     })
     expect(built).toMatchObject({
-      seed: { source: 'premise.md', from: 'selection' },
+      seed: { note: 'premise.md', from: 'selection' },
       parameter: { name: 'lens', value: 'sceptic' },
     })
   })

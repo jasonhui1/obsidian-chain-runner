@@ -15,7 +15,11 @@ export function seedFromNote(text: string): string {
 /** Where a run's seed came from — the whole note, or the passage in front of you. */
 export type SeedOrigin = 'selection' | 'note'
 
-/** The text a run was given, and what it was taken from. */
+/**
+ * The text a run was given, and what it was taken from. `RunSeed` in
+ * `./session` is the header's half of the same fact — the note's name, without
+ * the text.
+ */
 export interface Seed {
   text: string
   from: SeedOrigin

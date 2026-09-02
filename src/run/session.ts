@@ -107,10 +107,17 @@ export function settleRun(state: RunState, error?: string): RunState {
   return { ...state, settled: true, error: state.error ?? error }
 }
 
-/** The seed of a run, as the header names it: which note, and how much of it. */
+/**
+ * The seed of a run, as the header names it: which note, and how much of it.
+ *
+ * `Seed` in `./seed` is the same fact for the other audience — it carries the
+ * text, because the engine is sent the words and not the note they came from.
+ * Neither side wants the other's half, so they stay two records rather than one
+ * the view would have to hold a whole note in.
+ */
 export interface RunSeed {
-  /** The note the run was invoked on. */
-  source: string
+  /** The name of the note the run was invoked on. */
+  note: string
   from: SeedOrigin
 }
 
@@ -120,7 +127,7 @@ export interface RunSeed {
  * needs no qualifier, and adding one to every run would say nothing.
  */
 export function seedLine(seed: RunSeed): string {
-  return seed.from === 'selection' ? `seed: ${seed.source} (selection)` : `seed: ${seed.source}`
+  return seed.from === 'selection' ? `seed: ${seed.note} (selection)` : `seed: ${seed.note}`
 }
 
 /** Everything the result view renders, for a run at one moment. */

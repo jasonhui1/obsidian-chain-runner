@@ -45,7 +45,7 @@ Any plugin action taken while the engine is offline shows a `engine offline` not
 
 **Chain Runner: Run chain on this note** takes the note you are reading — or the selection, when you have one — and runs a chain against it. Nothing is drawn; the result reads in the right sidebar.
 
-**What the run reads.** With nothing selected the whole note is the seed, minus its frontmatter: tags, aliases and dates are the vault's bookkeeping, not part of the argument the chain is asked to read. Select a passage and that passage is the seed instead, left exactly as it was highlighted — frontmatter inside a selection was selected on purpose. The result header names the note either way, and adds `(selection)` when the run covered less than it: `seed: premise.md (selection)`.
+**What the run reads.** The note and the selection are read from one pane — the editor you are in — so a selection left behind in another pane can never be run under a different note's name. With nothing selected the whole note is the seed, minus its frontmatter: tags, aliases and dates are the vault's bookkeeping, not part of the argument the chain is asked to read. Select a passage and that passage is the seed instead, left exactly as it was highlighted — frontmatter inside a selection was selected on purpose. The result header names the note either way, and adds `(selection)` when the run covered less than it: `seed: premise.md (selection)`.
 
 **Picking a chain.** The picker groups chains under the four headings the engine's own picker uses: 洞見 (insight), 產出 (production), 壓力測試 (stress-test), and `unclassified` for a chain that declares no `purpose`. Under each name sits the chain's `moment` in grey — the situation that should make you reach for it — falling back to its `description`. Typing filters across every group at once, matching the name, the slug, the moment and the description; a heading with nothing left under it disappears.
 
@@ -121,6 +121,8 @@ src/
 ```
 
 `src/run/` holds no Obsidian import: what a stream of engine events means, and what panels it becomes, is decided there and checked without a vault. The view is left with the two things only a view can do — markdown, and how often to redraw.
+
+`src/ui/quickRun.ts` is where the two meet, and the decisions it makes — which note, how much of it, whether to ask for the dropdown — are driven in `tests/quickRunner.test.ts` against `tests/obsidian.ts`, a stub that records modals instead of drawing them (aliased over `obsidian` in `vitest.config.ts`). Typechecking still runs against the real module, so a stub that drifts from Obsidian's API fails `tsc` rather than passing a green suite.
 
 **The engine projects the panels; the plugin draws them.** `POST /api/run` streams a `layout` frame — one before the first hop, one after every `agent_done` — carrying the engine's own `buildLayoutModel` output (maestro-playground ADR-0017). The plugin holds no copy of that rule, so a chain edited in the workspace changes what is drawn here without this repo being touched.
 

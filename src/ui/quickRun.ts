@@ -50,12 +50,20 @@ export class QuickRunner {
 
   /** The command. Everything after this is the reader picking, then the stream. */
   async start(): Promise<void> {
-    const note = this.deps.app.workspace.getActiveFile()
+    const editing = this.deps.app.workspace.getActiveViewOfType(MarkdownView)
+    // The note and the selection come from one view, never two. A selection left
+    // in another pane is not part of the note in front of you, and taking the
+    // text from one and the name from the other would run one note under the
+    // other's header.
+    const note = editing?.file ?? this.deps.app.workspace.getActiveFile()
     if (!note || note.extension !== 'md') {
       this.deps.notify('Open a note to run a chain on it')
       return
     }
-    const seed = await this.seedFrom(note)
+    const seed = chooseSeed({
+      selection: editing?.editor.getSelection(),
+      noteText: await this.deps.app.vault.cachedRead(note),
+    })
     if (seed.text === '') {
       // A selection that is only whitespace is no selection at all, so an empty
       // seed here is always an empty note.
@@ -88,20 +96,7 @@ export class QuickRunner {
     this.inFlight = undefined
   }
 
-  /** The selection when there is one, so a passage can be run without splitting the note. */
-  private async seedFrom(note: TFile): Promise<Seed> {
-    const editor = this.deps.app.workspace.getActiveViewOfType(MarkdownView)?.editor
-    return chooseSeed({
-      selection: editor?.getSelection(),
-      noteText: await this.deps.app.vault.cachedRead(note),
-    })
-  }
-
-  /**
-   * A chain that declares a dropdown reads it as an input, so it is asked for
-   * before the run rather than left empty — an unanswered parameter runs a
-   * different chain than the reader picked.
-   */
+  /** Asks for the chain's dropdown when it has one to ask for; launches when it does not. */
   private pickParameter(run: QuickRun): void {
     const parameter = parameterToAsk(run.chain)
     if (!parameter) {
@@ -126,9 +121,11 @@ export class QuickRunner {
     this.inFlight = controller
 
     let state = emptyRunState()
+    // The header names the note and how much of it was read; the seed's own text
+    // has gone to the engine by then and is not the view's to hold.
     const show = (): void =>
       view.show(
-        buildRunResult({ chain, seed: { source: note.name, from: seed.from }, state, paramValue }),
+        buildRunResult({ chain, seed: { note: note.name, from: seed.from }, state, paramValue }),
         note.path,
       )
     show()
