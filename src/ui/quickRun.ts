@@ -1,19 +1,11 @@
 import { MarkdownView, TFile, type App } from 'obsidian'
 import { ChainPicker, ParameterPicker } from './chainPicker'
 import type { RunResultView } from './resultView'
-import { engineFailureMessage } from '../engine/guard'
-import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
-import { applyRunEvent, buildRunResult, emptyRunState, settleRun } from '../run/session'
+import { buildRunResult, emptyRunState, settleRun } from '../run/session'
+import { streamRun, streamsLayout, UNSUPPORTED_ENGINE } from '../run/stream'
 import { chooseSeed, type Seed } from '../run/seed'
 import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
-
-/**
- * Said when the engine does not stream layout frames. Named as the thing that is
- * missing rather than as a failure, because the fix is on the engine's side.
- */
-export const UNSUPPORTED_ENGINE =
-  'This engine is too old for Chain Runner: it does not stream layout frames. Update maestro-playground.'
 
 export interface QuickRunDeps {
   app: App
@@ -73,10 +65,10 @@ export class QuickRunner {
 
     const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
     if (!workspace) return
-    // The panels are the engine's to project (ADR-0017). An engine too old to
+    // The panels are the engine's to project (ADR-0001). An engine too old to
     // stream them cannot be drawn for, and saying so is the whole point of
     // feature-detecting: the alternative is a view quietly showing a stale rule.
-    if (!workspace.capabilities.runLayoutFrames) {
+    if (!streamsLayout(workspace.capabilities)) {
       this.deps.notify(UNSUPPORTED_ENGINE)
       return
     }
@@ -130,26 +122,22 @@ export class QuickRunner {
       )
     show()
 
-    let failure: string | undefined
-    try {
-      const request = { chainName: chain.name, seedPrompt: seed.text, ...(paramValue ? { paramValue } : {}) }
-      for await (const event of this.deps.engine.launchRun(request, controller.signal)) {
-        state = applyRunEvent(state, event)
+    const outcome = await streamRun({
+      engine: this.deps.engine,
+      request: { chainName: chain.name, seedPrompt: seed.text, ...(paramValue ? { paramValue } : {}) },
+      signal: controller.signal,
+      onState: next => {
+        state = next
         show()
-      }
-    } catch (error) {
-      // A superseded run leaves the view to the run that replaced it.
-      if (error instanceof RequestAbortedError) return
-      failure = engineFailureMessage(error)
-      if (failure === undefined) throw error
-      if (error instanceof EngineOfflineError) this.deps.markOffline()
-      this.deps.notify(failure)
-    } finally {
-      if (this.inFlight === controller) {
-        this.inFlight = undefined
-        state = settleRun(state, failure)
-        show()
-      }
-    }
+      },
+      notify: this.deps.notify,
+      markOffline: this.deps.markOffline,
+    })
+    // A superseded run leaves the view to the run that replaced it.
+    if (outcome.aborted || this.inFlight !== controller) return
+
+    this.inFlight = undefined
+    state = settleRun(outcome.state, outcome.failure)
+    show()
   }
 }

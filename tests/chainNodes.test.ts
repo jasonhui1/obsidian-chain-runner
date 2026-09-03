@@ -47,7 +47,7 @@ function makeNodes(): ChainNodes {
     // reaches it, so the three calls a run makes are never reached from here.
     read: () => undefined,
     setRunStatus: () => Promise.resolve(true),
-    placeRun: () => Promise.resolve(),
+    placeRun: () => Promise.resolve(true),
     place: elements => {
       placed.push(elements)
       return Promise.resolve()

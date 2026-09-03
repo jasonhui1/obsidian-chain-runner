@@ -1,14 +1,14 @@
 import { TFile, type App } from 'obsidian'
 import type { ChainNodeData, MaybeNodeElement, NodeRunStatus, NodeTarget } from './chainNode'
-import type { DrawingView, NodeReading, NodeSurface } from './excalidraw'
+import type { DrawingView, NodeReading, NodeSurface, PlacedOutput } from './excalidraw'
 import type { Box, NodeInput } from './nodeScene'
 import type { OutputNotes } from './outputNotes'
-import { engineFailureMessage } from '../engine/guard'
-import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
+import { CHAIN_GONE, NODE_GONE } from './chainNodes'
 import { buildRunPanels } from '../run/panels'
-import { buildRunFrame } from '../run/runFrame'
+import { buildRunFrame, type RunFrame } from '../run/runFrame'
 import { joinSeed, seedFromNote } from '../run/seed'
-import { applyRunEvent, emptyRunState, runFailure, settleRun, type RunState } from '../run/session'
+import { runFailure, settleRun, type RunState } from '../run/session'
+import { streamRun, streamsLayout, UNSUPPORTED_ENGINE } from '../run/stream'
 import type { EngineClient } from '../engine/client'
 import type { ChainSummary, LayoutModel } from '../engine/types'
 
@@ -45,6 +45,13 @@ export const ALREADY_RUNNING = 'This chain node is already running.'
 /** The run reached the engine and never got an id, so there is nothing to file under. */
 export const NOTHING_WRITTEN = 'The run did not finish, so nothing was written.'
 
+/** The run finished and the chain produced no panels; there is nothing to place. */
+export const NO_OUTPUTS = 'The run finished without producing any output.'
+
+/** This Excalidraw cannot make a frame, so the outputs were placed without one. */
+export const NO_FRAME =
+  'This Excalidraw cannot make frames, so the outputs were placed loose beside the node. Update it to group them.'
+
 export interface NodeRunDeps {
   app: App
   engine: EngineClient
@@ -56,12 +63,19 @@ export interface NodeRunDeps {
   surface: NodeSurface
   /** The output-note convention, shared with the result view's own actions. */
   notes: OutputNotes
-  /** Said when the node names a chain the engine no longer has. */
-  chainGone: (chainName: string) => string
-  /** Said when the node is no longer on the drawing. */
-  nodeGone: string
-  /** Said when the engine is too old to project its own panels. */
-  unsupportedEngine: string
+}
+
+/** One run of one node, as the click assembled it. */
+interface NodeRunPlan {
+  chain: ChainSummary
+  /** What the arrows into the node came to, as one piece of text. */
+  seed: string
+  target: NodeTarget
+  /** The view the click happened in, which is the only handle on an embedded drawing. */
+  view: DrawingView | undefined
+  /** Where the node sits, which is what the run's frame is placed against. */
+  node: Box
+  parameterValue?: string
 }
 
 export class NodeRun {
@@ -118,13 +132,13 @@ export class NodeRun {
     if (!workspace) return
     // The panels are the engine's to project (ADR-0001), and the frame is placed
     // from them; an engine that does not stream them cannot be drawn for.
-    if (!workspace.capabilities.runLayoutFrames) {
-      this.deps.notify(this.deps.unsupportedEngine)
+    if (!streamsLayout(workspace.capabilities)) {
+      this.deps.notify(UNSUPPORTED_ENGINE)
       return
     }
     const chain = workspace.chains.find(one => one.slug === data.chain)
     if (!chain) {
-      this.deps.notify(this.deps.chainGone(data.chainName))
+      this.deps.notify(CHAIN_GONE(data.chainName))
       return
     }
 
@@ -137,10 +151,15 @@ export class NodeRun {
       return
     }
 
-    await this.launch(
-      { chain, seed, target, view, node: reading.box, parameterValue: data.parameterValue },
-      controller,
-    )
+    const plan: NodeRunPlan = {
+      chain,
+      seed,
+      target,
+      view,
+      node: reading.box,
+      ...(data.parameterValue ? { parameterValue: data.parameterValue } : {}),
+    }
+    await this.launch(plan, controller)
   }
 
   /** Drops every run in flight — the plugin is unloading. */
@@ -154,7 +173,7 @@ export class NodeRun {
     try {
       const reading = this.deps.surface.read(target, view)
       if (reading) return reading
-      this.deps.notify(this.deps.nodeGone)
+      this.deps.notify(NODE_GONE)
     } catch (error) {
       this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
     }
@@ -183,20 +202,9 @@ export class NodeRun {
     return joinSeed(parts)
   }
 
-  private async launch(
-    run: {
-      chain: ChainSummary
-      seed: string
-      target: NodeTarget
-      view: DrawingView | undefined
-      node: Box
-      parameterValue?: string
-    },
-    controller: AbortController,
-  ): Promise<void> {
-    const { chain, seed, target, view, parameterValue } = run
+  private async launch(plan: NodeRunPlan, controller: AbortController): Promise<void> {
+    const { chain, seed, target, view, parameterValue } = plan
 
-    let state = emptyRunState()
     let said = ''
     // The node is written to only when its words change: every write to a
     // drawing is a save, and a run of forty tokens is not forty saves.
@@ -209,74 +217,87 @@ export class NodeRun {
 
     await say({ kind: 'running', done: 0 })
 
-    let failure: string | undefined
-    try {
-      const request = {
+    const outcome = await streamRun({
+      engine: this.deps.engine,
+      request: {
         chainName: chain.name,
         seedPrompt: seed,
         ...(parameterValue ? { paramValue: parameterValue } : {}),
-      }
-      for await (const event of this.deps.engine.launchRun(request, controller.signal)) {
-        state = applyRunEvent(state, event)
-        await say(progress(state.layout))
-      }
-    } catch (error) {
-      // A run dropped because the plugin unloaded has no node left to tell.
-      if (error instanceof RequestAbortedError) return
-      failure = engineFailureMessage(error)
-      if (failure === undefined) throw error
-      if (error instanceof EngineOfflineError) this.deps.markOffline()
-      this.deps.notify(failure)
-    }
+      },
+      signal: controller.signal,
+      onState: state => say(progress(state.layout)),
+      notify: this.deps.notify,
+      markOffline: this.deps.markOffline,
+    })
+    // A run dropped because the plugin unloaded has no node left to tell.
+    if (outcome.aborted) return
 
-    state = settleRun(state, failure)
-    await this.settle(state, run, failure)
+    await this.settle(settleRun(outcome.state, outcome.failure), plan, outcome.failure)
   }
 
   /**
-   * What a finished run leaves behind: the outputs as notes, in a frame behind
+   * What a finished run leaves behind: the outputs as notes, in a frame beside
    * the node, and the node saying how it went.
    *
-   * A run that never reported an id wrote nothing — its notes have nowhere to
-   * be filed (ADR-0002) — and says so rather than leaving an empty frame.
+   * A run that never reported an id wrote nothing — its notes have nowhere to be
+   * filed (ADR-0002) — and says so rather than leaving an empty frame. A run
+   * that finished and produced nothing is done, not failed: an empty answer is
+   * still the chain's answer.
    */
   private async settle(
     state: RunState,
-    run: { chain: ChainSummary; target: NodeTarget; view: DrawingView | undefined; node: Box },
+    plan: NodeRunPlan,
     /** What was already said on the way out, so a failure is not said twice. */
     said: string | undefined,
   ): Promise<void> {
-    const { chain, target, view, node } = run
+    const { chain, target, view, node } = plan
     const error = runFailure(state)
-    const layout = buildRunPanels(chain, state.layout, state.nodes)
     // A hop that failed is the engine's own message, and nothing has said it yet.
     if (error && error !== said) this.deps.notify(error)
+    // The reason travels onto the node itself: a notice is gone by the time the
+    // reader looks back at the drawing, and the node is what they look at.
+    const outcome: NodeRunStatus = error ? { kind: 'failed', error } : { kind: 'done' }
 
-    if (!state.runId || layout.panels.length === 0) {
+    if (!state.runId) {
       if (!error) this.deps.notify(NOTHING_WRITTEN)
-      await this.onDrawing(() => this.deps.surface.setRunStatus(target, { kind: 'failed' }, view))
+      await this.onDrawing(() => this.deps.surface.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }, view))
+      return
+    }
+
+    const layout = buildRunPanels(chain, state.layout, state.nodes)
+    if (layout.panels.length === 0) {
+      this.deps.notify(NO_OUTPUTS)
+      await this.onDrawing(() => this.deps.surface.setRunStatus(target, outcome, view))
       return
     }
 
     const frame = buildRunFrame({ layout, chainName: chain.name, runId: state.runId, node })
-    const notes: (TFile | undefined)[] = []
+    const outputs: PlacedOutput[] = []
     for (const placed of frame.panels) {
-      notes.push(await this.deps.notes.write(placed.panel, { runId: state.runId, chainName: chain.name }))
+      const note = await this.deps.notes.write(placed.panel, { runId: state.runId, chainName: chain.name })
+      // A note the vault refused has said so already; the rest of the run still
+      // lands, so one unwritable name does not cost the reader the whole frame.
+      if (note) outputs.push({ placed, note })
     }
 
+    await this.place(frame, outputs, view)
+    await this.onDrawing(() => this.deps.surface.setRunStatus(target, outcome, view))
+  }
+
+  /** Puts the frame on the drawing, saying so when it could not be a real frame. */
+  private async place(frame: RunFrame, outputs: PlacedOutput[], view: DrawingView | undefined): Promise<void> {
     await this.onDrawing(async () => {
-      await this.deps.surface.placeRun(frame, notes, view)
+      // The outputs are the run; a frame that could not be made is worth saying
+      // and not worth withholding them over.
+      if (!(await this.deps.surface.placeRun(frame, outputs, view))) this.deps.notify(NO_FRAME)
       return true
     })
-    await this.onDrawing(() =>
-      this.deps.surface.setRunStatus(target, error ? { kind: 'failed' } : { kind: 'done' }, view),
-    )
   }
 
   /** Touches the drawing, saying so rather than throwing when it cannot. */
   private async onDrawing(action: () => Promise<boolean>): Promise<void> {
     try {
-      if (!(await action())) this.deps.notify(this.deps.nodeGone)
+      if (!(await action())) this.deps.notify(NODE_GONE)
     } catch (error) {
       this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
     }

@@ -1,5 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ALREADY_RUNNING, MISSING_NOTE, NO_INPUTS, NodeRun, NOTHING_WRITTEN, SOME_UNBOUND } from '@/ui/nodeRun'
+import {
+  ALREADY_RUNNING,
+  MISSING_NOTE,
+  NO_FRAME,
+  NO_INPUTS,
+  NO_OUTPUTS,
+  NodeRun,
+  NOTHING_WRITTEN,
+  SOME_UNBOUND,
+} from '@/ui/nodeRun'
+import { CHAIN_GONE, NODE_GONE } from '@/ui/chainNodes'
+import { UNSUPPORTED_ENGINE } from '@/run/stream'
+import { OFFLINE_NOTICE } from '@/engine/guard'
 import { runLabel, type NodeRunStatus } from '@/ui/chainNode'
 import type { NodeReading, NodeSurface } from '@/ui/excalidraw'
 import { OutputNotes } from '@/ui/outputNotes'
@@ -41,7 +53,9 @@ let online: boolean
 let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
 let notices: string[]
 let labels: string[]
-let framed: { frame: RunFrame; notes: (string | undefined)[] }[]
+let framed: { frame: RunFrame; notes: string[] }[]
+/** Whether this Excalidraw can make a real frame. */
+let canFrame: boolean
 let vault: Record<string, string>
 let folders: string[]
 let offline: number
@@ -110,9 +124,9 @@ function makeRun(): NodeRun {
       labels.push(runLabel(status))
       return Promise.resolve(true)
     },
-    placeRun: (frame, notes) => {
-      framed.push({ frame, notes: notes.map(note => note?.path) })
-      return Promise.resolve()
+    placeRun: (frame, outputs) => {
+      framed.push({ frame, notes: outputs.map(output => output.note.path) })
+      return Promise.resolve(canFrame)
     },
   }
 
@@ -134,9 +148,6 @@ function makeRun(): NodeRun {
     markOffline: () => void offline++,
     surface,
     notes: new OutputNotes({ app, notify, folder: () => 'chains/runs' }),
-    chainGone: name => `${name} is gone`,
-    nodeGone: 'that node is gone',
-    unsupportedEngine: 'this engine is too old',
   })
 }
 
@@ -165,6 +176,7 @@ beforeEach(() => {
   notices = []
   labels = []
   framed = []
+  canFrame = true
   vault = {}
   folders = []
   offline = 0
@@ -236,7 +248,7 @@ describe('what the node says', () => {
     expect(running.length).toBeLessThanOrEqual(1)
   })
 
-  it('shows failed, and the engine’s own message, when a hop fails', async () => {
+  it('carries the engine’s own message onto the node when a hop fails', async () => {
     events = [
       layout(['First'], 0),
       {
@@ -250,7 +262,10 @@ describe('what the node says', () => {
       { type: 'run_complete', runId: '2026-09-02-ab12c' },
     ]
     await start()
-    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed' }))
+    // The notice is gone by the time the reader looks back at the drawing, so the
+    // reason has to be on the node as well as in the notice.
+    expect(labels.at(-1)).toContain('the model refused')
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: 'the model refused' }))
     expect(notices).toContain('the model refused')
   })
 
@@ -259,6 +274,14 @@ describe('what the node says', () => {
     await start()
     expect(labels.at(-1)).toBe(runLabel({ kind: 'failed' }))
     expect(notices).toContain(NOTHING_WRITTEN)
+  })
+
+  it('says the run is done when it finished having produced nothing', async () => {
+    events = [{ type: 'run_complete', runId: '2026-09-02-ab12c' }]
+    await start()
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'done' }))
+    expect(notices).toContain(NO_OUTPUTS)
+    expect(framed).toEqual([])
   })
 
   it('will not start a second run on a node already running', async () => {
@@ -295,6 +318,13 @@ describe('what the run leaves behind', () => {
     ])
   })
 
+  it('says so when this Excalidraw could not make a frame, and still places the outputs', async () => {
+    canFrame = false
+    await start()
+    expect(notices).toContain(NO_FRAME)
+    expect(framed[0].notes).toHaveLength(2)
+  })
+
   it('puts the frame beside the node it was run from', async () => {
     await start()
     expect(framed[0].frame.box.x).toBeGreaterThan(reading!.box.x + reading!.box.width)
@@ -318,26 +348,27 @@ describe('what stops a run', () => {
     expect(vault).toEqual({})
     expect(framed).toEqual([])
     expect(offline).toBe(1)
-    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed' }))
+    // The node carries why, not just that: a notice is gone the moment it fades.
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: OFFLINE_NOTICE }))
   })
 
   it('refuses an engine that does not project its own panels', async () => {
     capabilities = {}
     await start()
-    expect(notices).toEqual(['this engine is too old'])
+    expect(notices).toEqual([UNSUPPORTED_ENGINE])
     expect(launched).toEqual([])
   })
 
   it('says so when the node names a chain the workspace no longer has', async () => {
     chains = []
     await start()
-    expect(notices).toEqual(['Relay is gone'])
+    expect(notices).toEqual([CHAIN_GONE('Relay')])
   })
 
   it('says so when the node has left the drawing', async () => {
     reading = undefined
     await start()
-    expect(notices).toEqual(['that node is gone'])
+    expect(notices).toEqual([NODE_GONE])
     expect(launched).toEqual([])
   })
 })

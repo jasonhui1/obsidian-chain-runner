@@ -68,7 +68,7 @@ export function buildRunFrame(input: {
   node: Box
 }): RunFrame {
   const { layout, chainName, runId, node } = input
-  const placed = layout.kind === 'columns' ? columns(layout.panels) : shrinkingRow(layout.panels)
+  const placed = arrange(layout)
 
   const origin = { x: node.x + node.width + NODE_GAP, y: node.y }
   const bounds = extent(placed.map(one => one.box))
@@ -92,6 +92,21 @@ export function buildRunFrame(input: {
       },
     })),
   }
+}
+
+/**
+ * Which of the three pictures a layout gets.
+ *
+ * `sidebar` is a loop's rounds, and rounds are peers: they get an even row
+ * rather than a narrowing one, because nothing is handed on and narrowed. Naming
+ * all four kinds here rather than falling through to the relay is what keeps a
+ * kind the engine adds later from silently getting a picture that is wrong for
+ * it (ADR-0001).
+ */
+function arrange(layout: RunLayout): FramedPanel[] {
+  if (layout.kind === 'columns') return columns(layout.panels)
+  if (layout.kind === 'sidebar') return row(layout.panels, PANEL_WIDTH, 0, 0).placed
+  return shrinkingRow(layout.panels)
 }
 
 /**

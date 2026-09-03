@@ -123,6 +123,13 @@ describe('buildRunFrame', () => {
     })
   })
 
+  it('lays a sidebar layout’s rounds out as equal peers, not as a relay', () => {
+    const frame = frameOf({ kind: 'sidebar', panels: [panel('Round 1'), panel('Round 2'), panel('Round 3')] })
+    const widths = frame.panels.map(one => one.box.width)
+    expect(new Set(widths).size).toBe(1)
+    expect(frame.panels.map(one => one.box.y)).toEqual([frame.panels[0].box.y, frame.panels[0].box.y, frame.panels[0].box.y])
+  })
+
   it('holds nothing for a run with no panels', () => {
     const frame = frameOf({ kind: 'timeline', panels: [] })
     expect(frame.panels).toEqual([])

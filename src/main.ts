@@ -4,12 +4,12 @@ import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
 import { withDefaults, type ChainRunnerSettings } from './settings'
-import { CHAIN_GONE, ChainNodes, NODE_GONE, newNodeId } from './ui/chainNodes'
+import { ChainNodes, newNodeId } from './ui/chainNodes'
 import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
 import { KeepPiece } from './ui/keepPiece'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
-import { QuickRunner, UNSUPPORTED_ENGINE } from './ui/quickRun'
+import { QuickRunner } from './ui/quickRun'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { renderStatusPill } from './ui/statusPill'
@@ -82,9 +82,6 @@ export default class ChainRunnerPlugin extends Plugin {
       markOffline: () => this.status.markOffline(),
       surface,
       notes,
-      chainGone: CHAIN_GONE,
-      nodeGone: NODE_GONE,
-      unsupportedEngine: UNSUPPORTED_ENGINE,
     })
     // A run outlives the click that started it; unloading the plugin ends it.
     this.register(() => nodeRun.stop())

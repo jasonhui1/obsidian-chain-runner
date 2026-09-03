@@ -10,7 +10,7 @@ import {
   type NodeTarget,
 } from './chainNode'
 import { nodeBox, resolveInputs, type Box, type NodeInputs, type SceneShape } from './nodeScene'
-import type { RunFrame } from '../run/runFrame'
+import type { FramedPanel, RunFrame } from '../run/runFrame'
 
 /**
  * The Excalidraw plugin, as this plugin reaches it.
@@ -131,6 +131,12 @@ export interface NodeReading {
   drawing: string
 }
 
+/** One output of a run: where it goes, and the note it shows. */
+export interface PlacedOutput {
+  placed: FramedPanel
+  note: TFile
+}
+
 /** What the chain-node actions need a drawing to do. */
 export interface NodeSurface {
   /** Why Excalidraw cannot be used, or `undefined` when it can. */
@@ -149,11 +155,11 @@ export interface NodeSurface {
   /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
   setRunStatus(target: NodeTarget, status: NodeRunStatus, on?: DrawingView): Promise<boolean>
   /**
-   * Puts a run's outputs on the drawing: a frame, and one embeddable per panel
-   * showing the note at the same index. A panel whose note could not be written
-   * is left out rather than drawn empty.
+   * Puts a run's outputs on the drawing: a frame, and one embeddable per output.
+   * `false` means this Excalidraw could not make a frame, so the outputs were
+   * placed beside the node without one.
    */
-  placeRun(frame: RunFrame, notes: readonly (TFile | undefined)[], on?: DrawingView): Promise<void>
+  placeRun(frame: RunFrame, outputs: readonly PlacedOutput[], on?: DrawingView): Promise<boolean>
 }
 
 export const NO_EXCALIDRAW =
@@ -247,20 +253,15 @@ export function createNodeSurface(app: App): NodeSurface {
       return { box, inputs: resolveInputs(scene, target), drawing: drawingPath(view) }
     },
 
-    placeRun: async (frame, notes, on) => {
+    placeRun: async (frame, outputs, on) => {
       const { ea } = bind(on)
-      const held = frame.panels
-        .map((placed, index) => ({ placed, note: notes[index] }))
-        .filter((one): one is { placed: (typeof frame.panels)[number]; note: TFile } => one.note !== undefined)
 
-      // The frame comes first so the panels can name it as their container; an
-      // Excalidraw that cannot make one gets a labelled rectangle instead, which
-      // says the same thing and holds nothing.
-      const frameId = ea.addFrame
-        ? ea.addFrame(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
-        : drawFallbackFrame(ea, frame)
+      // The frame comes first so the panels can name it as their container. An
+      // Excalidraw with no `addFrame` still gets the outputs — they are the run —
+      // and the caller is told they landed loose rather than being grouped.
+      const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
 
-      for (const { placed, note } of held) {
+      for (const { placed, note } of outputs) {
         ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
         const { box } = placed
         const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
@@ -269,12 +270,13 @@ export function createNodeSurface(app: App): NodeSurface {
         // one; an element placed by a script has to say so itself. Without this
         // the panels would sit over the frame rather than in it, and dragging the
         // frame would leave them behind.
-        if (element && ea.addFrame) element.frameId = frameId
+        if (element && frameId) element.frameId = frameId
       }
       ea.style.strokeWidth = PLAIN_STROKE
       // Not repositioned to the cursor: the coordinates are the node's own, and
       // a run's outputs belong beside the node that produced them.
       await ea.addElementsToView(false, true)
+      return frameId !== undefined
     },
   }
 }
@@ -282,28 +284,6 @@ export function createNodeSurface(app: App): NodeSurface {
 /** A run's outputs are drawn heavier when they are what the layout is about. */
 const EMPHASIS_STROKE = 4
 const PLAIN_STROKE = 1
-
-/** Room above a fallback frame's rectangle for its title. */
-const FRAME_TITLE_GAP = 28
-
-/**
- * The frame, for an Excalidraw with no `addFrame`: a rectangle and its title.
- *
- * It holds nothing — dragging it moves a rectangle and leaves the panels — but a
- * run's outputs are still grouped, named and readable, which is the part a
- * reader is looking at.
- */
-function drawFallbackFrame(ea: ExcalidrawAutomate, frame: RunFrame): string {
-  ea.style.strokeColor = FRAME_INK
-  ea.style.backgroundColor = 'transparent'
-  ea.style.strokeWidth = PLAIN_STROKE
-  const id = ea.addRect(frame.box.x, frame.box.y, frame.box.width, frame.box.height)
-  ea.addText(frame.box.x, frame.box.y - FRAME_TITLE_GAP, frame.name, { width: frame.box.width })
-  return id
-}
-
-/** Excalidraw's own grey, for a frame that is a container and not a drawing of one. */
-const FRAME_INK = '#868e96'
 
 /**
  * Writes edits back to the node they came from. `false` means there was nothing

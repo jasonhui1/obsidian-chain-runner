@@ -346,7 +346,8 @@ export type NodeRunStatus =
   | { kind: 'idle' }
   | { kind: 'running'; done: number; total?: number }
   | { kind: 'done' }
-  | { kind: 'failed' }
+  /** `error` is the engine's own words for what went wrong, when it had any. */
+  | { kind: 'failed'; error?: string }
 
 /**
  * The `▶ Run` line's words for a status.
@@ -354,14 +355,32 @@ export type NodeRunStatus =
  * A settled run keeps `▶ Run` on the line: the outcome is worth reading, and the
  * node is still the thing you click to run it again. A running one does not —
  * clicking it again while it is going is not an offer this makes.
+ *
+ * A failure carries the engine's own message, trimmed to the line. A notice is
+ * gone by the time the reader looks back at the drawing, and the node is what
+ * they look at — so the reason has to live where the failure does.
  */
 export function runLabel(status: NodeRunStatus): string {
   if (status.kind === 'running') {
     return status.total === undefined ? '⏳ running' : `⏳ ${status.done}/${status.total}`
   }
   if (status.kind === 'done') return `✓ done · ${RUN_LABEL}`
-  if (status.kind === 'failed') return `✕ failed · ${RUN_LABEL}`
+  if (status.kind === 'failed') return `✕ ${failureWords(status.error)} · ${RUN_LABEL}`
   return RUN_LABEL
+}
+
+/**
+ * How much of the engine's message the line can hold. The `▶ Run` that follows
+ * it and the box's own padding take the rest; a message longer than this is cut
+ * rather than pushing the node out of shape, and the whole of it was said as a
+ * notice when it happened.
+ */
+const MOST_FAILURE_CHARS = 28
+
+function failureWords(error: string | undefined): string {
+  const said = (error ?? '').trim().split('\n')[0] ?? ''
+  if (said === '') return 'failed'
+  return said.length <= MOST_FAILURE_CHARS ? said : `${said.slice(0, MOST_FAILURE_CHARS - 1).trimEnd()}…`
 }
 
 /**
