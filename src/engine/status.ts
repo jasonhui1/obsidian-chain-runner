@@ -1,9 +1,6 @@
 /**
- * Whether the engine is reachable, kept current by a gentle poll.
- *
- * `unknown` is the state before the first answer, so a pill can say "checking"
- * instead of claiming the engine is down while the first request is still in
- * flight.
+ * Whether the engine is reachable, kept current by a poll. `unknown` is the
+ * state before the first answer, so a pill can say "checking".
  */
 export type EngineState = 'unknown' | 'online' | 'offline'
 
@@ -16,11 +13,7 @@ export interface EngineStatusOptions {
   intervalMs?: number
 }
 
-/**
- * Owns the poll loop and nothing else — it takes a reachability check rather
- * than a client, so the plugin's status pill can be driven by a fake in a test
- * and by a real socket at runtime.
- */
+/** Owns the poll loop; it takes a reachability check rather than a client. */
 export class EngineStatus {
   readonly intervalMs: number
   private current: EngineState = 'unknown'
@@ -63,10 +56,7 @@ export class EngineStatus {
     this.timer = undefined
   }
 
-  /**
-   * Checks now and returns what was found — the call a settings change or an
-   * action about to need the engine makes, rather than waiting out an interval.
-   */
+  /** Checks now rather than waiting out an interval, and returns what was found. */
   async refresh(): Promise<EngineState> {
     await this.poll()
     return this.current
@@ -74,8 +64,7 @@ export class EngineStatus {
 
   /** The check a caller is waiting on: the one already running, or a new one. */
   private poll(): Promise<void> {
-    // Joining an in-flight check rather than starting a second one keeps a slow
-    // engine from stacking polls, without ever handing back a stale answer.
+    // Joining an in-flight check keeps a slow engine from stacking polls.
     this.inFlight ??= this.runPoll().finally(() => {
       this.inFlight = undefined
       this.rearm()
@@ -83,10 +72,7 @@ export class EngineStatus {
     return this.inFlight
   }
 
-  /**
-   * Records first-hand evidence that the engine is gone — a request that failed
-   * to reach it. Cheaper and more current than waiting out the next interval.
-   */
+  /** Records first-hand evidence that the engine is gone: a request that never reached it. */
   markOffline(): void {
     this.set('offline')
   }

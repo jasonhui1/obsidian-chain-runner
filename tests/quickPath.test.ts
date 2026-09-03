@@ -7,8 +7,7 @@ import { FakeEngine, frame } from './fakeEngine'
 
 /**
  * The quick path end to end: SSE off a real socket, through the client, into the
- * fold, out as the panels the view draws. The pieces are checked on their own
- * elsewhere; this checks that a run on the wire becomes a timeline.
+ * fold, out as the panels the view draws.
  */
 
 let engine: FakeEngine

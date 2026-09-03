@@ -1,8 +1,6 @@
 /**
  * Server-sent-event framing, reduced to what the run API sends: `data:` frames
- * holding one JSON value each. Framing and transport are separate so the same
- * parser serves any byte source — a socket in the plugin, a string generator
- * in a test.
+ * holding one JSON value each. Any byte source will do.
  */
 
 const FRAME_SEPARATOR = /\r?\n\r?\n/

@@ -3,15 +3,13 @@ import { QuickRunner } from '@/ui/quickRun'
 import type { EngineClient } from '@/engine/client'
 import type { RunResult } from '@/run/session'
 import type { App } from 'obsidian'
-// The stub `obsidian` resolves to at test time. Its helpers are imported by path
-// rather than through the alias, so `tsc` still checks the plugin against the
-// real module's types.
+// The test-time `obsidian` stub, imported by path so `tsc` still checks the
+// plugin against the real module's types.
 import { MarkdownView, lastModal, resetModals } from './obsidian'
 
 /**
  * The seam between Obsidian and the run: which note the command reads, how much
- * of it, and what it asks before launching. The pieces below it are checked on
- * their own; this checks the wiring the ticket's acceptance criteria live in.
+ * of it, and what it asks before launching.
  */
 
 const CHAINS = [

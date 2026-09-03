@@ -7,11 +7,7 @@ import { seedLine, type RunResult, type RunStatus } from '../run/session'
 
 export const RESULT_VIEW_TYPE = 'chain-runner-result'
 
-/**
- * What a reader can do with one panel: keep it as a note, or put it on a
- * drawing. Both write to the vault, so neither is the view's to do — it draws
- * the two words and says which panel was clicked.
- */
+/** What a reader can do with one panel. Both write to the vault, so neither is the view's. */
 export interface PanelActions {
   saveAsNote: (panel: RunPanel, run: RunResult) => void
   sendToDrawing: (panel: RunPanel, run: RunResult) => void
@@ -24,14 +20,10 @@ const STATUS_LABEL: Record<RunStatus, string> = {
 }
 
 /**
- * Where the quick path reads: one panel per declared output, in the shape the
- * chain asked for, streaming as the run happens.
- *
- * The view decides nothing about the run. It is handed a `RunResult` and draws
- * it; what the panels are, what state each is in and what a state says all come
- * from `src/run/`, and where each panel lands from `./arrangement`, all of them
- * checkable without a vault. What lands here is the three things only a view can
- * do: markdown, how often to redraw, and what a click means.
+ * Where the quick path reads: one panel per declared output, streaming as the
+ * run happens. The view decides nothing — what the panels are comes from
+ * `src/run/` and where they land from `./arrangement`. Only markdown, redraw
+ * rate and clicks are here.
  */
 export class RunResultView extends ItemView {
   private result: RunResult | undefined
@@ -39,22 +31,12 @@ export class RunResultView extends ItemView {
   private sourcePath = ''
   private readonly throttle = createThrottle()
   /**
-   * Owns the render children of the draw on screen.
-   *
-   * `MarkdownRenderer.render` registers a child on the component it is handed,
-   * and at ten draws a second a long run would leave hundreds of them attached
-   * to the view until it closed — exactly the cost the throttle exists to avoid.
-   * Each draw gets its own host, and the previous one is unloaded with the
-   * elements it rendered into.
+   * Owns the render children of the draw on screen. `MarkdownRenderer.render`
+   * registers a child on the component it is handed, so each draw gets its own
+   * host and the previous one is unloaded rather than accumulating.
    */
   private renderHost: Component | undefined
-  /**
-   * The round the reader clicked in a sidebar layout, if they have clicked one.
-   *
-   * Unset means the detail pane follows the run — which is what a reader wants
-   * until the moment they go back to look at an earlier round, and what they
-   * want again on the next run.
-   */
+  /** The round clicked in a sidebar layout; unset means the detail follows the run. */
   private pickedRound: number | undefined
 
   constructor(
@@ -86,17 +68,12 @@ export class RunResultView extends ItemView {
   }
 
   /**
-   * Shows a run, throttled while it streams.
-   *
-   * A settled run redraws at once and drops whatever frame was held: the last
-   * thing a reader sees must be the finished run, not a frame from just before
-   * it landed.
+   * Shows a run, throttled while it streams. A settled one redraws at once and
+   * drops the held frame, so the last thing seen is the finished run.
    */
   show(result: RunResult, sourcePath: string): void {
-    // The round the reader was reading belonged to the run before this one. A
-    // launch's first draw is the one moment a running run has no panels — the
-    // engine's first frame has not landed — and that holds for a run started
-    // while the last one was still going, which a status edge would miss.
+    // A running run with no panels is a launch's first draw, including one that
+    // superseded a run still going — where a status edge would miss it.
     if (result.status === 'running' && result.layout.panels.length === 0) this.pickedRound = undefined
     this.result = result
     this.sourcePath = sourcePath
@@ -131,11 +108,7 @@ export class RunResultView extends ItemView {
     this.drawArrangement(contentEl, arrangeRun(this.result.layout, this.pickedRound), this.result.status)
   }
 
-  /**
-   * The panels in the shape the chain asked for. Which shape that is comes from
-   * the engine's `kind`, and where each panel lands from `arrangeRun` — this
-   * decides nothing beyond which elements the arrangement becomes.
-   */
+  /** The arrangement as elements; `arrangeRun` has already decided what goes where. */
   private drawArrangement(parent: HTMLElement, arrangement: Arrangement, status: RunStatus): void {
     if (arrangement.kind === 'columns') {
       const columns = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--columns' })
@@ -165,16 +138,14 @@ export class RunResultView extends ItemView {
     const { panel } = entry
     const el = parent.createDiv({ cls: `chain-runner-round chain-runner-round--${panel.state}` })
     if (entry.selected) el.addClass('chain-runner-round--selected')
-    // A loop runs one node over and over, so every round can carry the same
-    // name; the iteration is the only thing that tells the rows apart. It is
-    // 0-based on the wire and 1-based to read.
+    // Rounds of a loop share a name, so the iteration is what tells rows apart.
+    // 0-based on the wire, 1-based to read.
     if (entry.round !== undefined) {
       el.createSpan({ cls: 'chain-runner-round-number', text: String(entry.round + 1) })
     }
     el.createSpan({ cls: 'chain-runner-round-name', text: panel.name })
     this.drawLines(el, 'chain-runner-round-lines', panel)
-    // Picking a round is the reader taking over from the run; redraw at once
-    // rather than through the throttle, so the click feels like a click.
+    // Redraw at once, not through the throttle, so the click feels like a click.
     el.onclick = (): void => {
       this.pickedRound = entry.index
       this.throttle.cancel()
@@ -216,12 +187,8 @@ export class RunResultView extends ItemView {
   }
 
   /**
-   * The two things a reader can do with a panel worth keeping.
-   *
-   * Offered on a settled, filled panel of a run that has an id, and on no other:
-   * an output note is stamped with the run id, and the engine reports that when
-   * the run finishes. So the actions appear as the run lands, which is also when
-   * a reader has read enough to want one.
+   * The two things a reader can do with a panel worth keeping. Offered only on a
+   * filled panel of a run with an id, since an output note is stamped with it.
    */
   private drawActions(parent: HTMLElement, panel: RunPanel): void {
     const run = this.result
@@ -234,8 +201,7 @@ export class RunResultView extends ItemView {
   private drawAction(parent: HTMLElement, label: string, onClick: () => void): void {
     const el = parent.createEl('button', { cls: 'chain-runner-panel-action', text: label })
     el.onclick = (event): void => {
-      // The panel is not itself clickable, but a round row above it is; a click
-      // on an action is about the action and nothing else.
+      // A round row above the panel is clickable; this click is not for it.
       event.stopPropagation()
       onClick()
     }
@@ -258,8 +224,8 @@ export class RunResultView extends ItemView {
     const text = panel.state === 'filled' ? panel.text : (panel.streaming ?? '')
     if (text === '') return
     const body = el.createDiv({ cls: 'chain-runner-panel-body' })
-    // Each draw builds its own body, so a render that resolves after the next
-    // draw writes into an element already off the page rather than over the new one.
+    // Each draw builds its own body, so a late render writes into an element
+    // already off the page rather than over the new one.
     void MarkdownRenderer.render(this.app, text, body, this.sourcePath, this.renderHost ?? this)
   }
 }

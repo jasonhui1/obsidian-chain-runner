@@ -45,21 +45,15 @@ interface RawChain {
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 /**
- * What `ping` asks for. `/api/workspace` would answer too, but it reads and
- * serialises every agent, skill, chain, tool and template on disk — too much to
- * repeat every few seconds. A run id nothing can match is answered from a
- * single failed file read, and the answer's status does not matter: any reply
- * at all means the engine is there.
+ * What `ping` asks for: a run id nothing matches, answered from one failed file
+ * read. `/api/workspace` would serialise the whole workspace every few seconds.
  */
 const PROBE_PATH = '/api/runs/chain-runner-probe'
 
 /**
- * The engine as this plugin sees it: four calls, and a reachability check.
- *
- * The base URL is read per call rather than captured, so changing it in
- * settings takes effect on the next request with nothing to re-wire. Every
- * failure to reach the engine surfaces as `EngineOfflineError`, which is the
- * single condition the status pill and the offline guard react to.
+ * The engine as this plugin sees it: four calls, and a reachability check. The
+ * base URL is read per call, so a settings change takes effect on the next one.
+ * Every failure to reach it surfaces as `EngineOfflineError`.
  */
 export class EngineClient {
   constructor(
@@ -68,9 +62,8 @@ export class EngineClient {
   ) {}
 
   /**
-   * The workspace, with the engine's own account of what it supports. An engine
-   * too old to report `capabilities` yields an empty one, which reads as
-   * supporting nothing — the caller decides whether that is fatal (ADR-0017).
+   * The workspace, with the engine's account of what it supports. One too old to
+   * report `capabilities` yields an empty one, which supports nothing (ADR-0017).
    */
   async loadWorkspace(): Promise<Workspace> {
     const workspace = await this.getJson<WorkspaceResponse>('/api/workspace')
@@ -94,9 +87,8 @@ export class EngineClient {
   }
 
   /**
-   * Starts a run and yields its events as they arrive. An engine `error` event
-   * is yielded, not thrown — the run reached the engine and the engine has
-   * something to say. Only an unreachable engine or a rejected request throws.
+   * Starts a run and yields its events. An engine `error` event is yielded, not
+   * thrown; only an unreachable engine or a rejected request throws.
    */
   async *launchRun(request: RunRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
     const url = this.resolve('/api/run')
@@ -115,18 +107,13 @@ export class EngineClient {
     }
   }
 
-  /**
-   * Whether the engine is there. An engine that answers with an error is still
-   * up — only an unreachable one is offline, so a broken workspace does not
-   * read as a stopped server.
-   */
+  /** Whether the engine is there. One that answers with an error is still up. */
   async ping(signal?: AbortSignal): Promise<boolean> {
     let url: string
     try {
       url = this.resolve(PROBE_PATH)
     } catch {
-      // A base URL that will not parse can never be reached either; the settings
-      // tab is where that gets fixed, not a thrown poll.
+      // A base URL that will not parse can never be reached either.
       return false
     }
     try {
@@ -166,16 +153,14 @@ function withTrailingSlash(base: string): string {
 
 function summarise(chain: RawChain): ChainSummary {
   const summary: ChainSummary = { slug: chain.slug, name: chain.name }
-  // Every chain carries a `description`; an empty one is the same as none to the
-  // picker, which falls back to it only when there is something to fall back to.
+  // An empty `description` is the same as none: there is nothing to fall back to.
   if (chain.description) summary.description = chain.description
   if (chain.moment !== undefined) summary.moment = chain.moment
   if (chain.purpose !== undefined) summary.purpose = chain.purpose
   if (chain.parameter) {
     summary.parameter = { name: chain.parameter.name, options: chain.parameter.options }
   }
-  // A chain's layout is half `view` and half `outputs`; the result view needs both
-  // to draw the panels the engine would draw for the same run.
+  // A chain's layout is half `view` and half `outputs`; the result view needs both.
   const view = declaredView(chain.view)
   if (view !== undefined) summary.view = view
   if (chain.outputs !== undefined) summary.outputs = chain.outputs.map(summarisePort)

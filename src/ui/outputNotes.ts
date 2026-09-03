@@ -47,9 +47,8 @@ export class OutputNotes {
 
   /**
    * A note created empty and rewritten as its panel fills. The path is settled
-   * once: Excalidraw stores it inside its scene file, which Obsidian's
-   * link-updating does not reach, so a note that moved would leave a dead
-   * embeddable.
+   * once: Excalidraw stores it in its scene file, out of reach of Obsidian's
+   * link-updating, so a moved note would leave a dead embeddable.
    */
   async open(panel: RunPanel, run: RunProvenance): Promise<OpenOutputNote | undefined> {
     return this.inFolder(panel, run, async (meta, wanted) => {

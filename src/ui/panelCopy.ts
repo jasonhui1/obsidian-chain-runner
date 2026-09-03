@@ -2,11 +2,8 @@ import type { RunPanel } from '../run/panels'
 import type { RunStatus } from '../run/session'
 
 /**
- * What a panel says when it has nothing to show, and the one thing that says it.
- *
- * The wording is the engine's result view's, so the same run reads the same on
- * both surfaces. `tone` names the condition rather than a colour; the stylesheet
- * decides what that looks like, in whichever theme is on.
+ * What a panel says when it has nothing to show. The wording is the engine's
+ * result view's; `tone` names the condition, and the stylesheet colours it.
  */
 export type PanelTone = 'writing' | 'waiting' | 'empty' | 'errored' | 'skipped'
 
@@ -26,8 +23,7 @@ export function noticeFor(panel: RunPanel, status: RunStatus): PanelNotice | nul
   if (panel.state === 'filled') return null
   // Text on screen already says the hop is working; the cue only names what it is.
   if (panel.streaming) return { text: 'writing…', tone: 'writing' }
-  // A settled run has nothing left to wait for, so a pending panel here is a node
-  // that never ran rather than one still coming.
+  // A pending panel on a settled run is a node that never ran.
   if (panel.state === 'pending') {
     return { text: status === 'running' ? 'waiting' : 'never ran', tone: 'waiting' }
   }

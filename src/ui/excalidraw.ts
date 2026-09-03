@@ -13,12 +13,8 @@ import { nodeBox, resolveInputs, type Box, type NodeInputs, type SceneShape } fr
 import type { FramedPanel, RunFrame } from '../run/runFrame'
 
 /**
- * The Excalidraw plugin, as this plugin reaches it.
- *
- * Everything here is a fact about the other plugin — its id, its minimum
- * version, the calls the spike found work (`docs/spike-ea.md`) — kept in one
- * file so a change on their side is a change in one place on ours. What is
- * *drawn* is not decided here; that is `./drawingChoices` and the caller.
+ * The Excalidraw plugin, as this plugin reaches it (`docs/spike-ea.md`). What is
+ * *drawn* is decided by `./drawingChoices` and the caller, not here.
  */
 
 const PLUGIN_ID = 'obsidian-excalidraw-plugin'
@@ -26,14 +22,10 @@ const PLUGIN_ID = 'obsidian-excalidraw-plugin'
 /** The view type Excalidraw registers. A drawing open as markdown is not one. */
 const EXCALIDRAW_VIEW = 'excalidraw'
 
-/**
- * Every call below predates 2.0, so this excludes the 1.x line without
- * excluding anyone on a current release. Verified against 2.26.4; raise it
- * rather than lower it if a 2.x user reports trouble (`docs/spike-ea.md`).
- */
+/** Every call below predates 2.0; verified against 2.26.4 (`docs/spike-ea.md`). */
 const MINIMUM_VERSION = '2.0.0'
 
-/** The embeddable's size on the drawing. The reader resizes it afterwards; they own it. */
+/** The embeddable's starting size; the reader resizes it afterwards. */
 const EMBEDDABLE_WIDTH = 400
 const EMBEDDABLE_HEIGHT = 300
 
@@ -42,9 +34,8 @@ const VIEW_READY_TIMEOUT_MS = 3000
 const VIEW_READY_POLL_MS = 50
 
 /**
- * The slice of ExcalidrawAutomate this plugin calls. Typed here rather than
- * imported: Excalidraw is a runtime dependency reached through `app.plugins`,
- * and a compile-time import would make an optional plugin a build dependency.
+ * The slice of ExcalidrawAutomate this plugin calls. Typed rather than imported:
+ * an import would make an optional plugin a build dependency.
  */
 interface ExcalidrawAutomate {
   verifyMinimumPluginVersion(version: string): boolean
@@ -87,10 +78,7 @@ interface SceneElement extends SceneShape {
   frameId?: string | null
 }
 
-/**
- * The hook a link click goes through, in EA's own positional shape. Returning
- * `false` stops Excalidraw opening the link (`docs/spike-ea.md`, Q1).
- */
+/** EA's link-click hook; returning `false` stops the link opening (`docs/spike-ea.md`, Q1). */
 type LinkClickHook = (
   element: SceneElement,
   linkText: string,
@@ -110,10 +98,8 @@ export interface DrawingSurface {
 }
 
 /**
- * A live Excalidraw view, as this plugin passes one around: opaque, because the
- * only thing done with it is handing it back to `setView`. A click arrives with
- * the view it happened in, which is the only way to reach a drawing embedded in
- * a note — that one is not a tab, so it can never be found by looking at tabs.
+ * A live Excalidraw view: opaque, since it is only handed back to `setView`. A
+ * click carries its own view, the only handle on a drawing embedded in a note.
  */
 export type DrawingView = unknown
 
@@ -139,10 +125,7 @@ export interface NodeSurface {
   hasActiveDrawing(): boolean
   /** Puts a built node on that drawing, at the cursor, and saves. */
   place(elements: ChainNodeElement[]): Promise<void>
-  /**
-   * Rewrites a node's parameter where it stands, on `on` when a click named the
-   * view it happened in. `false` means the node is no longer there.
-   */
+  /** Rewrites a node's parameter in place. `false` means the node is no longer there. */
   setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
   /** What a node is bound to and where it sits; `undefined` when it is gone. */
   read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
@@ -166,9 +149,7 @@ export function createDrawingSurface(app: App): DrawingSurface {
           .filter(file => isDrawing(app, file))
           .map(file => ({ path: file.path, name: file.basename, mtime: file.stat.mtime })),
         open: openDrawings(app),
-        // Obsidian's recent list is newest-first and holds paths of files that
-        // may since have been deleted; `drawingChoices` drops what the vault
-        // no longer has.
+        // Newest-first, and may name deleted files; `drawingChoices` drops those.
         recent: app.workspace.getLastOpenFiles(),
       }),
     place: async (drawing, note) => {
@@ -176,12 +157,10 @@ export function createDrawingSurface(app: App): DrawingSurface {
       if (!ea) throw new Error(NO_EXCALIDRAW)
       const view = await openDrawing(app, drawing.path)
       ea.reset()
-      // The binding goes stale whenever the reader switches tabs, so it is set
-      // at the entry point on every call rather than once at startup.
+      // The binding goes stale when the reader switches tabs, so it is set per call.
       ea.setView(view)
       ea.addEmbeddable(0, 0, EMBEDDABLE_WIDTH, EMBEDDABLE_HEIGHT, undefined, note)
-      // Reposition to the cursor, and save: the reader put the cursor where they
-      // want the note, and a drawing that loses the piece on reload kept nothing.
+      // Reposition to the cursor, and save.
       await ea.addElementsToView(true, true)
     },
   }
@@ -192,11 +171,8 @@ export const NOT_A_DRAWING = 'Open the Excalidraw drawing as its own tab to do t
 
 export function createNodeSurface(app: App): NodeSurface {
   /**
-   * The one place a node action reaches Excalidraw: the handle, bound to a view.
-   *
-   * A click hands over the view it happened in, and that one is used in
-   * preference to the tab in front — a drawing embedded in a note is not a tab,
-   * so looking for one would refuse a click that plainly arrived from a drawing.
+   * The one place a node action reaches Excalidraw. A click's own view wins over
+   * the tab in front: a drawing embedded in a note is not a tab.
    */
   const bind = (on?: DrawingView): { ea: ExcalidrawAutomate; view: DrawingView } => {
     const ea = automate(app)
@@ -204,8 +180,7 @@ export function createNodeSurface(app: App): NodeSurface {
     const view = on ?? activeDrawing(app)
     if (!view) throw new Error(NOT_A_DRAWING)
     ea.reset()
-    // The binding goes stale whenever the reader switches tabs, so it is set at
-    // the entry point on every call rather than once at startup.
+    // The binding goes stale when the reader switches tabs, so it is set per call.
     ea.setView(view)
     return { ea, view }
   }
@@ -218,10 +193,9 @@ export function createNodeSurface(app: App): NodeSurface {
     place: async elements => {
       const { ea } = bind()
       const ids = elements.map(element => draw(ea, element))
-      // One group, so the five elements move, copy and delete as the one node
-      // they read as. The reader can still ungroup it; it is their drawing.
+      // One group, so the node's elements move, copy and delete together.
       if (ids.length > 1) ea.addToGroup(ids)
-      // Reposition to the cursor: the reader put it where they want the node.
+      // Reposition to the cursor.
       await ea.addElementsToView(true, true)
     },
 
@@ -265,15 +239,14 @@ export function createNodeSurface(app: App): NodeSurface {
   }
 }
 
-/** A run's outputs are drawn heavier when they are what the layout is about. */
+/** Outputs the layout is about are drawn heavier. */
 const EMPHASIS_STROKE = 4
 const PLAIN_STROKE = 1
 
 /** `false` means the node was deleted between the click and the write. */
 async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): Promise<boolean> {
   if (edits.length === 0) return false
-  // Editing in place rather than adding: the copies keep their ids, so
-  // writing them back updates the node instead of drawing a second one.
+  // The copies keep their ids, so writing them back updates the node in place.
   ea.copyViewElementsToEAforEditing(edits.map(edit => edit.element))
   for (const edit of edits) {
     const element = ea.getElement(edit.element.id)
@@ -315,8 +288,8 @@ function draw(ea: ExcalidrawAutomate, element: ChainNodeElement): string {
         })
   const made = ea.getElement(id)
   if (made) {
-    // A link is what makes a line clickable at all; the click is recognised by
-    // `customData`, which is also what survives a move, a copy and a reload.
+    // The link makes the line clickable; `customData` is what the click is
+    // recognised by, and what survives a move, a copy and a reload.
     made.link = element.link ?? null
     made.customData = element.customData
   }
@@ -330,11 +303,9 @@ function drawRect(ea: ExcalidrawAutomate, element: ChainNodeElement): string {
 }
 
 /**
- * Intercepts link clicks so a chain node's own links never open anything.
- *
- * Anything the handler does not claim falls through to whatever hook was already
- * installed, and the returned function puts that hook back. EA holds one hook,
- * so a plugin that installs its own after this one wins until it unloads.
+ * Intercepts link clicks so a chain node's own links never open anything. What
+ * the handler does not claim falls through to the previous hook, which the
+ * returned function puts back. EA holds one hook, so the last installer wins.
  */
 export function registerLinkHook(
   app: App,
@@ -344,8 +315,6 @@ export function registerLinkHook(
   if (!ea) return () => {}
   const previous = ea.onLinkClickHook
   ea.onLinkClickHook = (element, linkText, event, view, self) => {
-    // The view the click happened in goes to the handler: it is the only handle
-    // on a drawing embedded in a note, which is not a tab and cannot be found.
     if (!handler(element, view)) return false
     return previous ? previous(element, linkText, event, view, self) : true
   }
@@ -361,16 +330,15 @@ function activeDrawing(app: App): unknown | undefined {
 }
 
 function automate(app: App): ExcalidrawAutomate | undefined {
-  // Reached through the plugin instance rather than the window global: both
-  // exist, and this one keeps the dependency explicit (`docs/spike-ea.md`).
+  // Through the plugin instance, not the window global, to keep the dependency
+  // explicit (`docs/spike-ea.md`).
   const plugins = (app as unknown as { plugins?: { plugins?: Record<string, { ea?: ExcalidrawAutomate }> } }).plugins
   return plugins?.plugins?.[PLUGIN_ID]?.ea
 }
 
 /**
- * Whether a file is a drawing. The path answers for both of Excalidraw's file
- * shapes; an ordinary note marked as a drawing in its frontmatter can only be
- * recognised through the metadata cache, so both are asked.
+ * Whether a file is a drawing. The path covers Excalidraw's own file shapes; an
+ * ordinary note marked as a drawing shows only in its frontmatter.
  */
 function isDrawing(app: App, file: TFile): boolean {
   if (isDrawingPath(file.path)) return true
@@ -387,21 +355,15 @@ function openDrawings(app: App): string[] {
   return paths
 }
 
-/**
- * Every leaf and the file it holds. The cast is the one place this plugin
- * assumes a view knows its file, which not every view does — so it is made once,
- * here, rather than at each walk.
- */
+/** Every leaf and the file it holds; the one place a view is assumed to know its file. */
 function eachLeaf(app: App, visit: (leaf: WorkspaceLeaf, file: TFile | undefined) => void): void {
   app.workspace.iterateAllLeaves(leaf => visit(leaf, (leaf.view as { file?: TFile }).file))
 }
 
 /**
- * The drawing's live view: the tab it is already in, or a new one.
- *
- * A drawing opened just now is not an Excalidraw view yet — the plugin builds it
- * a beat later, and `setView` on the half-built one fails silently, drawing
- * nothing (`docs/spike-ea.md`). So the view is waited for rather than assumed.
+ * The drawing's live view: the tab it is already in, or a new one. The view is
+ * waited for because `setView` on a half-built one fails silently
+ * (`docs/spike-ea.md`).
  */
 async function openDrawing(app: App, path: string): Promise<unknown> {
   const file = app.vault.getAbstractFileByPath(path)
@@ -423,12 +385,8 @@ async function openDrawing(app: App, path: string): Promise<unknown> {
 }
 
 /**
- * The Excalidraw tab showing this drawing, if there is one.
- *
- * The view type is part of the match, not just the path: a `.excalidraw.md` can
- * also be open as a plain markdown tab, and EA cannot be pointed at that one.
- * Answering with it would wait out the readiness loop and then refuse a drawing
- * that opens perfectly well in a tab of its own.
+ * The Excalidraw tab showing this drawing, if there is one. The view type is
+ * matched too: a `.excalidraw.md` open as plain markdown is not one EA can use.
  */
 function leafShowing(app: App, path: string): WorkspaceLeaf | undefined {
   let found: WorkspaceLeaf | undefined

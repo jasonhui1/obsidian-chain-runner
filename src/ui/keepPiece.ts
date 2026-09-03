@@ -8,14 +8,8 @@ import type { RunResult } from '../run/session'
 
 /**
  * Keeping a piece of a run: the panel becomes a note, and the note optionally
- * lands on a drawing.
- *
- * What the note *is* — its path, its frontmatter, what a collision does — is
- * `src/run/outputNote.ts`, and writing it is `./outputNotes.ts`, which the
- * drawing's own runs share. What is left here is the two actions the result view
- * offers: open what was written, or ask which drawing to put it on. The drawing
- * surface is a seam for the same reason the engine's transport is: Excalidraw
- * cannot be driven from a test.
+ * lands on a drawing. What the note *is* lives in `src/run/outputNote.ts`, and
+ * writing it in `./outputNotes.ts`; only the two result-view actions are here.
  */
 
 export interface KeepPieceDeps {
@@ -40,15 +34,9 @@ export class KeepPiece {
   }
 
   /**
-   * Puts the panel on a drawing as an embeddable, writing its note on the way.
-   *
-   * Everything that could stop the action is checked before the suggester opens,
-   * and the note is written after a drawing is picked — a reader who changes
-   * their mind at the modal should leave nothing behind in the vault.
-   *
-   * The note is written by the same rule `saveAsNote` uses, so a piece sent to a
-   * drawing and a piece saved are the same note: sending after saving reuses
-   * what is already there rather than leaving two copies of one hop.
+   * Puts the panel on a drawing as an embeddable. The note is written only after
+   * a drawing is picked, so backing out at the modal leaves nothing behind, and
+   * by `saveAsNote`'s rule, so saving then sending reuses the one note.
    */
   async sendToDrawing(panel: RunPanel, run: RunResult): Promise<void> {
     if (!run.runId) {

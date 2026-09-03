@@ -43,10 +43,7 @@ export class QuickRunner {
   /** The command. Everything after this is the reader picking, then the stream. */
   async start(): Promise<void> {
     const editing = this.deps.app.workspace.getActiveViewOfType(MarkdownView)
-    // The note and the selection come from one view, never two. A selection left
-    // in another pane is not part of the note in front of you, and taking the
-    // text from one and the name from the other would run one note under the
-    // other's header.
+    // The note and the selection come from one view, never two.
     const note = editing?.file ?? this.deps.app.workspace.getActiveFile()
     if (!note || note.extension !== 'md') {
       this.deps.notify('Open a note to run a chain on it')
@@ -57,17 +54,15 @@ export class QuickRunner {
       noteText: await this.deps.app.vault.cachedRead(note),
     })
     if (seed.text === '') {
-      // A selection that is only whitespace is no selection at all, so an empty
-      // seed here is always an empty note.
+      // A whitespace-only selection is no selection, so this is always an empty note.
       this.deps.notify('This note is empty')
       return
     }
 
     const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
     if (!workspace) return
-    // The panels are the engine's to project (ADR-0001). An engine too old to
-    // stream them cannot be drawn for, and saying so is the whole point of
-    // feature-detecting: the alternative is a view quietly showing a stale rule.
+    // The panels are the engine's to project (ADR-0001), so an engine too old to
+    // stream them is refused rather than drawn for from a stale rule.
     if (!streamsLayout(workspace.capabilities)) {
       this.deps.notify(UNSUPPORTED_ENGINE)
       return
@@ -113,8 +108,7 @@ export class QuickRunner {
     this.inFlight = controller
 
     let state = emptyRunState()
-    // The header names the note and how much of it was read; the seed's own text
-    // has gone to the engine by then and is not the view's to hold.
+    // The header names the note, not the seed text, which has gone to the engine.
     const show = (): void =>
       view.show(
         buildRunResult({ chain, seed: { note: note.name, from: seed.from }, state, paramValue }),

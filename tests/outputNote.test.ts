@@ -3,9 +3,8 @@ import { freeOutputPath, outputNoteContent, outputNotePath, resolveOutputPath } 
 import type { RunPanel } from '@/run/panels'
 
 /**
- * The output-note convention, checked the way every later ticket will use it:
- * a panel and a run's meta in, a file path and a file's content out. Nothing
- * here touches a vault, so the convention is pinned without one.
+ * The output-note convention: a panel and a run's meta in, a path and a file's
+ * content out. Nothing here touches a vault.
  */
 
 const panel = (over: Partial<RunPanel> = {}): RunPanel => ({
@@ -38,8 +37,7 @@ describe('outputNotePath', () => {
 
   it('falls back to a name rather than writing a nameless file', () => {
     expect(outputNotePath(panel({ name: '///' }), meta)).toBe('chains/runs/2026-09-02-ab12c/output.md')
-    // Nothing here is unusable, and nothing survives the trim either — a note
-    // called `.md` would be hidden as well as nameless.
+    // Nothing survives the trim, and a note called `.md` would be hidden.
     expect(outputNotePath(panel({ name: '...' }), meta)).toBe('chains/runs/2026-09-02-ab12c/output.md')
     expect(outputNotePath(panel({ name: '   ' }), meta)).toBe('chains/runs/2026-09-02-ab12c/output.md')
   })

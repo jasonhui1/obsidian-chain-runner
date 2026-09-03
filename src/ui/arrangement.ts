@@ -1,14 +1,9 @@
 import type { RunLayout, RunPanel } from '../run/panels'
 
 /**
- * Where a layout's panels go on screen.
- *
- * Not *what* the panels are — the engine settled that, and this module reads
- * `state`, `emphasis` and `round` without ever deciding one (ADR-0001). What is
- * left is the arrangement: a columns chain reads side by side, a loop reads as a
- * list of rounds with one of them open, and everything else stacks. That is a
- * drawing decision, and it is a pure function so all three shapes are checkable
- * without a vault.
+ * Where a layout's panels go on screen, not what they are (ADR-0001): columns
+ * side by side, a loop as a list of rounds with one open, everything else
+ * stacked.
  */
 
 /** One column of a `columns` layout. */
@@ -34,12 +29,8 @@ export type Arrangement =
   | { kind: 'sidebar'; rounds: RoundEntry[]; detail?: RunPanel }
 
 /**
- * The round to open when the reader has picked none: the one being written, or
- * failing that the last one that landed, or failing that the first.
- *
- * A loop's later rounds are pending for most of the run, so following the front
- * of the run is what keeps the detail pane showing something happening rather
- * than an empty panel the reader has to click away from.
+ * The round to open when the reader has picked none: the one being written, else
+ * the last that landed, else the first — so the detail pane follows the run.
  */
 function frontOfRun(panels: RunPanel[]): number {
   const writing = panels.findLastIndex(panel => Boolean(panel.streaming))
@@ -55,11 +46,8 @@ function selectedRound(panels: RunPanel[], picked: number | undefined): number {
 }
 
 /**
- * How to draw the panels the engine sent.
- *
- * `picked` is the round the reader clicked in a sidebar layout; every other kind
- * ignores it. It is deliberately an index into the panels rather than a round
- * number, so a layout whose panels carry no `round` is still selectable.
+ * How to draw the panels the engine sent. `picked` is a sidebar layout's clicked
+ * round — an index, not a round number, so panels without a `round` still select.
  */
 export function arrangeRun(layout: RunLayout, picked?: number): Arrangement {
   if (layout.kind === 'columns') {

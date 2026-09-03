@@ -1,10 +1,6 @@
 /**
- * Section addressing, ported from the engine's `lib/graph.ts`.
- *
- * A chain's output port may name a section of a node's output rather than the
- * whole of it, and the panel has to resolve that name the same way the engine's
- * edges do — otherwise a panel here and a panel there show different text for
- * the same run. Ported rather than imported: the engine is a separate process.
+ * Section addressing, ported from the engine's `lib/graph.ts` — a port may name a
+ * section of a node's output, and both sides must resolve the name alike.
  */
 
 export function slugify(text: string): string {

@@ -3,11 +3,8 @@ import type { SeedOrigin } from './seed'
 import { isEvent, momentOf, type ChainSummary, type LayoutModel, type RunEvent } from '../engine/types'
 
 /**
- * A run as the result view watches it happen.
- *
- * The fold is separate from the view for the same reason the engine client is
- * separate from the status pill: what a stream of events means is checkable
- * without a vault, and the view is left with nothing to decide.
+ * A run as the result view watches it happen. The fold is kept apart from the
+ * view so what a stream of events means is checkable without a vault.
  */
 
 /**
@@ -19,10 +16,7 @@ export type RunStatus = 'running' | 'done' | 'failed'
 
 export interface RunState {
   nodes: RunNodes
-  /**
-   * The engine's own panels, from the last `layout` frame. Absent only before the
-   * first one, which the engine sends before the run's first hop (ADR-0017).
-   */
+  /** The engine's panels, from the last `layout` frame; absent before the first (ADR-0017). */
   layout?: LayoutModel
   /** The engine's id for this run, which arrives at the end. */
   runId?: string
@@ -36,8 +30,7 @@ export function emptyRunState(): RunState {
   return { nodes: emptyRunNodes(), settled: false }
 }
 
-/** Tokens that are the node's answer. A turn's are its tool narration, and a
- *  thought is its reasoning; the engine overwrites the panel with neither. */
+/** Tokens that are the node's answer, not its tool narration or its reasoning. */
 function isAnswerToken(event: { tokenType?: string; turn?: number }): boolean {
   return event.tokenType !== 'thought' && event.turn === undefined
 }
@@ -77,28 +70,22 @@ export function applyRunEvent(state: RunState, event: RunEvent): RunState {
       nodes: {
         ...state.nodes,
         outputs: [...state.nodes.outputs, { ...event.output, nodeId: event.nodeId }],
-        // The partial is kept, not dropped: the engine's `layout` frame lands a
-        // beat after `agent_done`, and clearing here would blank the panel for
-        // that beat. It stops being read the moment the panel is no longer
-        // pending, and `agent_start` clears it when the node runs again.
+        // The partial is kept: the `layout` frame lands a beat later, and
+        // clearing here would blank the panel for that beat.
         started: withStarted(state.nodes, event.nodeId, event.output.agentName),
       },
     }
   }
 
-  // The panels are the engine's answer, not a projection recomputed here: one
-  // rule, one owner, and a chain edited in the workspace redraws this view
-  // without the plugin changing (ADR-0017).
+  // The engine's own projection, not one recomputed here (ADR-0017).
   if (isEvent(event, 'layout')) return { ...state, layout: event.model }
 
-  // Both carry the same id; the first is what lets a surface file its outputs
-  // while the run is still going.
+  // Both carry the same id; the first arrives early enough to file outputs mid-run.
   if (isEvent(event, 'run_start')) return { ...state, runId: event.runId }
   if (isEvent(event, 'run_complete')) return { ...state, runId: event.runId }
   if (isEvent(event, 'error')) return { ...state, error: event.error }
 
-  // Tool turns and section warnings reach here and are not modelled; a later
-  // ticket reads them without this fold changing shape.
+  // Tool turns and section warnings reach here and are not modelled.
   return state
 }
 
@@ -112,11 +99,7 @@ export function settleRun(state: RunState, error?: string): RunState {
 
 /**
  * The seed of a run, as the header names it: which note, and how much of it.
- *
- * `Seed` in `./seed` is the same fact for the other audience — it carries the
- * text, because the engine is sent the words and not the note they came from.
- * Neither side wants the other's half, so they stay two records rather than one
- * the view would have to hold a whole note in.
+ * `Seed` in `./seed` is the engine's half — the words, not the note.
  */
 export interface RunSeed {
   /** The name of the note the run was invoked on. */
@@ -124,11 +107,7 @@ export interface RunSeed {
   from: SeedOrigin
 }
 
-/**
- * The header's one line about the seed. A selection run covers less than the
- * note it was taken from, so it says which of the two happened; a whole-note run
- * needs no qualifier, and adding one to every run would say nothing.
- */
+/** The header's one line about the seed; only a selection run needs the qualifier. */
 export function seedLine(seed: RunSeed): string {
   return seed.from === 'selection' ? `seed: ${seed.note} (selection)` : `seed: ${seed.note}`
 }
@@ -138,10 +117,6 @@ export interface RunResult {
   chainName: string
   /** The situation this chain is for; its description when it states no moment. */
   moment: string
-  /**
-   * Where the seed came from: the note the run was invoked on, and whether the
-   * whole of it was read or only the passage that was selected.
-   */
   seed: RunSeed
   /** The dropdown the chain declared and what it was set to, when it declared one. */
   parameter?: { name: string; value: string }

@@ -1,14 +1,9 @@
 import { momentOf, type ChainPurpose, type ChainSummary } from '../engine/types'
 
 /**
- * What the chain picker shows, and in what order — decided here so the modal is
- * left with drawing only.
- *
- * The four headings and their order are the engine's own (ADR-0016): a chain
- * declares which group it belongs to, and one that declares nothing sits under
- * the fourth rather than inside a group it never chose. The one departure from
- * the playground's picker is that an empty heading is dropped rather than drawn:
- * a modal filtered to two results has no room to say what it has none of.
+ * What the chain picker shows, and in what order, so the modal is left with
+ * drawing only. The four headings are the engine's own (ADR-0016); unlike the
+ * playground's picker, an empty heading is dropped rather than drawn.
  */
 export const PURPOSE_HEADINGS: { heading: string; purpose?: ChainPurpose }[] = [
   { heading: '洞見 (insight)', purpose: 'insight' },
@@ -30,18 +25,13 @@ export interface PickerRow {
   groupStart: boolean
   /** The situation the chain is for; its description when it states no moment. */
   note: string
-  /**
-   * Whether the note this was invoked on reaches the chain at all. A chain that
-   * declares no seed node reads the files it pins instead, and running it on a
-   * note without saying so would look like the note was ignored.
-   */
+  /** Whether the note reaches the chain at all; an unseeded one reads the files it pins. */
   readsNote: boolean
 }
 
 /**
- * The name is what a reader is most likely typing, so a hit there outranks the
- * same hit in the sentence beneath it. Every field is searched, though: the
- * moment is often the only part of a chain anyone remembers.
+ * A hit in the name outranks the same hit beneath it. Every field is searched:
+ * the moment is often the only part of a chain anyone remembers.
  */
 function scoreOf(chain: ChainSummary, match: Matcher): number | null {
   const fields: [string | undefined, number][] = [
@@ -64,9 +54,8 @@ function scoreOf(chain: ChainSummary, match: Matcher): number | null {
 
 
 /**
- * The picker's rows for what was typed: groups in heading order, and within a
- * group the best match first. Group order wins over score — headings that
- * reshuffled as the reader typed would cost more than a better ranking buys.
+ * The picker's rows: groups in heading order, best match first within a group.
+ * Group order wins over score, so headings never reshuffle as the reader types.
  */
 export function pickerRows(chains: ChainSummary[], query: string, fuzzy: FuzzySearch): PickerRow[] {
   const trimmed = query.trim()
@@ -80,16 +69,14 @@ export function pickerRows(chains: ChainSummary[], query: string, fuzzy: FuzzySe
 
   return PURPOSE_HEADINGS.flatMap(({ heading, purpose }) => {
     const group = scored.filter(({ chain }) => (purpose ? chain.purpose === purpose : !chain.purpose))
-    // A stable sort leaves an unqueried list in workspace order, which is the
-    // order the playground's own picker shows.
+    // Unsorted leaves an unqueried list in workspace order, as the playground shows it.
     if (match) group.sort((a, b) => b.score - a.score)
     return group.map(({ chain }, index) => ({
       chain,
       heading,
       groupStart: index === 0,
       note: momentOf(chain),
-      // A workspace too old to report its nodes says nothing either way; the
-      // common case is a chain that takes a seed, so that is what is assumed.
+      // A workspace too old to report its nodes says nothing; assume seeded.
       readsNote: chain.seeded !== false,
     }))
   })

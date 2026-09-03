@@ -9,12 +9,8 @@ import { lastModal, openedModals, resetModals } from './obsidian'
 
 /**
  * The seam between a chain node and the drawing it sits on: what the command
- * asks before it places anything, and what a click on either of the node's two
- * links does.
- *
- * The node's own shape is checked in `chainNode.test.ts`; Excalidraw is behind
- * the surface, for the same reason the engine is behind a transport — it cannot
- * be driven from a test.
+ * asks before placing anything, and what a click on either link does. The node's
+ * own shape is checked in `chainNode.test.ts`.
  */
 
 const personas: ChainSummary = {
@@ -43,8 +39,7 @@ function makeNodes(): ChainNodes {
   const surface: NodeSurface = {
     unavailable: () => unavailable,
     hasActiveDrawing: () => drawingOpen,
-    // The run's own seam is `nodeRun.test.ts`; this one only checks that a click
-    // reaches it, so the three calls a run makes are never reached from here.
+    // This only checks that a click reaches the run; `nodeRun.test.ts` has the rest.
     read: () => undefined,
     setRunStatus: () => Promise.resolve(true),
     placeRun: () => Promise.resolve(true),
@@ -188,8 +183,7 @@ describe('clicking the node’s links', () => {
   })
 
   it('rewrites on the drawing the click came from, not on the tab in front', async () => {
-    // A drawing embedded in a note is not a tab, and the hook hands over the
-    // view the click happened in — which is the only handle on that one.
+    // A drawing embedded in a note is not a tab; the click's own view is the handle.
     const embedded = { embedded: true }
     makeNodes().handleLinkClick(element(), embedded)
     await flush()

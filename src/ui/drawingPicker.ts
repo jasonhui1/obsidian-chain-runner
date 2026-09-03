@@ -3,8 +3,7 @@ import type { DrawingChoice, DrawingReason } from './drawingChoices'
 
 /**
  * Which drawing to send a piece to. The order is the point — the drawing on
- * screen is nearly always the answer — so the list opens unfiltered and the
- * search is there for the vault where it is not.
+ * screen is nearly always the answer — so the list opens unfiltered.
  */
 
 /** Why a drawing sits where it does, said plainly under its name. */
@@ -29,8 +28,7 @@ export class DrawingPicker extends SuggestModal<DrawingChoice> {
   getSuggestions(query: string): DrawingChoice[] {
     const needle = query.trim().toLowerCase()
     if (needle === '') return this.drawings
-    // The path is matched as well as the name, so a vault that files drawings by
-    // folder can be searched by folder.
+    // The path is matched too, so drawings filed by folder can be found by folder.
     return this.drawings.filter(drawing => drawing.path.toLowerCase().includes(needle))
   }
 

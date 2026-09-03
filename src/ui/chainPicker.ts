@@ -3,19 +3,12 @@ import { pickerRows, type Matcher, type PickerRow } from './pickerModel'
 import type { ChainSummary } from '../engine/types'
 
 /**
- * The chain picker: purpose groups, the moment in grey under each name, and a
- * fuzzy search that filters across all of them.
- *
- * Obsidian's suggest modals have no group headers, and a header rendered as its
- * own suggestion would be a row the arrow keys stop on. So the heading is drawn
- * inside the first row of its group instead — every row stays selectable, and
- * the headings never move under the reader's cursor.
+ * The chain picker: purpose groups, the moment under each name, and a fuzzy
+ * search across all of them. Obsidian's suggest modals have no group headers, so
+ * a heading is drawn inside the first row of its group and every row stays
+ * selectable.
  */
-/**
- * What the picker asks and what it warns about — the two lines that differ
- * between running a chain on a note and adding one to a drawing. Everything
- * else about the modal is the same in both places, so only these are passed.
- */
+/** The two lines that differ between running a chain on a note and adding one to a drawing. */
 export interface ChainPickerOptions {
   placeholder?: string
   /** Said under a chain that reads no seed; named for what it will not read here. */
@@ -53,8 +46,7 @@ export class ChainPicker extends SuggestModal<PickerRow> {
     if (row.groupStart) el.createDiv({ cls: 'chain-runner-suggestion-heading', text: row.heading })
     el.createDiv({ cls: 'chain-runner-suggestion-name', text: row.chain.name })
     if (row.note) el.createDiv({ cls: 'chain-runner-suggestion-note', text: row.note })
-    // Said before the run rather than discovered after it: this chain reads the
-    // files it pins, and whatever it was pointed at reaches nothing.
+    // Said before the run: this chain reads its own files, not what it was pointed at.
     if (!row.readsNote) {
       el.createDiv({ cls: 'chain-runner-suggestion-warning', text: this.options.unseeded })
     }
@@ -72,9 +64,8 @@ function fuzzy(query: string): Matcher {
 }
 
 /**
- * The one dropdown a chain may declare, asked for before the run rather than
- * left empty. A chain that declares a parameter reads it as an input; running it
- * without one runs a different chain than the reader asked for.
+ * The one dropdown a chain may declare, asked before the run: a chain reads its
+ * parameter as an input, so an unset one runs something else.
  */
 export class ParameterPicker extends FuzzySuggestModal<string> {
   constructor(

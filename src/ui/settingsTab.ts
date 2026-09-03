@@ -25,9 +25,8 @@ export class ChainRunnerSettingTab extends PluginSettingTab {
             this.plugin.settings.engineUrl = normaliseEngineUrl(value)
             await this.plugin.saveSettings()
           })
-        // A half-typed URL is not worth a request, and normalising mid-word
-        // would fight the cursor — so the engine is re-checked, and the field
-        // rewritten to what was stored, only once the box is left.
+        // Normalising mid-word would fight the cursor, so the field is rewritten
+        // and the engine re-checked only once the box is left.
         text.inputEl.addEventListener('blur', () => {
           text.setValue(this.plugin.settings.engineUrl)
           void this.plugin.status.refresh()
@@ -45,8 +44,7 @@ export class ChainRunnerSettingTab extends PluginSettingTab {
             this.plugin.settings.outputFolder = normaliseOutputFolder(value)
             await this.plugin.saveSettings()
           })
-        // Normalising mid-word would fight the cursor, the same way the URL box
-        // does; the box is rewritten to what was stored once it is left.
+        // Rewritten on blur, the same as the URL box above.
         text.inputEl.addEventListener('blur', () => {
           text.setValue(this.plugin.settings.outputFolder)
         })

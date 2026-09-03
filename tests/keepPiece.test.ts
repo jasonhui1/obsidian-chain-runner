@@ -6,14 +6,14 @@ import type { DrawingSurface } from '@/ui/excalidraw'
 import type { RunPanel } from '@/run/panels'
 import type { RunResult } from '@/run/session'
 import type { App, TFile } from 'obsidian'
-// The stub `obsidian` resolves to at test time, imported by path so `tsc` still
-// checks the plugin against the real module's types.
+// The test-time `obsidian` stub, imported by path so `tsc` still checks the
+// plugin against the real module's types.
 import { TFile as StubFile, TFolder, lastModal, resetModals } from './obsidian'
 
 /**
  * The seam between the output-note convention and the vault: what gets written,
  * where, what a second save does, and what reaches the drawing. The convention
- * itself is checked in `outputNote.test.ts`; this checks the wiring around it.
+ * itself is `outputNote.test.ts`.
  */
 
 const panel = (over: Partial<RunPanel> = {}): RunPanel => ({

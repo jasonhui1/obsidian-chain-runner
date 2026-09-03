@@ -1,10 +1,7 @@
 /**
- * The text a note contributes to a run.
- *
- * Frontmatter is the vault's bookkeeping — tags, aliases, dates — and not part
- * of the argument the chain is asked to read, so it comes off before the note
- * body is sent. Only a block the note *opens* with is frontmatter; a `---` rule
- * further down is prose and stays.
+ * The text a note contributes to a run. Frontmatter is the vault's bookkeeping,
+ * not the chain's argument, so it comes off — but only a block the note *opens*
+ * with; a `---` further down is prose.
  */
 const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/
 
@@ -15,22 +12,15 @@ export function seedFromNote(text: string): string {
 /** Where a run's seed came from — the whole note, or the passage in front of you. */
 export type SeedOrigin = 'selection' | 'note'
 
-/**
- * The text a run was given, and what it was taken from. `RunSeed` in
- * `./session` is the header's half of the same fact — the note's name, without
- * the text.
- */
+/** The text a run was given, and what it came from; `RunSeed` is the header's half. */
 export interface Seed {
   text: string
   from: SeedOrigin
 }
 
 /**
- * What to run a chain on: the selection when there is one, the note otherwise.
- *
- * A selection is left as it was made — frontmatter inside one was selected on
- * purpose, and stripping it would run something other than what was highlighted.
- * Only a whole-note seed gets the vault's bookkeeping taken off.
+ * What to run a chain on: the selection when there is one, the note otherwise. A
+ * selection is left as made — frontmatter inside one was highlighted on purpose.
  */
 export function chooseSeed(input: { selection?: string; noteText: string }): Seed {
   const selection = (input.selection ?? '').trim()
@@ -39,11 +29,8 @@ export function chooseSeed(input: { selection?: string; noteText: string }): See
 }
 
 /**
- * One seed from several inputs, in the order they were read.
- *
- * A blank line between them and nothing else: the reader bound two things into
- * a node because both are the argument, and a heading or a label invented here
- * would be words the chain reads as the reader's when they are ours.
+ * One seed from several inputs, in reading order. A blank line between them and
+ * nothing else: a heading invented here would read as the reader's words.
  */
 export function joinSeed(parts: readonly string[]): string {
   return parts

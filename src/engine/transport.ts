@@ -1,11 +1,7 @@
 /**
- * The one place the plugin touches the network.
- *
- * Obsidian's own `requestUrl` cannot stream a response body, and a renderer
- * `fetch` to `localhost` is a cross-origin request the engine sets no CORS
- * headers for. So the desktop transport goes through Node's `http` directly,
- * which does both. Everything above this file takes a `HttpTransport`, so the
- * tests drive the same code against a real local server.
+ * The one place the plugin touches the network. Node's `http` directly:
+ * `requestUrl` cannot stream a body, and a renderer `fetch` to `localhost` is a
+ * cross-origin request the engine sets no CORS headers for.
  */
 
 export interface HttpRequest {
@@ -35,9 +31,8 @@ export interface HttpTransport {
 }
 
 /**
- * The engine could not be reached at all — refused, unresolvable, or timed
- * out. Distinct from an HTTP error, which means the engine answered. This is
- * what flips the status pill offline.
+ * The engine could not be reached at all — refused, unresolvable, timed out.
+ * This is what flips the status pill offline; an HTTP error does not.
  */
 export class EngineOfflineError extends Error {
   constructor(

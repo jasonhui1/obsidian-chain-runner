@@ -1,9 +1,6 @@
 /**
- * How often the result view redraws while a run streams.
- *
- * Tokens arrive faster than markdown can be parsed and laid out, and a redraw
- * per token makes a long output stutter. Ten frames a second is above the rate a
- * reader perceives as continuous and an order of magnitude below the token rate.
+ * How often the result view redraws while a run streams. Ten frames a second
+ * reads as continuous and is well below the rate tokens arrive at.
  */
 export const RENDER_INTERVAL_MS = 100
 
@@ -15,9 +12,8 @@ export interface Throttle {
 }
 
 /**
- * Leading and trailing, keeping only the newest held call: every call redraws
- * the whole view from the same state, so an intermediate frame has nothing in it
- * the next one lacks.
+ * Leading and trailing, keeping only the newest held call — every call redraws
+ * the whole view, so an intermediate frame has nothing the next one lacks.
  */
 export function createThrottle(intervalMs: number = RENDER_INTERVAL_MS): Throttle {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -25,8 +21,7 @@ export function createThrottle(intervalMs: number = RENDER_INTERVAL_MS): Throttl
 
   function fire(work: () => void): void {
     work()
-    // The window opens on the run, not on the last call, so a steady stream
-    // redraws on a fixed cadence rather than drifting slower.
+    // The window opens on the run, so a steady stream keeps a fixed cadence.
     timer = setTimeout(() => {
       timer = undefined
       const pending = held

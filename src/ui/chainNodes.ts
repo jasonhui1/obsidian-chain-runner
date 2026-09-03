@@ -6,22 +6,14 @@ import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
 
 /**
- * Chain nodes on a drawing: putting one there, and answering a click on it.
- *
- * The node's shape is `./chainNode.ts` and the drawing is behind `NodeSurface`,
- * so what is left here is the decisions — what is asked before anything is
- * placed, and what each of the node's two links means. Both are the ticket's
- * acceptance criteria, and both are checkable without a vault.
+ * Chain nodes on a drawing: putting one there, and answering a click on it. The
+ * node's shape is `./chainNode.ts` and the drawing is behind `NodeSurface`, so
+ * only the decisions are here.
  */
 
 export const NO_DRAWING = 'Open an Excalidraw drawing to add a chain node to it'
 
-/**
- * A node's identity, made once when it is placed.
- *
- * Not an Excalidraw element id: those are re-made when a node is copied, and a
- * copy is meant to be its own node while its five elements stay one node.
- */
+/** A node's identity, made once when it is placed. Not an element id — those change on copy. */
 export function newNodeId(): string {
   return `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -52,11 +44,8 @@ export class ChainNodes {
   constructor(private readonly deps: ChainNodesDeps) {}
 
   /**
-   * The "Add chain node" command.
-   *
-   * Everything that could stop the action is checked before the picker opens —
-   * Excalidraw, the drawing, the engine, the workspace — so a reader who gets as
-   * far as choosing a chain gets a node.
+   * The "Add chain node" command. Everything that could stop it is checked before
+   * the picker opens, so a reader who gets as far as choosing a chain gets a node.
    */
   async add(): Promise<void> {
     const unavailable = this.deps.surface.unavailable()
@@ -78,26 +67,20 @@ export class ChainNodes {
 
     new ChainPicker(this.deps.app, chains, chain => this.place(chain), {
       placeholder: 'Add which chain to this drawing?',
-      // The node's inputs are the arrows bound into it (#9), so what a chain does
-      // with a note is not what the reader is deciding here.
+      // A node's inputs are the arrows bound into it (#9), not the note.
       unseeded: 'reads its own files — bound inputs are not used',
     }).open()
   }
 
   /**
-   * A click on a link the drawing is about to open. `false` swallows it
-   * (`docs/spike-ea.md`, Q1).
-   *
-   * Every element of a chain node is answered, not just the two that carry a
-   * link: a reader who copies a node and pastes it somewhere odd should never
-   * find one of our links opening a browser or making a note.
+   * A click on a link the drawing is about to open; `false` swallows it
+   * (`docs/spike-ea.md`, Q1). Every element of a node is answered, so none of our
+   * links ever opens anything.
    */
   handleLinkClick(element: MaybeNodeElement, view?: DrawingView): boolean {
     const data = chainNodeData(element)
     // Not ours: a wiki link the reader drew themselves, and theirs to follow.
     if (!data) return true
-    // The groups say which copy was clicked; the view is the only handle on a
-    // drawing embedded in a note.
     if (data.role === 'run') this.deps.run(data, element, view)
     if (data.role === 'parameter') void this.editParameter(data, element, view)
     return false
@@ -124,8 +107,7 @@ export class ChainNodes {
 
   /** The dropdown line: the chain's own options, and the pick written back in place. */
   private async editParameter(data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView): Promise<void> {
-    // Checked on this path too, and not only on the command: a drawing made by a
-    // newer Chain Runner can be opened on an Excalidraw too old to edit it with.
+    // Checked here too: a drawing can be opened on an Excalidraw too old to edit it.
     const unavailable = this.deps.surface.unavailable()
     if (unavailable) {
       this.deps.notify(unavailable)

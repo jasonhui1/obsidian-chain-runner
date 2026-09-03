@@ -11,10 +11,8 @@ import {
 } from './transport'
 
 /**
- * Node's client reports a refused connection, an unresolvable host and a
- * dropped socket all as request-level `error` events. To this plugin they are
- * one condition: the engine is not there — unless the caller pulled the socket
- * itself, which surfaces as the same kind of event.
+ * Refused, unresolvable and dropped all arrive as request-level `error` events,
+ * and to this plugin they are one condition — unless the caller aborted.
  */
 function failure(request: HttpRequest, cause: unknown): Error {
   if (cause instanceof RequestAbortedError || request.signal?.aborted) {
@@ -33,13 +31,9 @@ function dispatch(request: HttpRequest): ClientRequest {
 }
 
 /**
- * Opens the request and resolves once the response headers are in, leaving the
- * body unread so both callers below can decide what to do with it.
- *
- * Aborting has two shapes depending on when it lands: before headers there is
- * only a request to destroy, after them the body is the live stream and
- * destroying that is what makes the reader throw. Both are wired here so the
- * signal means the same thing throughout the exchange.
+ * Opens the request and resolves once the headers are in, leaving the body
+ * unread. An abort destroys the request before headers and the body after, so
+ * the signal means the same thing throughout.
  */
 function connect(request: HttpRequest): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
@@ -58,9 +52,8 @@ function connect(request: HttpRequest): Promise<IncomingMessage> {
 
     req.on('response', res => {
       response = res
-      // The body is consumed as an async iterator, which surfaces the error
-      // there; this listener only keeps Node from treating it as unhandled
-      // before the reader arrives.
+      // The iterator below surfaces the error; this only keeps Node from
+      // treating it as unhandled before the reader arrives.
       res.on('error', () => {})
       resolve(res)
     })

@@ -41,8 +41,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => this.status.stop())
     this.status.start()
 
-    // One writer for the output-note convention, shared by the result view's
-    // actions and the drawing's own runs: a panel kept twice is one note.
+    // One writer for the output-note convention, so a panel kept twice is one note.
     const notes = new OutputNotes({
       app: this.app,
       notify: message => new Notice(message),
@@ -95,11 +94,8 @@ export default class ChainRunnerPlugin extends Plugin {
       newNodeId,
       run: (data, element, view) => void nodeRun.run(data, element, view),
     })
-    // Excalidraw is not necessarily loaded while this one is loading, and the
-    // hook lives on its plugin instance — so it is installed once the workspace
-    // has finished coming up rather than here. The disposer is registered now
-    // rather than then: a plugin disabled before layout-ready would otherwise
-    // install a hook after its own unload and never take it off again.
+    // The hook lives on Excalidraw's plugin instance, which may not be loaded
+    // yet; the disposer is registered now so an unload before layout-ready wins.
     let removeLinkHook: (() => void) | undefined
     let unloaded = false
     this.register(() => {
@@ -125,8 +121,8 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void this.quickRun.start(),
     })
 
-    // The one action this ticket ships: proof the client reaches a live engine,
-    // and the offline path something can be exercised against (#3).
+    // Proof the client reaches a live engine, and something to exercise the
+    // offline path against (#3).
     this.addCommand({
       id: 'list-chains',
       name: 'List chains on the engine',
@@ -140,10 +136,8 @@ export default class ChainRunnerPlugin extends Plugin {
   }
 
   /**
-   * The result view, opened in the right sidebar or brought back to the front.
-   *
-   * One view, reused: a second run replaces what the first showed rather than
-   * stacking another tab beside it.
+   * The result view, opened in the right sidebar or brought to the front. One
+   * view, reused: a second run replaces what the first showed.
    */
   private async openResultView(): Promise<RunResultView | undefined> {
     const open = this.app.workspace.getLeavesOfType(RESULT_VIEW_TYPE)
@@ -154,10 +148,7 @@ export default class ChainRunnerPlugin extends Plugin {
     return leaf.view instanceof RunResultView ? leaf.view : undefined
   }
 
-  /**
-   * Persists only. Re-checking the engine is the settings tab's call, made when
-   * the URL box is left rather than on every keystroke.
-   */
+  /** Persists only; re-checking the engine is the settings tab's call. */
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings)
     this.renderPill()

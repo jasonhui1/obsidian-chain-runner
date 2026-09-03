@@ -8,9 +8,8 @@ export interface RecordedRequest {
 }
 
 /**
- * A stand-in for maestro-playground, spoken to over a real socket so the client
- * is exercised through its real transport. Routes are the engine's own: the
- * workspace listing, a run's meta and layout, and `POST /api/run` streaming SSE.
+ * A stand-in for maestro-playground over a real socket, so the client is
+ * exercised through its real transport. The routes are the engine's own.
  */
 export class FakeEngine {
   private readonly server: http.Server

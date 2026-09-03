@@ -1,16 +1,10 @@
 /**
  * The slice of Obsidian the quick path touches, standing in for the real module
- * at test time (aliased in `vitest.config.ts`).
+ * at test time (aliased in `vitest.config.ts`). Modals record themselves on open
+ * instead of drawing, so a test can answer them the way a reader would.
  *
- * `src/run/` is checked without a vault because it imports nothing from
- * Obsidian. `src/ui/quickRun.ts` is the seam where the two meet, and its
- * decisions — which note, how much of it, whether to ask for the dropdown — are
- * the ticket's acceptance criteria. This is the smallest thing that lets them be
- * driven: modals that record themselves on open instead of drawing, so a test
- * can answer them the way a reader would.
- *
- * Typechecking still runs against the real `obsidian` types; only the runtime is
- * substituted, so a stub that drifts from the real API fails `tsc`.
+ * Only the runtime is substituted, so a stub that drifts from the real API fails
+ * `tsc`.
  */
 
 /** Every modal opened since `resetModals`, oldest first. */

@@ -7,11 +7,7 @@ export interface PillContent {
   modifier: string
 }
 
-/**
- * What the status-bar pill says for a given state. Pure, so the wording and the
- * three-state mapping are checkable without a running vault; the element it
- * lands in is written in `renderStatusPill`.
- */
+/** What the status-bar pill says for a given state; `renderStatusPill` writes it. */
 export function describeEngineState(state: EngineState, engineUrl: string): PillContent {
   switch (state) {
     case 'online':
@@ -28,11 +24,8 @@ export const PILL_CLASS = 'chain-runner-engine-pill'
 const MODIFIERS = ['online', 'offline', 'unknown'] as const
 
 /**
- * Writes the pill into the status-bar item Obsidian handed the plugin.
- *
- * Classes are added and removed one at a time rather than assigned: the item
- * arrives carrying Obsidian's own `status-bar-item`, and overwriting that would
- * drop the pill out of the status bar's layout.
+ * Writes the pill into the status-bar item. Classes are toggled rather than
+ * assigned: overwriting Obsidian's own would drop the pill out of the layout.
  */
 export function renderStatusPill(el: HTMLElement, state: EngineState, engineUrl: string): void {
   const { text, tooltip, modifier } = describeEngineState(state, engineUrl)

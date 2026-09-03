@@ -13,11 +13,8 @@ import type { ChainSummary } from '@/engine/types'
 
 /**
  * The node as a set of elements: what it holds, where each piece sits, what
- * survives a reload, and what a rewritten parameter changes.
- *
- * Nothing here touches Excalidraw. The builder answers in plain shapes, so the
- * whole of the node's shape is checkable without a drawing; `src/ui/excalidraw.ts`
- * is the only thing that turns these into elements on a scene.
+ * survives a reload, and what a rewritten parameter changes. Nothing here
+ * touches Excalidraw.
  */
 
 const chain = (over: Partial<ChainSummary> = {}): ChainSummary => ({
@@ -201,8 +198,7 @@ describe('rewriting the parameter in place', () => {
         ...element,
         groupIds: [group],
       }))
-    // Copying a node copies its `customData` too, so both copies claim `n-1`;
-    // Excalidraw re-makes the group, and that is what tells them apart.
+    // Both copies claim `n-1`; the re-made group is what tells them apart.
     const copies = [...grouped('n-1', 'g-first'), ...grouped('n-1', 'g-copy')]
 
     const edits = parameterEdits(copies, { nodeId: 'n-1', groupIds: ['g-copy'] }, 'founders')

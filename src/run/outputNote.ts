@@ -1,13 +1,9 @@
 import type { RunPanel } from './panels'
 
 /**
- * The output-note convention: what a kept panel becomes on disk.
- *
- * Every surface that keeps a piece of a run writes it this way — the quick
- * path's two actions now, the drawing's embeddables later — so a note found in
- * the vault says which run, which chain and which output it came from whoever
- * wrote it. The whole convention is here, a path and a string, checkable
- * without a vault.
+ * The output-note convention: what a kept panel becomes on disk. Every surface
+ * that keeps a piece of a run writes it this way, so a note in the vault says
+ * which run, chain and output it came from.
  */
 
 /** What a run knows about itself when one of its panels is kept. */
@@ -20,25 +16,20 @@ export interface OutputNoteMeta {
 }
 
 /**
- * Characters Obsidian will not put in a filename, plus the four markdown links
- * and headings read specially. Each becomes a dash rather than disappearing, so
- * two outputs whose names differ only there stay two names.
+ * Characters a filename cannot hold, plus the four markdown reads specially.
+ * Each becomes a dash, so names differing only there stay two names.
  */
 const UNUSABLE = /[\\/:*?"<>|#^[\]]/g
 
 /**
- * The output's name, as a filename. The chain's own word for the output is kept
- * — case, spaces and all — because it is what the reader saw on the panel; only
- * what a filename cannot hold is replaced.
+ * The output's name as a filename — the chain's own word, case and spaces and
+ * all, with only what a filename cannot hold replaced.
  */
 function fileName(name: string): string {
-  // A name none of whose characters is kept as itself — `///`, `...`, spaces —
-  // would file as `---.md` or, worse, as a hidden note called `.md`. Neither
-  // says anything, so it gets a word instead. Both the substitution and the trim
-  // below can empty a name, so both are asked here.
+  // A name of nothing but those characters — `///`, `...` — would file as
+  // `---.md` or as a hidden note called `.md`, so it gets a word instead.
   if (name.replace(UNUSABLE, '').replace(/[\s.]/g, '') === '') return 'output'
-  // Leading and trailing dots and spaces are legal in a path and confusing in a
-  // file list, so they go the way the unusable characters do.
+  // Leading and trailing dots and spaces are legal in a path and confusing in a list.
   return name.replace(UNUSABLE, '-').replace(/^[\s.]+|[\s.]+$/g, '')
 }
 
@@ -49,22 +40,14 @@ export function outputNotePath(panel: RunPanel, meta: OutputNoteMeta): string {
   return `${folder}/${run}/${fileName(panel.name)}.md`
 }
 
-/**
- * A frontmatter value that cannot be misread. Everything is quoted rather than
- * only what has to be: a chain named `yes` or `2026-09-02` is a string here, and
- * a rule with no exceptions is one less thing for a later writer to get wrong.
- */
+/** A frontmatter value. Everything is quoted, so a chain named `yes` stays a string. */
 function yaml(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
 /**
  * The note itself: the three keys the convention promises, then the hop's text
- * exactly as the panel showed it.
- *
- * The text is not touched — a hop that wrote its own frontmatter or its own
- * heading keeps it, below this one. What the hop said is the note's content;
- * where it came from is the note's frontmatter.
+ * untouched — a hop's own frontmatter or heading is kept, below this one.
  */
 export function outputNoteContent(panel: RunPanel, meta: OutputNoteMeta): string {
   const frontmatter = [
@@ -79,9 +62,8 @@ export function outputNoteContent(panel: RunPanel, meta: OutputNoteMeta): string
 }
 
 /**
- * The hop's words, or why there are none. A run that dies before its first hop
- * leaves a note per output (ADR-0003), and a file of bare frontmatter says
- * nothing. Quoted, so it never reads as the chain's words.
+ * The hop's words, or why there are none — a run that dies early still leaves a
+ * note per output (ADR-0003). Quoted, so it never reads as the chain's words.
  */
 function body(panel: RunPanel): string {
   const said = panel.text.replace(/\n+$/, '')
@@ -93,13 +75,9 @@ function body(panel: RunPanel): string {
 const MOST_SUFFIXES = 1000
 
 /**
- * The path to actually write to, given what the vault already holds.
- *
- * `read` answers with a note's content, or `undefined` where there is no note.
- * A name already taken by something else gets ` 2`, ` 3` and so on — but a note
- * that already says exactly this is reused rather than duplicated, so keeping
- * the same panel twice (saved, then sent to a drawing) leaves one note and not
- * two identical ones.
+ * The path to write to, given what the vault holds. A taken name gets ` 2`, ` 3`
+ * and so on, but a note that already says exactly this is reused — so saving a
+ * panel and then sending it to a drawing leaves one note.
  */
 export async function resolveOutputPath(
   path: string,
@@ -131,8 +109,7 @@ async function walkNames(path: string, accept: (candidate: string) => Promise<bo
     const candidate = suffix === 1 ? path : `${stem} ${suffix}.md`
     if (await accept(candidate)) return candidate
   }
-  // Unreachable in a vault a person made: it would take a thousand notes of one
-  // name. It is here so a `read` that answers wrongly ends as a notice rather
-  // than as a loop that never returns.
+  // Unreachable in a real vault; here so a misbehaving `read` ends as a notice
+  // rather than a loop that never returns.
   throw new Error(`${path} and the ${MOST_SUFFIXES} names after it are all taken`)
 }

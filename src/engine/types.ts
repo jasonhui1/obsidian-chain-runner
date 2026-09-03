@@ -1,10 +1,7 @@
 /**
- * The engine's wire shapes, narrowed to what this plugin reads.
- *
- * These mirror `maestro-playground`'s `lib/types.ts` and `lib/layoutModel.ts`
- * rather than importing them — the engine is a separate process reached over
- * HTTP, so its types cross the wire as data. Fields the plugin never reads are
- * deliberately absent; every shape here is treated as a subset of what arrives.
+ * The engine's wire shapes, narrowed to what this plugin reads. They mirror
+ * `maestro-playground`'s `lib/types.ts` and `lib/layoutModel.ts`; every shape
+ * here is a subset of what actually arrives.
  */
 
 /** Which picker heading a chain groups under; unset means the unlabeled fourth heading. */
@@ -38,11 +35,9 @@ export interface ChainPort {
 export type ChainView = 'timeline' | 'columns' | 'sidebar'
 
 /**
- * A chain as the picker and the result view need it.
- *
- * `view` and `outputs` are the chain's layout declaration. The plugin reads them
- * so it can build the same panels the engine's `/layout` route builds, while the
- * run is still streaming — that route only answers for a run already on disk.
+ * A chain as the picker and the result view need it. `view` and `outputs` are
+ * its layout declaration, read so panels can be built while the run is still
+ * streaming — the engine's `/layout` route only answers for a finished run.
  */
 export interface ChainSummary {
   slug: string
@@ -55,30 +50,20 @@ export interface ChainSummary {
   parameter?: ChainParameter
   /** The result layout the chain opts into; absent means it declares none. */
   view?: ChainView
-  /**
-   * Whether the chain reads a seed at all. One that declares no seed node reads
-   * the files it pins instead, and the note it was run on reaches nothing.
-   */
+  /** Whether the chain reads a seed at all; an unseeded one reads the files it pins. */
   seeded?: boolean
   /** The panels of that layout, in reading order. */
   outputs?: ChainPort[]
 }
 
-/**
- * The situation a chain is for, in its own words — what the picker leads with
- * and the result header repeats. `description` is the mechanism, and is the
- * fallback for a chain that states no moment.
- */
+/** The situation a chain is for, falling back to `description`, the mechanism. */
 export function momentOf(chain: ChainSummary): string {
   return chain.moment || chain.description || ''
 }
 
 /**
- * The dropdown a chain must be asked for before it can run, or `undefined` when
- * there is nothing to ask. A chain reads its parameter as an input, so running
- * one with the value unset runs a different chain than the reader picked — but a
- * dropdown declared with no options has no value to offer, and asking for one
- * would be a modal with nothing in it.
+ * The dropdown to ask for before running, or `undefined` when there is nothing
+ * to ask — a dropdown declared with no options would be an empty modal.
  */
 export function parameterToAsk(chain: ChainSummary): ChainParameter | undefined {
   const parameter = chain.parameter
@@ -115,11 +100,7 @@ export type PanelState = 'pending' | 'empty' | 'errored' | 'skipped' | 'filled'
 
 export interface LayoutPanel {
   name: string
-  /**
-   * The inner node this panel's port binds to. A live view overlays tokens onto
-   * the panel currently writing, and token events are keyed by `nodeId`; without
-   * this the only join would be the display name (ADR-0017).
-   */
+  /** The inner node this panel binds to; token events are keyed by it (ADR-0017). */
   node: string
   text: string
   lines: number
@@ -135,10 +116,8 @@ export interface LayoutModel {
 }
 
 /**
- * What this engine can do, for a client that ships separately from it. Read from
- * `/api/workspace` and feature-detected rather than pinned to a version, so an
- * old engine fails loudly instead of this plugin drawing a rule it no longer
- * owns (ADR-0017).
+ * What this engine can do, read from `/api/workspace`. Feature-detected rather
+ * than version-pinned, so an old engine fails loudly (ADR-0017).
  */
 export interface Capabilities {
   /** `/api/run` streams `layout` frames, and every panel carries `node`. */
@@ -186,12 +165,9 @@ export interface AgentDoneEvent {
 }
 
 /**
- * The panels, as the engine itself projects them — one frame before the first
- * hop and one after every `agent_done` (ADR-0017).
- *
- * This is why the plugin holds no copy of `buildLayoutModel`. The rule has one
- * implementation and one owner; a chain edited in the workspace changes what is
- * drawn here without this repo being touched.
+ * The panels as the engine projects them — one frame before the first hop and
+ * one after every `agent_done`, so the plugin keeps no copy of the rule
+ * (ADR-0017).
  */
 export interface LayoutFrameEvent {
   type: 'layout'
@@ -214,11 +190,7 @@ export interface RunErrorEvent {
   error: string
 }
 
-/**
- * Events the engine emits that this ticket does not model — tool turns,
- * `section_missing`. They still reach the consumer so a later ticket can read
- * them without the client changing (#3).
- */
+/** Events not modelled here — tool turns, `section_missing` — still reach the consumer (#3). */
 export interface UnknownRunEvent {
   type: string
   [key: string]: unknown
@@ -237,11 +209,8 @@ export type KnownRunEvent =
 export type RunEvent = KnownRunEvent | UnknownRunEvent
 
 /**
- * Narrows an event to one of the modelled kinds.
- *
- * `RunEvent`'s open member has an index signature, so it absorbs every tagged
- * member and a bare `event.type === 'run_complete'` never narrows on its own.
- * This is how a consumer reads a specific event without casting.
+ * Narrows an event to one of the modelled kinds. Needed because `UnknownRunEvent`'s
+ * index signature absorbs every tagged member, so a bare `type ===` never narrows.
  */
 export function isEvent<T extends KnownRunEvent['type']>(
   event: RunEvent,
