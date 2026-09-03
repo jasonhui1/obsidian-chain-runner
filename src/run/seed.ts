@@ -37,3 +37,20 @@ export function chooseSeed(input: { selection?: string; noteText: string }): See
   if (selection !== '') return { text: selection, from: 'selection' }
   return { text: seedFromNote(input.noteText), from: 'note' }
 }
+
+/**
+ * One seed from several inputs, in the order they were read.
+ *
+ * A blank line between them and nothing else: the reader bound two things into
+ * a node because both are the argument, and a heading or a label invented here
+ * would be words the chain reads as the reader's when they are ours.
+ */
+export function joinSeed(parts: readonly string[]): string {
+  return parts
+    .map(part => part.trim())
+    .filter(part => part !== '')
+    .join(SEPARATOR)
+}
+
+/** A blank line, which is a paragraph break in every chain's reading of it. */
+const SEPARATOR = '\n\n'

@@ -271,10 +271,16 @@ export interface NodeTarget {
 }
 
 /** One element to write back, and what changes on it. */
-export interface ParameterEdit<E> {
+export interface NodeEdit<E> {
   element: E
-  /** The new label, on the one line that shows the value; absent on the rest. */
+  /** The new label, on the one line whose words change; absent on the rest. */
   text?: string
+  /**
+   * Keep the element's right edge where it is as the new label re-measures.
+   * The `run` line is set against the box's right edge, and a label that grows
+   * from the left would run out through it.
+   */
+  keepRightEdge?: boolean
   data: ChainNodeData
 }
 
@@ -290,12 +296,11 @@ export function parameterEdits<E extends MaybeNodeElement>(
   scene: readonly E[],
   target: NodeTarget,
   value: string,
-): ParameterEdit<E>[] {
-  const edits: ParameterEdit<E>[] = []
+): NodeEdit<E>[] {
+  const edits: NodeEdit<E>[] = []
   for (const element of scene) {
-    const data = chainNodeData(element)
-    if (!data || data.nodeId !== target.nodeId) continue
-    if (!sameNode(target, element)) continue
+    const data = nodeElementData(element, target)
+    if (!data) continue
     const next: ChainNodeData = { ...data, parameterValue: value }
     edits.push({
       element,
@@ -308,10 +313,74 @@ export function parameterEdits<E extends MaybeNodeElement>(
   return edits
 }
 
+/**
+ * The node identity on an element that belongs to the copy of the node named by
+ * `target`, and `undefined` for everything else on the drawing.
+ *
+ * This is the one test for "is this element part of that node", so a reading of
+ * the scene and a write back to it can never disagree about which elements are
+ * the node's.
+ */
+export function nodeElementData(element: MaybeNodeElement, target: NodeTarget): ChainNodeData | undefined {
+  const data = chainNodeData(element)
+  if (!data || data.nodeId !== target.nodeId) return undefined
+  return sameNode(target, element) ? data : undefined
+}
+
 /** Whether an element belongs to the copy of the node that was clicked. */
 function sameNode(target: NodeTarget, element: MaybeNodeElement): boolean {
   const theirs = element.groupIds ?? []
   const ours = target.groupIds ?? []
   if (theirs.length === 0 || ours.length === 0) return true
   return theirs.some(group => ours.includes(group))
+}
+
+/**
+ * What a node says about the run it last started.
+ *
+ * `total` is the number of panels the engine's layout frame declares, which is
+ * absent until the first frame arrives — a run that has been asked for but has
+ * not reported its shape yet says it is running without counting.
+ */
+export type NodeRunStatus =
+  | { kind: 'idle' }
+  | { kind: 'running'; done: number; total?: number }
+  | { kind: 'done' }
+  | { kind: 'failed' }
+
+/**
+ * The `▶ Run` line's words for a status.
+ *
+ * A settled run keeps `▶ Run` on the line: the outcome is worth reading, and the
+ * node is still the thing you click to run it again. A running one does not —
+ * clicking it again while it is going is not an offer this makes.
+ */
+export function runLabel(status: NodeRunStatus): string {
+  if (status.kind === 'running') {
+    return status.total === undefined ? '⏳ running' : `⏳ ${status.done}/${status.total}`
+  }
+  if (status.kind === 'done') return `✓ done · ${RUN_LABEL}`
+  if (status.kind === 'failed') return `✕ failed · ${RUN_LABEL}`
+  return RUN_LABEL
+}
+
+/**
+ * What changes on a drawing when a node's run reaches `status`.
+ *
+ * Only the `run` line changes, and its identity is written back unchanged: a
+ * run's progress is what is happening now, not something a copy of the node
+ * should carry off with it.
+ */
+export function runEdits<E extends MaybeNodeElement>(
+  scene: readonly E[],
+  target: NodeTarget,
+  status: NodeRunStatus,
+): NodeEdit<E>[] {
+  const edits: NodeEdit<E>[] = []
+  for (const element of scene) {
+    const data = nodeElementData(element, target)
+    if (data?.role !== 'run') continue
+    edits.push({ element, text: runLabel(status), keepRightEdge: true, data })
+  }
+  return edits
 }

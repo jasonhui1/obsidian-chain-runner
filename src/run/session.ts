@@ -149,8 +149,13 @@ export interface RunResult {
   layout: RunLayout
 }
 
-/** The first failure the run reported, whichever hop carried it. */
-function hopFailure(state: RunState): string | undefined {
+/**
+ * Why a run failed, in the engine's own words, or `undefined` for one that did
+ * not: what stopped it reaching the engine at all, else the first hop that
+ * failed. Every surface that shows a run's outcome reads this one rule.
+ */
+export function runFailure(state: RunState): string | undefined {
+  if (state.error) return state.error
   const failed = state.nodes.outputs.find(output => output.status === 'error')
   if (!failed) return undefined
   return failed.error || 'this hop failed'
@@ -164,7 +169,7 @@ export function buildRunResult(input: {
   paramValue?: string
 }): RunResult {
   const { chain, seed, state, paramValue } = input
-  const error = state.error ?? hopFailure(state)
+  const error = runFailure(state)
 
   const result: RunResult = {
     chainName: chain.name,

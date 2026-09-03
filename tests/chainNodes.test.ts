@@ -1,12 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import {
-  CHAIN_GONE,
-  ChainNodes,
-  NODE_GONE,
-  NO_DRAWING,
-  NO_PARAMETER,
-  RUN_NOT_WIRED,
-} from '@/ui/chainNodes'
+import { CHAIN_GONE, ChainNodes, NODE_GONE, NO_DRAWING, NO_PARAMETER } from '@/ui/chainNodes'
 import { chainNodeData, type ChainNodeElement } from '@/ui/chainNode'
 import type { NodeSurface } from '@/ui/excalidraw'
 import type { EngineClient } from '@/engine/client'
@@ -41,6 +34,7 @@ let parameterSet: { nodeId: string; value: string; on?: unknown }[]
 let onDrawing: string[]
 let unavailable: string | undefined
 let drawingOpen: boolean
+let runs: { nodeId: string; groupIds?: readonly string[]; view?: unknown }[]
 
 /** Lets the writes a picked row sets off finish before the assertions. */
 const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
@@ -49,6 +43,11 @@ function makeNodes(): ChainNodes {
   const surface: NodeSurface = {
     unavailable: () => unavailable,
     hasActiveDrawing: () => drawingOpen,
+    // The run's own seam is `nodeRun.test.ts`; this one only checks that a click
+    // reaches it, so the three calls a run makes are never reached from here.
+    read: () => undefined,
+    setRunStatus: () => Promise.resolve(true),
+    placeRun: () => Promise.resolve(),
     place: elements => {
       placed.push(elements)
       return Promise.resolve()
@@ -67,6 +66,7 @@ function makeNodes(): ChainNodes {
     notify: message => notices.push(message),
     surface,
     newNodeId: () => 'n-new',
+    run: (data, element, view) => runs.push({ nodeId: data.nodeId, groupIds: element.groupIds, view }),
   })
 }
 
@@ -94,6 +94,7 @@ beforeEach(() => {
   onDrawing = ['n-1']
   unavailable = undefined
   drawingOpen = true
+  runs = []
   resetModals()
 })
 
@@ -169,9 +170,11 @@ describe('clicking the node’s links', () => {
     expect(notices).toEqual([])
   })
 
-  it('says Run is not wired up yet', () => {
-    makeNodes().handleLinkClick(element({ role: 'run' }))
-    expect(notices).toEqual([RUN_NOT_WIRED])
+  it('hands a Run click to the run, with the node and view it came from', () => {
+    const view = { drawing: true }
+    expect(makeNodes().handleLinkClick({ ...element({ role: 'run' }), groupIds: ['g-1'] }, view)).toBe(false)
+    expect(runs).toEqual([{ nodeId: 'n-1', groupIds: ['g-1'], view }])
+    expect(notices).toEqual([])
   })
 
   it('rewrites the value the reader picks, on the node they clicked', async () => {

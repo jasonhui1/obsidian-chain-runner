@@ -1,6 +1,16 @@
 import { TFile, type App, type WorkspaceLeaf } from 'obsidian'
 import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoices'
-import { parameterEdits, type ChainNodeElement, type MaybeNodeElement, type NodeTarget } from './chainNode'
+import {
+  parameterEdits,
+  runEdits,
+  type ChainNodeElement,
+  type MaybeNodeElement,
+  type NodeEdit,
+  type NodeRunStatus,
+  type NodeTarget,
+} from './chainNode'
+import { nodeBox, resolveInputs, type Box, type NodeInputs, type SceneShape } from './nodeScene'
+import type { RunFrame } from '../run/runFrame'
 
 /**
  * The Excalidraw plugin, as this plugin reaches it.
@@ -43,6 +53,12 @@ interface ExcalidrawAutomate {
   style: ElementStyle
   addEmbeddable(x: number, y: number, width: number, height: number, url?: string, file?: TFile): string
   addRect(x: number, y: number, width: number, height: number): string
+  /**
+   * Excalidraw's own frame. Feature-detected rather than required: the spike
+   * verified the four `add*` calls below and not this one, and a drawing is
+   * better off with a labelled rectangle than with nothing.
+   */
+  addFrame?(x: number, y: number, width: number, height: number, name?: string): string
   addText(x: number, y: number, text: string, formatting?: TextFormatting): string
   getElement(id: string): SceneElement | undefined
   getViewElements(): SceneElement[]
@@ -59,6 +75,7 @@ interface ExcalidrawAutomate {
 interface ElementStyle {
   strokeColor: string
   backgroundColor: string
+  strokeWidth: number
   fontSize: number
   textAlign: string
 }
@@ -69,13 +86,9 @@ interface TextFormatting {
 }
 
 /** An element on the scene, narrowed to the fields a chain node reads or writes. */
-interface SceneElement extends MaybeNodeElement {
-  id: string
-  type: string
-  link?: string | null
-  text?: string
-  /** What Excalidraw re-wraps from; a text element edited without it snaps back. */
-  originalText?: string
+interface SceneElement extends SceneShape {
+  /** The frame this element belongs to. Excalidraw assigns it on drop; we assign it on place. */
+  frameId?: string | null
 }
 
 /**
@@ -108,6 +121,16 @@ export interface DrawingSurface {
  */
 export type DrawingView = unknown
 
+/** What a node's drawing says about it, at the moment it was asked. */
+export interface NodeReading {
+  /** Where the node sits, which is what its run's frame is placed against. */
+  box: Box
+  /** What is bound into it, in reading order. */
+  inputs: NodeInputs
+  /** The drawing's own path, which is what a wiki link on it resolves against. */
+  drawing: string
+}
+
 /** What the chain-node actions need a drawing to do. */
 export interface NodeSurface {
   /** Why Excalidraw cannot be used, or `undefined` when it can. */
@@ -121,6 +144,16 @@ export interface NodeSurface {
    * view it happened in. `false` means the node is no longer there.
    */
   setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
+  /** What a node is bound to and where it sits; `undefined` when it is gone. */
+  read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
+  /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
+  setRunStatus(target: NodeTarget, status: NodeRunStatus, on?: DrawingView): Promise<boolean>
+  /**
+   * Puts a run's outputs on the drawing: a frame, and one embeddable per panel
+   * showing the note at the same index. A panel whose note could not be written
+   * is left out rather than drawn empty.
+   */
+  placeRun(frame: RunFrame, notes: readonly (TFile | undefined)[], on?: DrawingView): Promise<void>
 }
 
 export const NO_EXCALIDRAW =
@@ -169,7 +202,7 @@ export function createNodeSurface(app: App): NodeSurface {
    * preference to the tab in front — a drawing embedded in a note is not a tab,
    * so looking for one would refuse a click that plainly arrived from a drawing.
    */
-  const bind = (on?: DrawingView): ExcalidrawAutomate => {
+  const bind = (on?: DrawingView): { ea: ExcalidrawAutomate; view: DrawingView } => {
     const ea = automate(app)
     if (!ea) throw new Error(NO_EXCALIDRAW)
     const view = on ?? activeDrawing(app)
@@ -178,7 +211,7 @@ export function createNodeSurface(app: App): NodeSurface {
     // The binding goes stale whenever the reader switches tabs, so it is set at
     // the entry point on every call rather than once at startup.
     ea.setView(view)
-    return ea
+    return { ea, view }
   }
 
   return {
@@ -187,7 +220,7 @@ export function createNodeSurface(app: App): NodeSurface {
     hasActiveDrawing: () => activeDrawing(app) !== undefined,
 
     place: async elements => {
-      const ea = bind()
+      const { ea } = bind()
       const ids = elements.map(element => draw(ea, element))
       // One group, so the five elements move, copy and delete as the one node
       // they read as. The reader can still ungroup it; it is their drawing.
@@ -197,26 +230,112 @@ export function createNodeSurface(app: App): NodeSurface {
     },
 
     setParameter: async (target, value, on) => {
-      const ea = bind(on)
-      const edits = parameterEdits(ea.getViewElements(), target, value)
-      if (edits.length === 0) return false
-      // Editing in place rather than adding: the copies keep their ids, so
-      // writing them back updates the node instead of drawing a second one.
-      ea.copyViewElementsToEAforEditing(edits.map(edit => edit.element))
-      for (const edit of edits) {
-        const element = ea.getElement(edit.element.id)
-        if (!element) continue
-        element.customData = { chainRunner: edit.data }
-        if (edit.text === undefined) continue
-        element.text = edit.text
-        // Excalidraw re-wraps from `originalText`; setting only `text` snaps back.
-        element.originalText = edit.text
-        ea.refreshTextElementSize?.(element.id)
+      const { ea } = bind(on)
+      return write(ea, parameterEdits(ea.getViewElements(), target, value))
+    },
+
+    setRunStatus: async (target, status, on) => {
+      const { ea } = bind(on)
+      return write(ea, runEdits(ea.getViewElements(), target, status))
+    },
+
+    read: (target, on) => {
+      const { ea, view } = bind(on)
+      const scene = ea.getViewElements()
+      const box = nodeBox(scene, target)
+      if (!box) return undefined
+      return { box, inputs: resolveInputs(scene, target), drawing: drawingPath(view) }
+    },
+
+    placeRun: async (frame, notes, on) => {
+      const { ea } = bind(on)
+      const held = frame.panels
+        .map((placed, index) => ({ placed, note: notes[index] }))
+        .filter((one): one is { placed: (typeof frame.panels)[number]; note: TFile } => one.note !== undefined)
+
+      // The frame comes first so the panels can name it as their container; an
+      // Excalidraw that cannot make one gets a labelled rectangle instead, which
+      // says the same thing and holds nothing.
+      const frameId = ea.addFrame
+        ? ea.addFrame(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
+        : drawFallbackFrame(ea, frame)
+
+      for (const { placed, note } of held) {
+        ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
+        const { box } = placed
+        const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
+        const element = ea.getElement(id)
+        // Excalidraw works out frame membership when a reader drops something in
+        // one; an element placed by a script has to say so itself. Without this
+        // the panels would sit over the frame rather than in it, and dragging the
+        // frame would leave them behind.
+        if (element && ea.addFrame) element.frameId = frameId
       }
+      ea.style.strokeWidth = PLAIN_STROKE
+      // Not repositioned to the cursor: the coordinates are the node's own, and
+      // a run's outputs belong beside the node that produced them.
       await ea.addElementsToView(false, true)
-      return true
     },
   }
+}
+
+/** A run's outputs are drawn heavier when they are what the layout is about. */
+const EMPHASIS_STROKE = 4
+const PLAIN_STROKE = 1
+
+/** Room above a fallback frame's rectangle for its title. */
+const FRAME_TITLE_GAP = 28
+
+/**
+ * The frame, for an Excalidraw with no `addFrame`: a rectangle and its title.
+ *
+ * It holds nothing — dragging it moves a rectangle and leaves the panels — but a
+ * run's outputs are still grouped, named and readable, which is the part a
+ * reader is looking at.
+ */
+function drawFallbackFrame(ea: ExcalidrawAutomate, frame: RunFrame): string {
+  ea.style.strokeColor = FRAME_INK
+  ea.style.backgroundColor = 'transparent'
+  ea.style.strokeWidth = PLAIN_STROKE
+  const id = ea.addRect(frame.box.x, frame.box.y, frame.box.width, frame.box.height)
+  ea.addText(frame.box.x, frame.box.y - FRAME_TITLE_GAP, frame.name, { width: frame.box.width })
+  return id
+}
+
+/** Excalidraw's own grey, for a frame that is a container and not a drawing of one. */
+const FRAME_INK = '#868e96'
+
+/**
+ * Writes edits back to the node they came from. `false` means there was nothing
+ * to write to, which is what a node deleted between the click and the write
+ * looks like.
+ */
+async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): Promise<boolean> {
+  if (edits.length === 0) return false
+  // Editing in place rather than adding: the copies keep their ids, so
+  // writing them back updates the node instead of drawing a second one.
+  ea.copyViewElementsToEAforEditing(edits.map(edit => edit.element))
+  for (const edit of edits) {
+    const element = ea.getElement(edit.element.id)
+    if (!element) continue
+    element.customData = { chainRunner: edit.data }
+    if (edit.text === undefined) continue
+    const wasWide = element.width ?? 0
+    element.text = edit.text
+    // Excalidraw re-wraps from `originalText`; setting only `text` snaps back.
+    element.originalText = edit.text
+    ea.refreshTextElementSize?.(element.id)
+    // The `▶ Run` line is set against the box's right edge, so a label that grew
+    // has to move left by what it gained rather than out through the box.
+    if (edit.keepRightEdge) element.x = (element.x ?? 0) + wasWide - (element.width ?? 0)
+  }
+  await ea.addElementsToView(false, true)
+  return true
+}
+
+/** The drawing a view is showing, as a vault path; `''` when it has no file. */
+function drawingPath(view: DrawingView): string {
+  return (view as { file?: TFile }).file?.path ?? ''
 }
 
 /** Why Excalidraw cannot be used right now, or `undefined` when it can. */

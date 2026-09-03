@@ -4,10 +4,12 @@ import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
 import { withDefaults, type ChainRunnerSettings } from './settings'
-import { ChainNodes, newNodeId } from './ui/chainNodes'
+import { CHAIN_GONE, ChainNodes, NODE_GONE, newNodeId } from './ui/chainNodes'
 import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
 import { KeepPiece } from './ui/keepPiece'
-import { QuickRunner } from './ui/quickRun'
+import { NodeRun } from './ui/nodeRun'
+import { OutputNotes } from './ui/outputNotes'
+import { QuickRunner, UNSUPPORTED_ENGINE } from './ui/quickRun'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { renderStatusPill } from './ui/statusPill'
@@ -39,10 +41,17 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => this.status.stop())
     this.status.start()
 
-    const keep = new KeepPiece({
+    // One writer for the output-note convention, shared by the result view's
+    // actions and the drawing's own runs: a panel kept twice is one note.
+    const notes = new OutputNotes({
       app: this.app,
       notify: message => new Notice(message),
       folder: () => this.settings.outputFolder,
+    })
+    const keep = new KeepPiece({
+      app: this.app,
+      notify: message => new Notice(message),
+      notes,
       drawing: createDrawingSurface(this.app),
     })
     this.registerView(
@@ -64,13 +73,30 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the command that started it; unloading the plugin ends it.
     this.register(() => this.quickRun.stop())
 
+    const surface = createNodeSurface(this.app)
+    const nodeRun = new NodeRun({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      markOffline: () => this.status.markOffline(),
+      surface,
+      notes,
+      chainGone: CHAIN_GONE,
+      nodeGone: NODE_GONE,
+      unsupportedEngine: UNSUPPORTED_ENGINE,
+    })
+    // A run outlives the click that started it; unloading the plugin ends it.
+    this.register(() => nodeRun.stop())
+
     const nodes = new ChainNodes({
       app: this.app,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
-      surface: createNodeSurface(this.app),
+      surface,
       newNodeId,
+      run: (data, element, view) => void nodeRun.run(data, element, view),
     })
     // Excalidraw is not necessarily loaded while this one is loading, and the
     // hook lives on its plugin instance — so it is installed once the workspace

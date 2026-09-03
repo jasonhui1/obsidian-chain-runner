@@ -1,8 +1,8 @@
-import { normalizePath, TFile, TFolder, type App } from 'obsidian'
+import type { TFile, App } from 'obsidian'
 import type { DrawingChoice } from './drawingChoices'
 import { DrawingPicker } from './drawingPicker'
 import type { DrawingSurface } from './excalidraw'
-import { outputNoteContent, outputNotePath, resolveOutputPath, type OutputNoteMeta } from '../run/outputNote'
+import type { OutputNotes } from './outputNotes'
 import type { RunPanel } from '../run/panels'
 import type { RunResult } from '../run/session'
 
@@ -11,17 +11,18 @@ import type { RunResult } from '../run/session'
  * lands on a drawing.
  *
  * What the note *is* — its path, its frontmatter, what a collision does — is
- * `src/run/outputNote.ts` and checked without a vault. What is left here is the
- * vault itself: creating folders, writing the file, opening it, and asking which
- * drawing. The drawing surface is a seam for the same reason the engine's
- * transport is: Excalidraw cannot be driven from a test.
+ * `src/run/outputNote.ts`, and writing it is `./outputNotes.ts`, which the
+ * drawing's own runs share. What is left here is the two actions the result view
+ * offers: open what was written, or ask which drawing to put it on. The drawing
+ * surface is a seam for the same reason the engine's transport is: Excalidraw
+ * cannot be driven from a test.
  */
 
 export interface KeepPieceDeps {
   app: App
   notify: (message: string) => void
-  /** Where output notes go. Read per action, so changing the setting takes at once. */
-  folder: () => string
+  /** The output-note convention, shared with the drawing's own runs. */
+  notes: OutputNotes
   drawing: DrawingSurface
 }
 
@@ -87,41 +88,6 @@ export class KeepPiece {
       this.deps.notify(NOT_SETTLED)
       return undefined
     }
-    const meta: OutputNoteMeta = { runId: run.runId, chainName: run.chainName, folder: this.deps.folder() }
-    const content = outputNoteContent(panel, meta)
-    const wanted = normalizePath(outputNotePath(panel, meta))
-
-    try {
-      await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
-      const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))
-      const existing = this.deps.app.vault.getAbstractFileByPath(path)
-      // The path either is free or already holds exactly this; a note that
-      // already says it is kept as it is rather than rewritten.
-      if (existing instanceof TFile) return existing
-      return await this.deps.app.vault.create(path, content)
-    } catch (error) {
-      this.deps.notify(error instanceof Error ? `Could not write the note: ${error.message}` : 'Could not write the note')
-      return undefined
-    }
-  }
-
-  private async read(path: string): Promise<string | undefined> {
-    const file = this.deps.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) return undefined
-    return this.deps.app.vault.cachedRead(file)
-  }
-
-  /** Creates the run's folder and everything above it, a segment at a time. */
-  private async ensureFolder(folder: string): Promise<void> {
-    const segments = folder.split('/').filter(segment => segment !== '')
-    let path = ''
-    for (const segment of segments) {
-      path = path === '' ? segment : `${path}/${segment}`
-      const existing = this.deps.app.vault.getAbstractFileByPath(path)
-      if (existing instanceof TFolder) continue
-      // A note sitting where the folder should be is the reader's, not ours to move.
-      if (existing) throw new Error(`${path} is a note, not a folder`)
-      await this.deps.app.vault.createFolder(path)
-    }
+    return this.deps.notes.write(panel, { runId: run.runId, chainName: run.chainName })
   }
 }

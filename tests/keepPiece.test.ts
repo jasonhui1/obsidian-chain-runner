@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { KeepPiece, NOT_SETTLED } from '@/ui/keepPiece'
+import { OutputNotes } from '@/ui/outputNotes'
 import type { DrawingChoice } from '@/ui/drawingChoices'
 import type { DrawingSurface } from '@/ui/excalidraw'
 import type { RunPanel } from '@/run/panels'
@@ -97,10 +98,11 @@ function makeKeep(): KeepPiece {
     },
   }
 
+  const notify = (message: string): void => void notices.push(message)
   return new KeepPiece({
     app,
-    notify: message => notices.push(message),
-    folder: () => 'chains/runs',
+    notify,
+    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs' }),
     drawing: surface,
   })
 }

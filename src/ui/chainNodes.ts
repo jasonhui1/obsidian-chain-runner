@@ -26,9 +26,6 @@ export function newNodeId(): string {
   return `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-/** Said on a Run click. The click is still swallowed; only the run is missing (#9). */
-export const RUN_NOT_WIRED = 'Running a chain node arrives in the next ticket — for now, use “Run chain on this note”.'
-
 /** The node names a chain the engine no longer has; the drawing outlived the workspace. */
 export const CHAIN_GONE = (chainName: string): string =>
   `${chainName} is no longer in the workspace, so there is nothing to choose from.`
@@ -47,6 +44,8 @@ export interface ChainNodesDeps {
   surface: NodeSurface
   /** A fresh identity for a node, injected so a placed node is checkable. */
   newNodeId: () => string
+  /** What a click on `▶ Run` sets off. The run itself is `./nodeRun.ts`. */
+  run: (data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView) => void
 }
 
 export class ChainNodes {
@@ -97,10 +96,10 @@ export class ChainNodes {
     const data = chainNodeData(element)
     // Not ours: a wiki link the reader drew themselves, and theirs to follow.
     if (!data) return true
-    if (data.role === 'run') this.deps.notify(RUN_NOT_WIRED)
-    // The element and the view it was clicked in both travel on: the groups tell
-    // one copy of a node from another, and the view is the only handle on a
-    // drawing embedded in a note, which is not a tab to be looked up.
+    // The element and the view travel on for the same two reasons the parameter
+    // click sends them: the groups say which copy of the node was clicked, and
+    // the view is the only handle on a drawing embedded in a note.
+    if (data.role === 'run') this.deps.run(data, element, view)
     if (data.role === 'parameter') void this.editParameter(data, element, view)
     return false
   }
