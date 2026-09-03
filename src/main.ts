@@ -7,6 +7,7 @@ import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
 import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
+import { Expand, newProposalId } from './ui/expand'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
@@ -114,6 +115,19 @@ export default class ChainRunnerPlugin extends Plugin {
       newNodeId,
       run: (data, element, view) => void nodeRun.run(data, element, view),
     })
+    const expand = new Expand({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      markOffline: () => this.status.markOffline(),
+      surface,
+      notes,
+      newProposalId,
+    })
+    // An expansion outlives the command that started it; unloading the plugin ends it.
+    this.register(() => expand.stop())
+
     // The hook lives on Excalidraw's plugin instance, which may not be loaded
     // yet; the disposer is registered now so an unload before layout-ready wins.
     let removeLinkHook: (() => void) | undefined
@@ -124,7 +138,11 @@ export default class ChainRunnerPlugin extends Plugin {
     })
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return
-      removeLinkHook = registerLinkHook(this.app, (element, view) => nodes.handleLinkClick(element, view))
+      // Each handler claims its own links and passes on what is not its; a
+      // proposal's labels and a chain node's lines never overlap.
+      removeLinkHook = registerLinkHook(this.app, (element, view) =>
+        [expand, nodes].every(handler => handler.handleLinkClick(element, view)),
+      )
     })
 
     this.addSettingTab(new ChainRunnerSettingTab(this.app, this))
@@ -133,6 +151,26 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'add-chain-node',
       name: 'Add chain node',
       callback: () => void nodes.add(),
+    })
+
+    this.addCommand({
+      id: 'expand-block',
+      name: 'Expand this block with a chain',
+      callback: () => void expand.start(),
+    })
+
+    // Following a link needs Ctrl/Cmd+Click (`docs/spike-ea.md`, Q1), so a
+    // proposal's two decisions are in the palette as well as on the card.
+    this.addCommand({
+      id: 'keep-proposal',
+      name: 'Keep the selected proposal',
+      callback: () => void expand.decideSelected('accept'),
+    })
+
+    this.addCommand({
+      id: 'drop-proposal',
+      name: 'Drop the selected proposal',
+      callback: () => void expand.decideSelected('dismiss'),
     })
 
     this.addCommand({

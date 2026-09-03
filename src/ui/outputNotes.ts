@@ -51,6 +51,17 @@ export class OutputNotes {
     })
   }
 
+  /**
+   * Removes a note this plugin wrote - a proposal the reader dropped. To the
+   * trash, not gone, so the reader's own deletion setting decides how final it is.
+   */
+  async remove(path: string): Promise<void> {
+    await this.guard(async () => {
+      const file = this.deps.app.vault.getAbstractFileByPath(path)
+      if (file instanceof TFile) await this.deps.app.fileManager.trashFile(file)
+    })
+  }
+
   /** The note at `wanted`, written or already there: one saying exactly this is reused. */
   private async writeOrReuse(wanted: string, content: string): Promise<TFile> {
     const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))

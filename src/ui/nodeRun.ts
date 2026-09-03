@@ -1,16 +1,18 @@
-import { TFile, type App } from 'obsidian'
+import type { App } from 'obsidian'
 import type { ChainNodeData, MaybeNodeElement, NodeRunStatus, NodeTarget } from './chainNode'
 import type { DrawingView, NodeReading, NodeSurface, PlacedOutput } from './excalidraw'
-import type { Box, NodeInput } from './nodeScene'
-import type { OpenOutputNote, OutputNotes } from './outputNotes'
+import type { Box } from './nodeScene'
+import type { OutputNotes } from './outputNotes'
 import { CHAIN_GONE, NODE_GONE } from './chainNodes'
-import { buildRunPanels, type RunLayout, type RunPanel } from '../run/panels'
-import { buildRunFrame, type RunFrame } from '../run/runFrame'
-import { joinSeed, seedFromNote } from '../run/seed'
+import { fillLiveOutputs, openLiveOutputs, type LiveOutput } from '../run/liveOutputs'
+import { buildRunPanels, type RunLayout } from '../run/panels'
+import { buildRunFrame, type FramedPanel, type RunFrame } from '../run/runFrame'
+import { seedFromInputs } from './inputSeed'
+import { onDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { runFailure, settleRun, type RunState } from '../run/session'
 import { streamRun, streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary, LayoutModel, PanelState } from '../engine/types'
+import type { ChainSummary, LayoutModel } from '../engine/types'
 
 /**
  * Running a chain node: the arrows in become the seed, and the outputs become
@@ -25,8 +27,6 @@ export const SOME_UNBOUND = (count: number): string =>
   count === 1
     ? 'One arrow into this node came from nothing readable, and was skipped.'
     : `${count} arrows into this node came from nothing readable, and were skipped.`
-
-export const MISSING_NOTE = (linkpath: string): string => `${linkpath} is no longer in the vault, so it was skipped.`
 
 export const ALREADY_RUNNING = 'This chain node is already running.'
 
@@ -113,7 +113,12 @@ export class NodeRun {
       return
     }
 
-    const seed = await this.seed(reading.inputs.inputs, reading.drawing)
+    const seed = await seedFromInputs({
+      app: this.deps.app,
+      notify: this.deps.notify,
+      inputs: reading.inputs.inputs,
+      drawing: reading.drawing,
+    })
     if (reading.inputs.unbound > 0) this.deps.notify(SOME_UNBOUND(reading.inputs.unbound))
     // A chain that pins its own files reads nothing from the drawing.
     if (seed === '' && chain.seeded !== false) {
@@ -145,27 +150,9 @@ export class NodeRun {
       if (reading) return reading
       this.deps.notify(NODE_GONE)
     } catch (error) {
-      this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
+      this.deps.notify(error instanceof Error ? error.message : UNREACHABLE_DRAWING)
     }
     return undefined
-  }
-
-  /** The inputs as one piece of text; a note contributes its body, minus frontmatter. */
-  private async seed(inputs: NodeInput[], drawing: string): Promise<string> {
-    const parts: string[] = []
-    for (const input of inputs) {
-      if (input.kind === 'text') {
-        parts.push(input.text)
-        continue
-      }
-      const note = this.deps.app.metadataCache.getFirstLinkpathDest(input.linkpath, drawing)
-      if (!(note instanceof TFile)) {
-        this.deps.notify(MISSING_NOTE(input.linkpath))
-        continue
-      }
-      parts.push(seedFromNote(await this.deps.app.vault.cachedRead(note)))
-    }
-    return joinSeed(parts)
   }
 
   private async launch(plan: NodeRunPlan, controller: AbortController): Promise<void> {
@@ -196,7 +183,7 @@ export class NodeRun {
         await say(progress(state.layout))
         const layout = buildRunPanels(chain, state.layout, state.nodes)
         live ??= await this.open(state.runId, layout, plan)
-        if (live) await this.fill(live, layout, false)
+        if (live) await fillLiveOutputs(live.outputs, layout, false)
       },
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
@@ -220,31 +207,16 @@ export class NodeRun {
     if (!runId || layout.panels.length === 0) return undefined
 
     const frame = buildRunFrame({ layout, chainName: plan.chain.name, runId, node: plan.node })
-    const outputs: LiveOutput[] = []
-    const placed: PlacedOutput[] = []
-    for (const one of frame.panels) {
-      const note = await this.deps.notes.open(one.panel, { runId, chainName: plan.chain.name })
-      // A refused note has said so already; the rest of the run still lands.
-      if (!note) continue
-      outputs.push({ index: one.index, note, written: { text: '', state: 'pending' } })
-      placed.push({ placed: one, note: note.file })
-    }
+    // A refused note has said so already; the rest of the run still lands.
+    const outputs = await openLiveOutputs({
+      places: frame.panels,
+      notes: this.deps.notes,
+      run: { runId, chainName: plan.chain.name },
+    })
 
+    const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, note: one.note.file }))
     await this.place(frame, placed, plan.view)
     return { frame, outputs }
-  }
-
-  /** Writes each output into its note. `force` is a settled run's last flush. */
-  private async fill(live: LiveOutputs, layout: RunLayout, force: boolean): Promise<void> {
-    for (const output of live.outputs) {
-      // By index, never by place in the frame: `columns` reorders.
-      const panel = layout.panels[output.index]
-      if (!panel) continue
-      const shown = { ...panel, text: shownText(panel) }
-      if (!force && !worthWriting(output.written, shown)) continue
-      output.written = { text: shown.text, state: shown.state }
-      await output.note.write(shown)
-    }
   }
 
   /**
@@ -278,7 +250,7 @@ export class NodeRun {
     }
 
     // A failed run's last frame carries the outcome, so nothing is settled here (ADR-0003).
-    await this.fill(live, buildRunPanels(chain, state.layout, state.nodes), true)
+    await fillLiveOutputs(live.outputs, buildRunPanels(chain, state.layout, state.nodes), true)
     await this.onDrawing(() => this.deps.surface.setRunStatus(target, outcome, view))
   }
 
@@ -292,47 +264,14 @@ export class NodeRun {
 
   /** Touches the drawing, saying so rather than throwing when it cannot. */
   private async onDrawing(action: () => Promise<boolean>): Promise<void> {
-    try {
-      if (!(await action())) this.deps.notify(NODE_GONE)
-    } catch (error) {
-      this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
-    }
+    if ((await onDrawing(action, this.deps.notify)) === false) this.deps.notify(NODE_GONE)
   }
-}
-
-/** One output being filled: the note, and which panel's words go in it. */
-interface LiveOutput {
-  /** Its panel's position in the engine's order. */
-  index: number
-  note: OpenOutputNote
-  /** What it was last written from, which sets the flush cadence. */
-  written: { text: string; state: PanelState }
 }
 
 interface LiveOutputs {
   frame: RunFrame
   /** Only the outputs that got a note. */
-  outputs: LiveOutput[]
-}
-
-/** A panel's settled text, or the tokens so far. */
-function shownText(panel: RunPanel): string {
-  return panel.streaming ?? panel.text
-}
-
-/**
- * A line at a time, the spike's cadence (`docs/spike-ea.md`, Q2): an embeddable
- * repaints per write, so a write per token buys nothing. A hop's unfinished last
- * line is flushed by the state change when it settles.
- */
-function worthWriting(before: { text: string; state: PanelState }, panel: RunPanel): boolean {
-  if (before.state !== panel.state) return true
-  return finishedLines(panel.text) > finishedLines(before.text)
-}
-
-/** The line still being written is not a finished one. */
-function finishedLines(text: string): number {
-  return text.trimEnd().split('\n').length - 1
+  outputs: LiveOutput<FramedPanel>[]
 }
 
 /** Panels landed, out of panels declared; the total arrives with the first frame. */

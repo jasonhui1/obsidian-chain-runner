@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   ALREADY_RUNNING,
-  MISSING_NOTE,
   NO_FRAME,
   NO_INPUTS,
   NO_OUTPUTS,
@@ -9,6 +8,7 @@ import {
   NOTHING_WRITTEN,
   SOME_UNBOUND,
 } from '@/ui/nodeRun'
+import { MISSING_NOTE } from '@/ui/inputSeed'
 import { CHAIN_GONE, NODE_GONE } from '@/ui/chainNodes'
 import { UNSUPPORTED_STREAMING } from '@/run/stream'
 import { OFFLINE_NOTICE } from '@/engine/guard'
@@ -163,6 +163,10 @@ function makeRun(): NodeRun {
   } as unknown as App
 
   const surface: NodeSurface = {
+    selection: () => undefined,
+    selectedProposal: () => undefined,
+    placeProposals: async () => {},
+    editProposal: async () => false,
     unavailable: () => undefined,
     hasActiveDrawing: () => true,
     place: () => Promise.resolve(),

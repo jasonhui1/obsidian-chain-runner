@@ -80,7 +80,7 @@ export function resolveInputs(scene: readonly SceneShape[], target: NodeTarget):
 
   const inputs: NodeInput[] = []
   for (const source of sources.sort(topToBottom)) {
-    const input = readSource(source, scene)
+    const input = blockInput(source, scene)
     if (input) inputs.push(input)
     else unbound++
   }
@@ -92,8 +92,12 @@ function topToBottom(left: SceneShape, right: SceneShape): number {
   return (left.y ?? 0) - (right.y ?? 0) || (left.x ?? 0) - (right.x ?? 0) || left.id.localeCompare(right.id)
 }
 
-/** A labelled shape contributes its bound text, as a bare text element does. */
-function readSource(source: SceneShape, scene: readonly SceneShape[]): NodeInput | undefined {
+/**
+ * What one block on the drawing contributes: its own words, the words bound
+ * inside it, or the note it embeds. A labelled shape contributes its bound text,
+ * as a bare text element does.
+ */
+export function blockInput(source: SceneShape, scene: readonly SceneShape[]): NodeInput | undefined {
   if (source.type === 'embeddable' || source.type === 'iframe') {
     const linkpath = linkpathOf(source.link)
     return linkpath ? { kind: 'note', linkpath } : undefined

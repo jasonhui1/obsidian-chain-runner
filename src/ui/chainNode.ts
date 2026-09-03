@@ -1,3 +1,4 @@
+import { GREY, INK, LINK_BLUE } from './ink'
 import { momentOf, parameterToAsk, type ChainSummary } from '../engine/types'
 
 /**
@@ -63,11 +64,7 @@ export const UNSET_PARAMETER = 'unset'
 /** The key the node's identity lives under, inside Excalidraw's `customData`. */
 const DATA_KEY = 'chainRunner'
 
-/**
- * The node's measurements. Colours are Excalidraw's own palette, not Obsidian
- * CSS variables: a canvas element cannot read a variable, and the canvas inverts
- * in dark mode.
- */
+/** The node's measurements; its colours are `./ink.ts`. */
 const WIDTH = 300
 const PADDING = 14
 const LINE_GAP = 6
@@ -77,10 +74,6 @@ const LINE_SIZE = 16
 const LINE_HEIGHT = 1.25
 /** Excalidraw's font is not measurable here; this is the ratio its 20px glyphs average. */
 const GLYPH_WIDTH = 0.58
-
-const INK = '#1e1e1e'
-const GREY = '#868e96'
-const LINK_BLUE = '#1971c2'
 
 /** The chain's mark in the title, so a node reads as one at a glance. */
 const TITLE_MARK = '⛓'

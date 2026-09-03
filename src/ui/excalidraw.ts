@@ -1,6 +1,7 @@
 import { TFile, type App, type WorkspaceLeaf } from 'obsidian'
 import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoices'
 import {
+  chainNodeData,
   parameterEdits,
   runEdits,
   type ChainNodeElement,
@@ -9,7 +10,21 @@ import {
   type NodeRunStatus,
   type NodeTarget,
 } from './chainNode'
-import { nodeBox, resolveInputs, type Box, type NodeInputs, type SceneShape } from './nodeScene'
+import { blockInput, nodeBox, resolveInputs, type Box, type NodeInput, type NodeInputs, type SceneShape } from './nodeScene'
+import {
+  ACCEPTED_STROKE,
+  ACCEPTED_STROKE_STYLE,
+  PROPOSAL_STROKE,
+  PROPOSAL_STROKE_STYLE,
+  acceptEdits,
+  buildProposalLabels,
+  dismissEdits,
+  proposalData,
+  type ProposalData,
+  type ProposalEdits,
+  type ProposalIdentity,
+  type ProposalRole,
+} from './proposal'
 import type { FramedPanel, RunFrame } from '../run/runFrame'
 
 /**
@@ -45,10 +60,14 @@ interface ExcalidrawAutomate {
   addEmbeddable(x: number, y: number, width: number, height: number, url?: string, file?: TFile): string
   addRect(x: number, y: number, width: number, height: number): string
   /** Feature-detected: the spike verified the other `add*` calls, not this one. */
+  addArrow?(points: [number, number][], formatting?: ArrowFormatting): string
+  /** Feature-detected: the spike verified the other `add*` calls, not this one. */
   addFrame?(x: number, y: number, width: number, height: number, name?: string): string
   addText(x: number, y: number, text: string, formatting?: TextFormatting): string
   getElement(id: string): SceneElement | undefined
   getViewElements(): SceneElement[]
+  /** What the reader has selected. Feature-detected, like `addFrame`. */
+  getViewSelectedElements?(): SceneElement[]
   /** Puts existing scene elements on the workbench, ids kept, so a write updates them. */
   copyViewElementsToEAforEditing(elements: SceneElement[]): void
   addToGroup(elementIds: string[]): string
@@ -63,8 +82,17 @@ interface ElementStyle {
   strokeColor: string
   backgroundColor: string
   strokeWidth: number
+  strokeStyle: StrokeStyle
   fontSize: number
   textAlign: string
+}
+
+/** Excalidraw's three stroke styles; a proposal is drawn in the dashed one. */
+type StrokeStyle = 'solid' | 'dashed' | 'dotted'
+
+interface ArrowFormatting {
+  startObjectId?: string
+  endObjectId?: string
 }
 
 interface TextFormatting {
@@ -76,6 +104,10 @@ interface TextFormatting {
 interface SceneElement extends SceneShape {
   /** The frame this element belongs to. Excalidraw assigns it on drop; we assign it on place. */
   frameId?: string | null
+  strokeColor?: string
+  strokeStyle?: StrokeStyle
+  /** Excalidraw's own tombstone; setting it is how a scripted element is removed. */
+  isDeleted?: boolean
 }
 
 /** EA's link-click hook; returning `false` stops the link opening (`docs/spike-ea.md`, Q1). */
@@ -117,6 +149,23 @@ export interface PlacedOutput {
   note: TFile
 }
 
+/** One block the reader picked out to expand: what it says, and where it sits. */
+export interface BlockReading {
+  /** The element itself, which a proposal's connector binds back to. */
+  id: string
+  box: Box
+  input: NodeInput
+  /** The drawing's path, which a wiki link on it resolves against. */
+  drawing: string
+}
+
+/** One proposal to draw: the note behind it, where it goes, and what marks it as one. */
+export interface PlacedProposal {
+  box: Box
+  note: TFile
+  identity: ProposalIdentity
+}
+
 /** What the chain-node actions need a drawing to do. */
 export interface NodeSurface {
   /** Why Excalidraw cannot be used, or `undefined` when it can. */
@@ -133,7 +182,19 @@ export interface NodeSurface {
   setRunStatus(target: NodeTarget, status: NodeRunStatus, on?: DrawingView): Promise<boolean>
   /** `false` means no frame could be made and the outputs landed loose. */
   placeRun(frame: RunFrame, outputs: readonly PlacedOutput[], on?: DrawingView): Promise<boolean>
+  /** The one block the reader has selected, or `undefined` when it is not one we can read. */
+  selection(on?: DrawingView): BlockReading | undefined
+  /** Draws a run's proposals greyed and dashed, each connected back to `source`. */
+  placeProposals(proposals: readonly PlacedProposal[], source: BlockReading, on?: DrawingView): Promise<void>
+  /** The proposal the reader has selected, for the commands that decide one. */
+  selectedProposal(on?: DrawingView): ProposalData | undefined
+  /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
+  editProposal(proposalId: string, action: 'accept' | 'dismiss', on?: DrawingView): Promise<boolean>
 }
+
+/** Said when Expand is asked for and the selection is not one readable block. */
+export const SELECT_ONE_BLOCK =
+  'Select one text block or embedded note on the drawing to expand it.'
 
 export const NO_EXCALIDRAW =
   'Excalidraw is not installed or not enabled. The drawing surface needs it — install the community plugin.'
@@ -217,6 +278,117 @@ export function createNodeSurface(app: App): NodeSurface {
       return { box, inputs: resolveInputs(scene, target), drawing: drawingPath(view) }
     },
 
+    selection: on => {
+      const { ea, view } = bind(on)
+      const selected = selectedElements(ea)
+      if (selected.length !== 1) return undefined
+      const element = selected[0]
+      // Our own furniture is not material to expand: a node, or another proposal.
+      if (!element || chainNodeData(element) || proposalData(element)) return undefined
+      const input = blockInput(element, ea.getViewElements())
+      if (!input) return undefined
+      return {
+        id: element.id,
+        box: {
+          x: element.x ?? 0,
+          y: element.y ?? 0,
+          width: element.width ?? 0,
+          height: element.height ?? 0,
+        },
+        input,
+        drawing: drawingPath(view),
+      }
+    },
+
+    selectedProposal: on => {
+      const { ea } = bind(on)
+      for (const element of selectedElements(ea)) {
+        const data = proposalData(element)
+        if (data) return data
+      }
+      return undefined
+    },
+
+    placeProposals: async (proposals, source, on) => {
+      const { ea } = bind(on)
+      /** Marks a drawn element as this proposal's, and greys it. */
+      const mark = (id: string | undefined, identity: ProposalIdentity, role: ProposalRole): void => {
+        const element = id ? ea.getElement(id) : undefined
+        if (!element) return
+        element.strokeColor = PROPOSAL_STROKE
+        element.strokeStyle = PROPOSAL_STROKE_STYLE
+        element.customData = { chainRunnerProposal: { ...identity, role } }
+        ids.push(element.id)
+      }
+
+      let ids: string[] = []
+      for (const { box, note, identity } of proposals) {
+        ea.style.strokeColor = PROPOSAL_STROKE
+        ea.style.strokeStyle = PROPOSAL_STROKE_STYLE
+        ids = []
+
+        const card = embedNote(ea, box, note)
+        mark(card?.id, identity, 'card')
+
+        // The connector is what makes a card read as this block's proposal. Drawn
+        // from the source's own edge: a stub short of it points at nothing.
+        mark(
+          ea.addArrow?.(
+            [
+              [source.box.x + source.box.width, source.box.y + source.box.height / 2],
+              [box.x, box.y + box.height / 2],
+            ],
+            { startObjectId: source.id, ...(card ? { endObjectId: card.id } : {}) },
+          ),
+          identity,
+          'link',
+        )
+
+        for (const label of buildProposalLabels(box, identity)) {
+          ea.style.strokeColor = label.strokeColor
+          ea.style.strokeStyle = ACCEPTED_STROKE_STYLE
+          ea.style.fontSize = label.fontSize
+          const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
+          if (!made) continue
+          made.link = label.link
+          made.customData = label.customData
+          ids.push(made.id)
+        }
+        // One group, so a proposal's card, connector and labels move together.
+        if (ids.length > 1) ea.addToGroup(ids)
+      }
+      ea.style.strokeColor = ACCEPTED_STROKE
+      ea.style.strokeStyle = ACCEPTED_STROKE_STYLE
+      // Not repositioned to the cursor: the coordinates are the source block's own.
+      await ea.addElementsToView(false, true)
+    },
+
+    editProposal: async (proposalId, action, on) => {
+      const { ea } = bind(on)
+      const scene = ea.getViewElements()
+      const edits: ProposalEdits<SceneElement> =
+        action === 'accept' ? acceptEdits(scene, proposalId) : dismissEdits(scene, proposalId)
+      const touched = [...edits.normalise, ...edits.remove]
+      if (touched.length === 0) return false
+
+      // The copies keep their ids, so writing them back edits the drawing in place.
+      ea.copyViewElementsToEAforEditing(touched)
+      for (const element of edits.normalise) {
+        const live = ea.getElement(element.id)
+        if (!live) continue
+        live.strokeColor = ACCEPTED_STROKE
+        live.strokeStyle = ACCEPTED_STROKE_STYLE
+        // Only our own key: another plugin's stamp on the same element is not ours to drop.
+        live.customData = withoutProposal(live.customData)
+      }
+      for (const element of edits.remove) {
+        const live = ea.getElement(element.id)
+        if (live) live.isDeleted = true
+      }
+      await ea.addElementsToView(false, true)
+      return true
+    },
+
     placeRun: async (frame, outputs, on) => {
       const { ea } = bind(on)
 
@@ -252,6 +424,20 @@ function embedNote(ea: ExcalidrawAutomate, box: Box, note: TFile): SceneElement 
 /** Outputs the layout is about are drawn heavier. */
 const EMPHASIS_STROKE = 4
 const PLAIN_STROKE = 1
+
+/** What the reader has selected; an Excalidraw that cannot say is too old to expand on. */
+function selectedElements(ea: ExcalidrawAutomate): SceneElement[] {
+  if (!ea.getViewSelectedElements) throw new Error(OLD_EXCALIDRAW)
+  return ea.getViewSelectedElements()
+}
+
+/** An accepted proposal is ordinary material: nothing left saying it was one. */
+function withoutProposal(custom: unknown): unknown {
+  if (typeof custom !== 'object' || custom === null) return custom
+  const rest = { ...(custom as Record<string, unknown>) }
+  delete rest['chainRunnerProposal']
+  return Object.keys(rest).length === 0 ? undefined : rest
+}
 
 /** `false` means the node was deleted between the click and the write. */
 async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): Promise<boolean> {

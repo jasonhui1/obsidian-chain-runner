@@ -37,6 +37,10 @@ const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0)
 
 function makeNodes(): ChainNodes {
   const surface: NodeSurface = {
+    selection: () => undefined,
+    selectedProposal: () => undefined,
+    placeProposals: async () => {},
+    editProposal: async () => false,
     unavailable: () => unavailable,
     hasActiveDrawing: () => drawingOpen,
     // This only checks that a click reaches the run; `nodeRun.test.ts` has the rest.
