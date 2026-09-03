@@ -1,0 +1,127 @@
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach } from 'vitest'
+import { createSourceRunHeader, SOURCE_RUN_CLASS } from '@/ui/sourceRunHeader'
+import { SOURCE_RUN, SOURCE_RUN_DELETED } from '@/run/provenance'
+import type { RunExistence } from '@/engine/types'
+import type { MarkdownPostProcessorContext } from 'obsidian'
+
+/**
+ * The one line above a rendered output note: that there is exactly one, that it
+ * links, and that it corrects itself when the engine says the run is gone. What
+ * it says is `provenance.test.ts`; only the element is here.
+ */
+
+const RUN_ID = '2026-09-02-ab12c'
+const ENGINE_URL = 'http://localhost:3000'
+
+let asked: string[]
+let answer: RunExistence
+
+/** The frontmatter of an output note, as a post-processor is handed it. */
+const context = (frontmatter: unknown): MarkdownPostProcessorContext =>
+  ({ frontmatter, docId: 'd', sourcePath: 'chains/runs/r/Optimist.md' }) as MarkdownPostProcessorContext
+
+const outputNote = { run: RUN_ID, chain: 'Relay', output: 'Survivor' }
+
+const header = () => createSourceRunHeader({ engineUrl: () => ENGINE_URL, exists: runId => ask(runId) })
+
+function ask(runId: string): Promise<RunExistence> {
+  asked.push(runId)
+  return Promise.resolve(answer)
+}
+
+/** A rendered note: the container Obsidian puts the sections in. */
+function rendered(sections: number): { container: HTMLElement; sections: HTMLElement[] } {
+  const container = document.createElement('div')
+  container.className = 'markdown-rendered'
+  document.body.append(container)
+  const parts = Array.from({ length: sections }, () => {
+    const section = document.createElement('p')
+    container.append(section)
+    return section
+  })
+  return { container, sections: parts }
+}
+
+/** Lets the deferred insertion and the engine's answer land. */
+const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+
+const line = (container: HTMLElement): HTMLElement | null => container.querySelector(`.${SOURCE_RUN_CLASS}`)
+
+beforeEach(() => {
+  document.body.replaceChildren()
+  asked = []
+  answer = 'found'
+})
+
+describe('the source-run line', () => {
+  it('links to the run on the engine set now', async () => {
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+
+    const anchor = line(container)?.querySelector('a')
+    expect(anchor?.textContent).toBe(SOURCE_RUN)
+    expect(anchor?.getAttribute('href')).toBe(`${ENGINE_URL}/history/${RUN_ID}`)
+  })
+
+  it('sits above the note’s own words', async () => {
+    const { container, sections } = rendered(2)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+    expect(container.firstElementChild).toBe(line(container))
+  })
+
+  it('is one line for the note, not one per section rendered', async () => {
+    const { container, sections } = rendered(3)
+    const processor = header()
+    for (const section of sections) processor(section, context(outputNote))
+    await settle()
+
+    expect(container.querySelectorAll(`.${SOURCE_RUN_CLASS}`)).toHaveLength(1)
+    // And the engine is asked once, however many sections the note has.
+    expect(asked).toEqual([RUN_ID])
+  })
+
+  it('says the run is deleted once the engine says it has no such run', async () => {
+    answer = 'missing'
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+
+    const shown = line(container)
+    expect(shown?.textContent).toBe(SOURCE_RUN_DELETED)
+    expect(shown?.querySelector('a')).toBeNull()
+    expect(shown?.classList.contains(`${SOURCE_RUN_CLASS}--deleted`)).toBe(true)
+  })
+
+  it('leaves the link alone when the engine could not be asked', async () => {
+    answer = 'unknown'
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+    expect(line(container)?.querySelector('a')?.textContent).toBe(SOURCE_RUN)
+  })
+
+  it('asks again after an engine that could not be asked, and not after one that answered', async () => {
+    const processor = header()
+    answer = 'unknown'
+    processor(rendered(1).sections[0]!, context(outputNote))
+    await settle()
+    answer = 'found'
+    processor(rendered(1).sections[0]!, context(outputNote))
+    await settle()
+    processor(rendered(1).sections[0]!, context(outputNote))
+    await settle()
+
+    expect(asked).toEqual([RUN_ID, RUN_ID])
+  })
+
+  it('leaves a note that is not an output note alone', async () => {
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context({ title: 'a premise' }))
+    await settle()
+    expect(line(container)).toBeNull()
+    expect(asked).toEqual([])
+  })
+})

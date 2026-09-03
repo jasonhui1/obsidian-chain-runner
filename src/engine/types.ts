@@ -82,6 +82,9 @@ export interface AgentOutput {
   [key: string]: unknown
 }
 
+/** Whether the engine still holds a run. `unknown` is an engine that could not be asked. */
+export type RunExistence = 'found' | 'missing' | 'unknown'
+
 export interface RunMeta {
   runId: string
   chainName: string

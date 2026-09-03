@@ -21,6 +21,7 @@
     "builtin-modules": "^4.0.0",
     "esbuild": "^0.24.0",
     "eslint": "^9.17.0",
+    "jsdom": "^30.0.1",
     "obsidian": "^1.7.2",
     "tsx": "^4.23.13",
     "typescript": "^5.7.2",

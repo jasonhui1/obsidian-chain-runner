@@ -1,5 +1,4 @@
 import { parseSse } from './sse'
-import type { RunExistence } from '../run/provenance'
 import {
   EngineHttpError,
   EngineOfflineError,
@@ -13,6 +12,7 @@ import type {
   ChainView,
   LayoutModel,
   RunEvent,
+  RunExistence,
   RunMeta,
   RunRequest,
 } from './types'

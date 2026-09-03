@@ -1,12 +1,6 @@
 import type { MarkdownPostProcessor } from 'obsidian'
-import {
-  resolveSourceRun,
-  runViewUrl,
-  sourceRunId,
-  sourceRunLabel,
-  type RunExistence,
-  type SourceRun,
-} from '../run/provenance'
+import { resolveSourceRun, sourceRunId, sourceRunLabel, sourceRunLink, type SourceRun } from '../run/provenance'
+import type { RunExistence } from '../engine/types'
 
 /**
  * The line an output note carries at the top of every rendering of it — in an
@@ -23,7 +17,7 @@ export interface SourceRunHeaderDeps {
 
 /**
  * Draws the link at once and corrects it when the engine answers: a note renders
- * on every keystroke of the run that is writing it, and waiting on the network
+ * on every write of the run that is still filling it, and waiting on the network
  * first would hold each of those renders up.
  */
 export function createSourceRunHeader(deps: SourceRunHeaderDeps): MarkdownPostProcessor {
@@ -31,21 +25,27 @@ export function createSourceRunHeader(deps: SourceRunHeaderDeps): MarkdownPostPr
   return (el, ctx) => {
     const runId = sourceRunId(ctx.frontmatter)
     if (!runId) return
-    const container = el.closest('.markdown-rendered, .markdown-preview-view') ?? el
-    // A post-processor runs per section of the note; the header is the note's.
-    if (container.querySelector(`.${SOURCE_RUN_CLASS}`)) return
-
-    const engineUrl = deps.engineUrl()
-    const header = container.ownerDocument.createElement('div')
-    header.className = SOURCE_RUN_CLASS
-    container.prepend(header)
-    const url = runViewUrl(engineUrl, runId)
-    writeSourceRun(header, { kind: 'run', runId, ...(url ? { url } : {}) })
-
-    void resolveSourceRun({ runId, engineUrl, exists }).then(source => {
-      if (header.isConnected) writeSourceRun(header, source)
+    // The header is the note's, not this section's, and a post-processor runs
+    // per section against an element not yet in the document — so both the
+    // container and the one-header rule wait for the rendering to land.
+    setTimeout(() => {
+      const header = headerFor(el)
+      if (!header) return
+      const engineUrl = deps.engineUrl()
+      writeSourceRun(header, sourceRunLink(engineUrl, runId))
+      void resolveSourceRun({ runId, engineUrl, exists }).then(source => writeSourceRun(header, source))
     })
   }
+}
+
+/** The note's own header element, made if this is the first section to ask for it. */
+function headerFor(el: HTMLElement): HTMLElement | undefined {
+  const container = el.closest('.markdown-rendered, .markdown-preview-view') ?? el
+  if (container.querySelector(`.${SOURCE_RUN_CLASS}`)) return undefined
+  const header = container.ownerDocument.createElement('div')
+  header.className = SOURCE_RUN_CLASS
+  container.prepend(header)
+  return header
 }
 
 /** Writes the header's one line: a link to the run, or the words that it is gone. */

@@ -1,3 +1,5 @@
+import type { RunExistence } from '../engine/types'
+
 /**
  * Where an output note came from. The note stores the engine's run id, never a
  * URL of its own — the engine's address is a setting, and a run outlives a
@@ -7,11 +9,8 @@
 export const SOURCE_RUN = 'source run'
 export const SOURCE_RUN_DELETED = 'source run deleted'
 
-/** The engine's result view for a run. Its API lives under `/api/runs/:id`. */
-const RUN_VIEW = 'runs'
-
-/** Whether the engine still holds a run. `unknown` is an engine that could not be asked. */
-export type RunExistence = 'found' | 'missing' | 'unknown'
+/** The engine's result view for a run: `app/history/[runId]`, not the `/api` route. */
+const RUN_VIEW = 'history'
 
 /** The run an output note names, as the header shows it. */
 export type SourceRun =
@@ -34,6 +33,12 @@ export function sourceRunId(frontmatter: unknown): string | undefined {
   return run
 }
 
+/** The run as a link, which is what it is until the engine says otherwise. */
+export function sourceRunLink(engineUrl: string, runId: string): SourceRun {
+  const url = runViewUrl(engineUrl, runId)
+  return { kind: 'run', runId, ...(url ? { url } : {}) }
+}
+
 export function runViewUrl(engineUrl: string, runId: string): string | undefined {
   try {
     const base = engineUrl.endsWith('/') ? engineUrl : `${engineUrl}/`
@@ -54,10 +59,8 @@ export async function resolveSourceRun(input: {
   exists: (runId: string) => Promise<RunExistence>
 }): Promise<SourceRun> {
   const { runId, engineUrl } = input
-  const existence = await ask(input.exists, runId)
-  if (existence === 'missing') return { kind: 'deleted', runId }
-  const url = runViewUrl(engineUrl, runId)
-  return { kind: 'run', runId, ...(url ? { url } : {}) }
+  if ((await ask(input.exists, runId)) === 'missing') return { kind: 'deleted', runId }
+  return sourceRunLink(engineUrl, runId)
 }
 
 /** A resolver that throws has not answered, which is not the same as answering no. */

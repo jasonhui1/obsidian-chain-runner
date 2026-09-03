@@ -56,7 +56,7 @@ describe('outputNoteContent', () => {
         'run: "2026-09-02-ab12c"',
         'chain: "Five Personas"',
         'output: "Optimist"',
-        'source: "http://localhost:3000/runs/2026-09-02-ab12c"',
+        'source: "http://localhost:3000/history/2026-09-02-ab12c"',
         '---',
         '',
         'It could work.',
@@ -150,7 +150,7 @@ describe('a note for an output that never happened', () => {
     // `empty` is an answer; only a hop that never ran explains itself.
     expect(outputNoteContent(panel({ text: '', state: 'empty' }), meta)).toBe(
       '---\nrun: "2026-09-02-ab12c"\nchain: "Five Personas"\noutput: "Optimist"\n' +
-        'source: "http://localhost:3000/runs/2026-09-02-ab12c"\n---\n\n\n',
+        'source: "http://localhost:3000/history/2026-09-02-ab12c"\n---\n\n\n',
     )
   })
 

@@ -159,7 +159,7 @@ export function createDrawingSurface(app: App): DrawingSurface {
       ea.reset()
       // The binding goes stale when the reader switches tabs, so it is set per call.
       ea.setView(view)
-      ea.addEmbeddable(0, 0, EMBEDDABLE_WIDTH, EMBEDDABLE_HEIGHT, undefined, note)
+      embedNote(ea, { x: 0, y: 0, width: EMBEDDABLE_WIDTH, height: EMBEDDABLE_HEIGHT }, note)
       // Reposition to the cursor, and save.
       await ea.addElementsToView(true, true)
     },
@@ -225,15 +225,9 @@ export function createNodeSurface(app: App): NodeSurface {
 
       for (const { placed, note } of outputs) {
         ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
-        const { box } = placed
-        const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
-        const element = ea.getElement(id)
-        if (!element) continue
+        const element = embedNote(ea, placed.box, note)
         // A scripted element has to claim its frame; only a drop is worked out.
-        if (frameId) element.frameId = frameId
-        // The link is how an arrow out of this output reads it back as an input,
-        // so it is set here rather than left to the embeddable's own bookkeeping.
-        if (!element.link) element.link = `[[${note.path}]]`
+        if (element && frameId) element.frameId = frameId
       }
       ea.style.strokeWidth = PLAIN_STROKE
       // Not repositioned to the cursor: the coordinates are the node's own.
@@ -241,6 +235,18 @@ export function createNodeSurface(app: App): NodeSurface {
       return frameId !== undefined
     },
   }
+}
+
+/**
+ * A note on the scene. The link is what an arrow out of the embeddable reads it
+ * back by (`./nodeScene.ts`), so it is set here rather than left to Excalidraw's
+ * own bookkeeping — which is how an output becomes the next run's input.
+ */
+function embedNote(ea: ExcalidrawAutomate, box: Box, note: TFile): SceneElement | undefined {
+  const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
+  const element = ea.getElement(id)
+  if (element && !element.link) element.link = `[[${note.path}]]`
+  return element
 }
 
 /** Outputs the layout is about are drawn heavier. */

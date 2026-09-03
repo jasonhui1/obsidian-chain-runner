@@ -6,8 +6,8 @@ import {
   sourceRunLabel,
   SOURCE_RUN,
   SOURCE_RUN_DELETED,
-  type RunExistence,
 } from '@/run/provenance'
+import type { RunExistence } from '@/engine/types'
 
 /**
  * Where an output note says it came from. Nothing here reaches an engine: the
@@ -38,11 +38,11 @@ describe('sourceRunId', () => {
 
 describe('runViewUrl', () => {
   it('is the engine’s result view for the run', () => {
-    expect(runViewUrl(engineUrl, '2026-09-02-ab12c')).toBe('http://localhost:3000/runs/2026-09-02-ab12c')
+    expect(runViewUrl(engineUrl, '2026-09-02-ab12c')).toBe('http://localhost:3000/history/2026-09-02-ab12c')
   })
 
   it('escapes a run id that would otherwise reshape the path', () => {
-    expect(runViewUrl(engineUrl, 'a/../b')).toBe('http://localhost:3000/runs/a%2F..%2Fb')
+    expect(runViewUrl(engineUrl, 'a/../b')).toBe('http://localhost:3000/history/a%2F..%2Fb')
   })
 
   it('is undefined when the engine URL will not parse, rather than throwing', () => {
@@ -53,7 +53,7 @@ describe('runViewUrl', () => {
 describe('resolveSourceRun', () => {
   it('links to the run the engine still holds', async () => {
     const source = await resolveSourceRun({ runId: 'r1', engineUrl, exists: answering('found') })
-    expect(source).toEqual({ kind: 'run', runId: 'r1', url: 'http://localhost:3000/runs/r1' })
+    expect(source).toEqual({ kind: 'run', runId: 'r1', url: 'http://localhost:3000/history/r1' })
     expect(sourceRunLabel(source)).toBe(SOURCE_RUN)
   })
 
@@ -65,14 +65,14 @@ describe('resolveSourceRun', () => {
 
   it('still links when the engine could not be asked — offline is not deleted', async () => {
     const source = await resolveSourceRun({ runId: 'r1', engineUrl, exists: answering('unknown') })
-    expect(source).toEqual({ kind: 'run', runId: 'r1', url: 'http://localhost:3000/runs/r1' })
+    expect(source).toEqual({ kind: 'run', runId: 'r1', url: 'http://localhost:3000/history/r1' })
   })
 
   it('treats a thrown answer as unasked rather than failing the render', async () => {
     await expect(resolveSourceRun({ runId: 'r1', engineUrl, exists: refusing })).resolves.toEqual({
       kind: 'run',
       runId: 'r1',
-      url: 'http://localhost:3000/runs/r1',
+      url: 'http://localhost:3000/history/r1',
     })
   })
 
