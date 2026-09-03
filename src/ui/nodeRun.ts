@@ -264,18 +264,19 @@ export class NodeRun {
     if (!runId || layout.panels.length === 0) return undefined
 
     const frame = buildRunFrame({ layout, chainName: plan.chain.name, runId, node: plan.node })
-    const notes: (OpenOutputNote | undefined)[] = []
+    const outputs: LiveOutput[] = []
     const placed: PlacedOutput[] = []
     for (const one of frame.panels) {
       const note = await this.deps.notes.open(one.panel, { runId, chainName: plan.chain.name })
-      notes.push(note)
       // A note the vault refused has said so already; the rest of the run still
       // lands, so one unwritable name does not cost the reader the whole frame.
-      if (note) placed.push({ placed: one, note: note.file })
+      if (!note) continue
+      outputs.push({ index: one.index, note, written: { text: '', state: 'pending' } })
+      placed.push({ placed: one, note: note.file })
     }
 
     await this.place(frame, placed, plan.view)
-    return { frame, notes, written: frame.panels.map(() => ({ text: '', state: 'pending' as PanelState })) }
+    return { frame, outputs }
   }
 
   /**
@@ -287,14 +288,15 @@ export class NodeRun {
    * settled run, where every note takes the panel's final word whatever it is.
    */
   private async fill(live: LiveOutputs, layout: RunLayout, force: boolean): Promise<void> {
-    for (const [index, panel] of layout.panels.entries()) {
-      const note = live.notes[index]
-      const before = live.written[index]
-      if (!note || !before) continue
+    for (const output of live.outputs) {
+      // The frame's order is not the engine's, so the panel is found by the index
+      // it was opened against and never by where it sits in the frame.
+      const panel = layout.panels[output.index]
+      if (!panel) continue
       const shown = { ...panel, text: shownText(panel) }
-      if (!force && !worthWriting(before, shown)) continue
-      live.written[index] = { text: shown.text, state: shown.state }
-      await note.write(shown)
+      if (!force && !worthWriting(output.written, shown)) continue
+      output.written = { text: shown.text, state: shown.state }
+      await output.note.write(shown)
     }
   }
 
@@ -361,13 +363,20 @@ export class NodeRun {
   }
 }
 
+/** One output being filled: the note, and which panel's words go in it. */
+interface LiveOutput {
+  /** Which of the layout's panels this note holds, in the engine's own order. */
+  index: number
+  note: OpenOutputNote
+  /** What the note was last written from, which is what sets the flush cadence. */
+  written: { text: string; state: PanelState }
+}
+
 /** A run's outputs on the drawing, once the first layout frame has named them. */
 interface LiveOutputs {
   frame: RunFrame
-  /** The note filling each of the frame's panels, in the frame's own order. */
-  notes: (OpenOutputNote | undefined)[]
-  /** What each note was last written from, which is what sets the flush cadence. */
-  written: { text: string; state: PanelState }[]
+  /** Only the outputs that got a note; one the vault refused is simply absent. */
+  outputs: LiveOutput[]
 }
 
 /** What a panel has to show right now: its settled text, or the tokens so far. */

@@ -123,6 +123,18 @@ describe('buildRunFrame', () => {
     })
   })
 
+  it('remembers where each panel sat in the engine’s order, however it is drawn', () => {
+    // A columns chain is drawn branches-first whatever order its ports were
+    // declared in, so the frame's order is not the engine's. Anything following
+    // a panel across frames reads `index`, never the position in the frame.
+    const frame = frameOf({
+      kind: 'columns',
+      panels: [panel('Synthesis', { emphasis: 'join' }), panel('Optimist'), panel('Skeptic')],
+    })
+    expect(frame.panels.map(one => one.panel.name)).toEqual(['Optimist', 'Skeptic', 'Synthesis'])
+    expect(frame.panels.map(one => one.index)).toEqual([1, 2, 0])
+  })
+
   it('lays a sidebar layout’s rounds out as equal peers, not as a relay', () => {
     const frame = frameOf({ kind: 'sidebar', panels: [panel('Round 1'), panel('Round 2'), panel('Round 3')] })
     const widths = frame.panels.map(one => one.box.width)

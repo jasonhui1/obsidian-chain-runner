@@ -20,6 +20,16 @@ import type { Box } from '../ui/nodeScene'
 /** One output, and the rectangle its embeddable is placed in. */
 export interface FramedPanel {
   panel: RunPanel
+  /**
+   * Which of the layout's panels this is, in the engine's own order.
+   *
+   * A columns chain is drawn with its branches before the panel they converge
+   * on, whatever order the chain declared its ports in — so the frame's order is
+   * not the engine's, and anything that follows a panel across frames has to say
+   * which one it means. Without this, a chain declaring its join anywhere but
+   * last would fill each output's note from its neighbour's hop.
+   */
+  index: number
   box: Box
   /**
    * The panel the layout is *about* — a columns chain's converging panel, a
@@ -95,18 +105,36 @@ export function buildRunFrame(input: {
 }
 
 /**
- * Which of the three pictures a layout gets.
+ * Which picture a layout gets.
  *
- * `sidebar` is a loop's rounds, and rounds are peers: they get an even row
- * rather than a narrowing one, because nothing is handed on and narrowed. Naming
- * all four kinds here rather than falling through to the relay is what keeps a
- * kind the engine adds later from silently getting a picture that is wrong for
- * it (ADR-0001).
+ * Every kind is named, and the compiler holds it that way: a kind the engine
+ * adds later stops this file compiling rather than quietly getting a picture
+ * drawn for something else. `sidebar` is a loop's rounds, and rounds are peers,
+ * so they get an even row rather than a narrowing one — nothing is handed on.
  */
 function arrange(layout: RunLayout): FramedPanel[] {
-  if (layout.kind === 'columns') return columns(layout.panels)
-  if (layout.kind === 'sidebar') return row(layout.panels, PANEL_WIDTH, 0, 0).placed
-  return shrinkingRow(layout.panels)
+  const panels = layout.panels.map((panel, index) => ({ panel, index }))
+  switch (layout.kind) {
+    case 'columns':
+      return columns(panels)
+    case 'sidebar':
+      return row(panels, PANEL_WIDTH, 0, 0).placed
+    case 'timeline':
+    case 'undeclared':
+      return shrinkingRow(panels)
+    default: {
+      // Unreachable while `LayoutKind` holds the four above; this is the line
+      // that fails to compile when it gains a fifth (ADR-0001).
+      const unknown: never = layout.kind
+      return unknown
+    }
+  }
+}
+
+/** A panel and where it sits in the engine's order, which the frame must keep. */
+interface Ordered {
+  panel: RunPanel
+  index: number
 }
 
 /**
@@ -116,9 +144,9 @@ function arrange(layout: RunLayout): FramedPanel[] {
  * A chain that declares no join is just the row — and one that is *only* a join
  * is one wide panel, which is the degenerate case of the same picture.
  */
-function columns(panels: RunPanel[]): FramedPanel[] {
-  const branches = panels.filter(panel => panel.emphasis !== 'join')
-  const joins = panels.filter(panel => panel.emphasis === 'join')
+function columns(panels: Ordered[]): FramedPanel[] {
+  const branches = panels.filter(one => one.panel.emphasis !== 'join')
+  const joins = panels.filter(one => one.panel.emphasis === 'join')
   if (branches.length === 0) return row(joins, JOIN_WIDTH, 0, 0).placed
 
   const top = row(branches, PANEL_WIDTH, 0, 0)
@@ -135,12 +163,12 @@ function columns(panels: RunPanel[]): FramedPanel[] {
 }
 
 /** One row of equal panels, left to right. */
-function row(panels: RunPanel[], width: number, x: number, y: number): { placed: FramedPanel[]; width: number } {
+function row(panels: Ordered[], width: number, x: number, y: number): { placed: FramedPanel[]; width: number } {
   let left = x
-  const placed = panels.map(panel => {
+  const placed = panels.map(({ panel, index }) => {
     const box = { x: left, y, width, height: PANEL_HEIGHT }
     left += width + GAP
-    return { panel, box, emphasis: panel.emphasis === 'join' }
+    return { panel, index, box, emphasis: panel.emphasis === 'join' }
   })
   return { placed, width: Math.max(0, left - x - GAP) }
 }
@@ -156,17 +184,18 @@ function row(panels: RunPanel[], width: number, x: number, y: number): { placed:
  * none — the trace fallback for a chain that declares no view — emphasises its
  * final panel, which is the same panel by a weaker rule.
  */
-function shrinkingRow(panels: RunPanel[]): FramedPanel[] {
-  const declared = panels.some(panel => panel.emphasis !== undefined)
+function shrinkingRow(panels: Ordered[]): FramedPanel[] {
+  const declared = panels.some(one => one.panel.emphasis !== undefined)
   let left = 0
-  return panels.map((panel, index) => {
-    const width = Math.max(MIN_WIDTH, Math.round(PANEL_WIDTH * SHRINK ** index))
+  return panels.map(({ panel, index }, along) => {
+    const width = Math.max(MIN_WIDTH, Math.round(PANEL_WIDTH * SHRINK ** along))
     const box = { x: left, y: 0, width, height: PANEL_HEIGHT }
     left += width + GAP
     return {
       panel,
+      index,
       box,
-      emphasis: declared ? panel.emphasis === 'last' : index === panels.length - 1,
+      emphasis: declared ? panel.emphasis === 'last' : along === panels.length - 1,
     }
   })
 }

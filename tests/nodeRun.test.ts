@@ -107,6 +107,31 @@ const failureFrame = (names: string[], done: number, error: string): RunEvent =>
   },
 })
 
+/** A columns layout whose converging panel is declared first, not last. */
+const joinFirst = (done: number): RunEvent => ({
+  type: 'layout',
+  model: {
+    kind: 'columns',
+    panels: [
+      {
+        name: 'Synthesis',
+        node: 'synthesis',
+        text: done > 1 ? 'the synthesis' : '',
+        lines: done > 1 ? 1 : 0,
+        state: done > 1 ? ('filled' as const) : ('pending' as const),
+        emphasis: 'join' as const,
+      },
+      {
+        name: 'Optimist',
+        node: 'optimist',
+        text: done > 0 ? 'the optimist' : '',
+        lines: done > 0 ? 1 : 0,
+        state: done > 0 ? ('filled' as const) : ('pending' as const),
+      },
+    ],
+  },
+})
+
 function makeRun(): NodeRun {
   const app = {
     vault: {
@@ -328,6 +353,27 @@ describe('outputs that fill in place', () => {
       `chains/runs/${RUN_ID}/Same 2.md`,
       `chains/runs/${RUN_ID}/Same.md`,
     ])
+  })
+
+  it('fills each note from its own panel when the join is not declared last', async () => {
+    // The frame draws branches before the panel they converge on, so the frame's
+    // order is not the engine's. Following a panel by its place in the frame
+    // would give every note its neighbour's words.
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      joinFirst(0),
+      joinFirst(2),
+      { type: 'run_complete', runId: RUN_ID },
+    ]
+    await start()
+
+    const optimist = vault[`chains/runs/${RUN_ID}/Optimist.md`]
+    const synthesis = vault[`chains/runs/${RUN_ID}/Synthesis.md`]
+    expect(optimist).toContain('output: "Optimist"')
+    expect(optimist).toContain('the optimist')
+    expect(optimist).not.toContain('the synthesis')
+    expect(synthesis).toContain('output: "Synthesis"')
+    expect(synthesis).toContain('the synthesis')
   })
 
   it('writes each output with its own provenance', async () => {

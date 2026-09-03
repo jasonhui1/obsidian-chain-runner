@@ -370,17 +370,22 @@ export function runLabel(status: NodeRunStatus): string {
 }
 
 /**
- * How much of the engine's message the line can hold. The `▶ Run` that follows
- * it and the box's own padding take the rest; a message longer than this is cut
- * rather than pushing the node out of shape, and the whole of it was said as a
- * notice when it happened.
+ * How much of the engine's message fits on the line beside everything else it
+ * has to carry — the mark, the separator and `▶ Run`, which keeps its place
+ * because a failed node is still the thing you click to run it again.
+ *
+ * It is not much. The node is a label, not a report: the whole message is said
+ * as a notice when it happens, and a failed run's output notes carry it in full
+ * (ADR-0003). What the line is for is telling a reader glancing at the drawing
+ * which node failed and roughly why.
  */
-const MOST_FAILURE_CHARS = 28
+const NEWLINE = '\n'
+
+const FAILURE_ROOM = WIDTH - PADDING * 2 - textWidth(`✕  · ${RUN_LABEL}`, LINE_SIZE)
 
 function failureWords(error: string | undefined): string {
-  const said = (error ?? '').trim().split('\n')[0] ?? ''
-  if (said === '') return 'failed'
-  return said.length <= MOST_FAILURE_CHARS ? said : `${said.slice(0, MOST_FAILURE_CHARS - 1).trimEnd()}…`
+  const said = (error ?? '').trim().split(NEWLINE)[0] ?? ''
+  return said === '' ? 'failed' : oneLine(said, LINE_SIZE, FAILURE_ROOM)
 }
 
 /**

@@ -305,8 +305,6 @@ async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): P
     // Excalidraw re-wraps from `originalText`; setting only `text` snaps back.
     element.originalText = edit.text
     ea.refreshTextElementSize?.(element.id)
-    // The `▶ Run` line is set against the box's right edge, so a label that grew
-    // has to move left by what it gained rather than out through the box.
     if (edit.keepRightEdge) element.x = (element.x ?? 0) + wasWide - (element.width ?? 0)
   }
   await ea.addElementsToView(false, true)
