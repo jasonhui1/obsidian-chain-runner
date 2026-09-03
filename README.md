@@ -144,6 +144,16 @@ One shape the spike did not exercise: it observed the hook on text **bound into 
 
 Excalidraw 2.0.0 or newer is required, and the version is checked before anything is placed — an older one says so in a notice and nothing is drawn.
 
+### Where an output came from
+
+Every output note says which run wrote it. The frontmatter carries `run`, `chain` and `output`, and a `source` link to the run on the engine as it was addressed at the time; above every *rendering* of the note — inside an embeddable on a drawing as much as in the note's own tab — sits one faint line reading **source run**, linking to the engine's view of that run.
+
+That line is rendered rather than stored, and built from the engine URL set *now* (ADR-0004). Moving the engine to another port or machine moves every header with it; the `source` key in the file is for readers outside this plugin and is never read back. It also keeps the provenance out of the note's own text, which matters for the next paragraph.
+
+**An output is material.** Arrow an output's embeddable into another chain node and it is an ordinary note input: the second run reads the hop's words, with the frontmatter stripped the way any bound note's is, and lands in a frame of its own titled with its own run id. Both runs are in the engine's history; neither knows about the other.
+
+**A run that is gone reads as gone.** The header asks the engine whether the run is still there. An engine that answers and has no such run turns the line into **source run deleted**, in amber; an engine that cannot be reached leaves the link alone, because an engine that is down is not a run that was deleted. Nothing throws either way, and the answer is remembered per run so a note being written line by line does not ask once per repaint.
+
 ## Development
 
 ```bash
@@ -169,7 +179,7 @@ src/
     transport.ts        HttpTransport seam + the three failure kinds
     nodeTransport.ts    the desktop implementation, over node:http
     sse.ts              SSE framing
-    client.ts           listChains / launchRun / getRun / getLayout / ping
+    client.ts           listChains / launchRun / getRun / getLayout / runExists / ping
     status.ts           the online-offline poll loop
     guard.ts            the offline guard every action goes through
   run/
@@ -178,6 +188,7 @@ src/
     session.ts            the event fold, and the result the view renders
     seed.ts               what a run reads: the selection, or the note
     outputNote.ts         the output-note convention: path, frontmatter, collisions
+    provenance.ts         the run an output note came from, and whether it still exists
   ui/
     pickerModel.ts        the picker's groups and order
     arrangement.ts        where a layout's panels go: stacked, columns, or rounds
@@ -189,6 +200,7 @@ src/
     throttle.ts           how often the result view redraws
     resultView.ts         the right-sidebar view
     keepPiece.ts          the two panel actions: write the note, put it on a drawing
+    sourceRunHeader.ts    the source-run line above every rendering of an output note
     chainNodes.ts         the add command, and what a click on a node's links means
     excalidraw.ts         the Excalidraw plugin, as this plugin reaches it
     quickRun.ts           the command: note → picker → stream → view

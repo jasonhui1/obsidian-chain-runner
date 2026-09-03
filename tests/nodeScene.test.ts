@@ -70,6 +70,14 @@ describe('resolveInputs', () => {
     expect(resolveInputs(scene, target)).toEqual({ inputs: [{ kind: 'text', text: 'a premise' }], unbound: 0 })
   })
 
+  it('reads an output of an earlier run as the note it is', () => {
+    const output = embeddable('e1', '[[chains/runs/2026-09-02-ab12c/Survivor.md]]', 100)
+    expect(resolveInputs([...nodeElements(), output, arrow('a1', 'e1', BOX)], target)).toEqual({
+      inputs: [{ kind: 'note', linkpath: 'chains/runs/2026-09-02-ab12c/Survivor.md' }],
+      unbound: 0,
+    })
+  })
+
   it('reads an embeddable bound in as the note it shows', () => {
     const scene = [...nodeElements(), embeddable('e1', '[[notes/premise.md]]', 100), arrow('a1', 'e1', BOX)]
     expect(resolveInputs(scene, target)).toEqual({

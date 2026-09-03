@@ -1,4 +1,5 @@
 import { parseSse } from './sse'
+import type { RunExistence } from '../run/provenance'
 import {
   EngineHttpError,
   EngineOfflineError,
@@ -80,6 +81,21 @@ export class EngineClient {
 
   async getRun(runId: string): Promise<RunMeta> {
     return this.getJson<RunMeta>(`/api/runs/${encodeURIComponent(runId)}`)
+  }
+
+  /**
+   * Whether the engine still has a run, for a note that says it came from one.
+   * It answers instead of throwing: an unreachable engine is not a deleted run
+   * (ADR-0004).
+   */
+  async runExists(runId: string): Promise<RunExistence> {
+    try {
+      await this.getRun(runId)
+      return 'found'
+    } catch (error) {
+      if (error instanceof EngineHttpError && error.status === 404) return 'missing'
+      return 'unknown'
+    }
   }
 
   async getLayout(runId: string): Promise<LayoutModel> {

@@ -116,6 +116,28 @@ describe('getRun', () => {
   })
 })
 
+describe('runExists', () => {
+  it('finds a run the engine still holds', async () => {
+    engine.runMeta = { runId: 'r1', chainName: 'c', status: 'complete', agentOutputs: [] }
+    expect(await client.runExists('r1')).toBe('found')
+  })
+
+  it('reports a run the engine says it has no record of', async () => {
+    engine.failWith = { status: 404, body: 'Run not found' }
+    expect(await client.runExists('r1')).toBe('missing')
+  })
+
+  it('answers rather than throwing when the engine cannot be reached', async () => {
+    const client = await offlineClient()
+    expect(await client.runExists('r1')).toBe('unknown')
+  })
+
+  it('does not read another failure as a deletion', async () => {
+    engine.failWith = { status: 500, body: 'broken' }
+    expect(await client.runExists('r1')).toBe('unknown')
+  })
+})
+
 describe('getLayout', () => {
   it('returns the layout model', async () => {
     engine.layout = { kind: 'columns', panels: [{ name: 'optimist', text: 'hi', lines: 1, state: 'filled' }] }

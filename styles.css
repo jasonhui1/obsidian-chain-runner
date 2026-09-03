@@ -349,3 +349,29 @@
 .chain-runner-detail .chain-runner-panel {
   margin-bottom: 0;
 }
+
+/* ── An output note's source run ─────────────────────────────────────────────
+   The line an output note carries above its own words, wherever it is rendered.
+   Faint: it says where the words came from, not what they are. */
+
+.chain-runner-source-run {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: var(--size-4-2);
+}
+
+.chain-runner-source-run a {
+  color: var(--text-faint);
+  text-decoration: none;
+}
+
+.chain-runner-source-run a:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+/* Amber again for a reference that no longer resolves: the note is still the
+   note, and the run behind it is gone. */
+.chain-runner-source-run--deleted {
+  color: var(--text-warning);
+}

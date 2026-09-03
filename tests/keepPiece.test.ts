@@ -16,6 +16,9 @@ import { TFile as StubFile, TFolder, lastModal, resetModals } from './obsidian'
  * itself is `outputNote.test.ts`.
  */
 
+/** The engine an output note links back to; the run view is checked in `provenance.test.ts`. */
+const ENGINE_URL = 'http://localhost:3000'
+
 const panel = (over: Partial<RunPanel> = {}): RunPanel => ({
   name: 'Optimist',
   node: 'n1',
@@ -102,7 +105,7 @@ function makeKeep(): KeepPiece {
   return new KeepPiece({
     app,
     notify,
-    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs' }),
+    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
     drawing: surface,
   })
 }

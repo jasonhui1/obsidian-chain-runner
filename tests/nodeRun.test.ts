@@ -33,6 +33,9 @@ const nodeData = {
   chainName: 'Relay',
 }
 
+/** The engine an output note links back to; the run view is checked in `provenance.test.ts`. */
+const ENGINE_URL = 'http://localhost:3000'
+
 const RUN_ID = '2026-09-02-ab12c'
 const FIRST = `chains/runs/${RUN_ID}/First.md`
 const SURVIVOR = `chains/runs/${RUN_ID}/Survivor.md`
@@ -196,7 +199,7 @@ function makeRun(): NodeRun {
     notify,
     markOffline: () => void offline++,
     surface,
-    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs' }),
+    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
   })
 }
 
@@ -509,6 +512,30 @@ describe('what stops a run', () => {
     await start()
     expect(notices).toEqual([NODE_GONE])
     expect(launched).toEqual([])
+  })
+})
+
+describe('an output run again', () => {
+  /** The same run, under a second id, so the two frames are told apart. */
+  const SECOND_RUN = '2026-09-02-cd34e'
+  const secondRun = (): RunEvent[] => [
+    { type: 'run_start', runId: SECOND_RUN },
+    layout(['First', 'Survivor'], 2),
+    { type: 'run_complete', runId: SECOND_RUN },
+  ]
+
+  it('reads an output note as its seed, and lands in a frame of its own', async () => {
+    await start()
+
+    // The reader draws an arrow from the placed output into a second node.
+    reading!.inputs = { inputs: [{ kind: 'note', linkpath: SURVIVOR }], unbound: 0 }
+    events = secondRun()
+    await start()
+
+    // The note's provenance is the vault's bookkeeping, not the chain's argument.
+    expect(launched[1].seedPrompt).toBe('Survivor said something')
+    expect(framed.map(one => one.frame.name)).toEqual([`Relay · ${RUN_ID}`, `Relay · ${SECOND_RUN}`])
+    expect(vault[`chains/runs/${SECOND_RUN}/Survivor.md`]).toContain('Survivor said something')
   })
 })
 

@@ -14,8 +14,8 @@ import type { RunPanel } from '../run/panels'
  * twice is one note. `write` takes a settled panel, `open` one still filling.
  */
 
-/** Which run a panel came from; the folder is settings'. */
-export type RunProvenance = Omit<OutputNoteMeta, 'folder'>
+/** Which run a panel came from; the folder and the engine are settings'. */
+export type RunProvenance = Omit<OutputNoteMeta, 'folder' | 'engineUrl'>
 
 /** A note a run holds open, to rewrite as its panel fills. */
 export interface OpenOutputNote {
@@ -28,6 +28,7 @@ export interface OutputNotesDeps {
   notify: (message: string) => void
   /** Read per write, so changing the setting takes at once. */
   folder: () => string
+  engineUrl: () => string
 }
 
 export class OutputNotes {
@@ -73,7 +74,7 @@ export class OutputNotes {
     run: RunProvenance,
     use: (meta: OutputNoteMeta, wanted: string) => Promise<T>,
   ): Promise<T | undefined> {
-    const meta: OutputNoteMeta = { ...run, folder: this.deps.folder() }
+    const meta: OutputNoteMeta = { ...run, folder: this.deps.folder(), engineUrl: this.deps.engineUrl() }
     const wanted = normalizePath(outputNotePath(panel, meta))
     try {
       await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))

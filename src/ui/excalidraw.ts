@@ -228,8 +228,12 @@ export function createNodeSurface(app: App): NodeSurface {
         const { box } = placed
         const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
         const element = ea.getElement(id)
+        if (!element) continue
         // A scripted element has to claim its frame; only a drop is worked out.
-        if (element && frameId) element.frameId = frameId
+        if (frameId) element.frameId = frameId
+        // The link is how an arrow out of this output reads it back as an input,
+        // so it is set here rather than left to the embeddable's own bookkeeping.
+        if (!element.link) element.link = `[[${note.path}]]`
       }
       ea.style.strokeWidth = PLAIN_STROKE
       // Not repositioned to the cursor: the coordinates are the node's own.

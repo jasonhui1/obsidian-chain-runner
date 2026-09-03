@@ -12,6 +12,7 @@ import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
+import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
 
 export default class ChainRunnerPlugin extends Plugin {
@@ -46,7 +47,15 @@ export default class ChainRunnerPlugin extends Plugin {
       app: this.app,
       notify: message => new Notice(message),
       folder: () => this.settings.outputFolder,
+      engineUrl: () => this.settings.engineUrl,
     })
+    // Every rendering of an output note says which run wrote it (ADR-0004).
+    this.registerMarkdownPostProcessor(
+      createSourceRunHeader({
+        engineUrl: () => this.settings.engineUrl,
+        exists: runId => this.engine.runExists(runId),
+      }),
+    )
     const keep = new KeepPiece({
       app: this.app,
       notify: message => new Notice(message),

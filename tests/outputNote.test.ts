@@ -16,7 +16,12 @@ const panel = (over: Partial<RunPanel> = {}): RunPanel => ({
   ...over,
 })
 
-const meta = { runId: '2026-09-02-ab12c', chainName: 'Five Personas', folder: 'chains/runs' }
+const meta = {
+  runId: '2026-09-02-ab12c',
+  chainName: 'Five Personas',
+  folder: 'chains/runs',
+  engineUrl: 'http://localhost:3000',
+}
 
 describe('outputNotePath', () => {
   it('files the note under the run it came from', () => {
@@ -44,12 +49,24 @@ describe('outputNotePath', () => {
 })
 
 describe('outputNoteContent', () => {
-  it('stamps the run, the chain and the output above the hop’s own text', () => {
+  it('stamps the run, the chain, the output and the run’s link above the hop’s own text', () => {
     expect(outputNoteContent(panel(), meta)).toBe(
-      ['---', 'run: "2026-09-02-ab12c"', 'chain: "Five Personas"', 'output: "Optimist"', '---', '', 'It could work.', ''].join(
-        '\n',
-      ),
+      [
+        '---',
+        'run: "2026-09-02-ab12c"',
+        'chain: "Five Personas"',
+        'output: "Optimist"',
+        'source: "http://localhost:3000/runs/2026-09-02-ab12c"',
+        '---',
+        '',
+        'It could work.',
+        '',
+      ].join('\n'),
     )
+  })
+
+  it('leaves the link out rather than writing a broken one', () => {
+    expect(outputNoteContent(panel(), { ...meta, engineUrl: 'not a url' })).not.toContain('source:')
   })
 
   it('quotes a name that would otherwise break the frontmatter', () => {
@@ -132,7 +149,8 @@ describe('a note for an output that never happened', () => {
   it('leaves a hop that genuinely said nothing empty', () => {
     // `empty` is an answer; only a hop that never ran explains itself.
     expect(outputNoteContent(panel({ text: '', state: 'empty' }), meta)).toBe(
-      '---\nrun: "2026-09-02-ab12c"\nchain: "Five Personas"\noutput: "Optimist"\n---\n\n\n',
+      '---\nrun: "2026-09-02-ab12c"\nchain: "Five Personas"\noutput: "Optimist"\n' +
+        'source: "http://localhost:3000/runs/2026-09-02-ab12c"\n---\n\n\n',
     )
   })
 

@@ -1,3 +1,4 @@
+import { runViewUrl } from './provenance'
 import type { RunPanel } from './panels'
 
 /**
@@ -13,6 +14,8 @@ export interface OutputNoteMeta {
   chainName: string
   /** Where output notes go, from settings; the run folder is created inside it. */
   folder: string
+  /** The engine the run happened on, which the note's `source` link points into. */
+  engineUrl: string
 }
 
 /**
@@ -46,15 +49,19 @@ function yaml(value: string): string {
 }
 
 /**
- * The note itself: the three keys the convention promises, then the hop's text
- * untouched — a hop's own frontmatter or heading is kept, below this one.
+ * The note itself: the keys the convention promises, then the hop's text
+ * untouched — a hop's own frontmatter or heading is kept, below this one. The
+ * `source` link is for a reader outside the plugin; the header resolves its own
+ * against the engine set now (ADR-0004).
  */
 export function outputNoteContent(panel: RunPanel, meta: OutputNoteMeta): string {
+  const source = runViewUrl(meta.engineUrl, meta.runId)
   const frontmatter = [
     '---',
     `run: ${yaml(meta.runId)}`,
     `chain: ${yaml(meta.chainName)}`,
     `output: ${yaml(panel.name)}`,
+    ...(source ? [`source: ${yaml(source)}`] : []),
     '---',
     '',
   ]
