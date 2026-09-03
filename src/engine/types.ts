@@ -143,6 +143,13 @@ export interface LayoutModel {
 export interface Capabilities {
   /** `/api/run` streams `layout` frames, and every panel carries `node`. */
   runLayoutFrames?: boolean
+  /** The run reports its id as a `run_start` event, before the first layout frame. */
+  runStartEvent?: boolean
+  /**
+   * A failed run streams one last layout frame before its `error` — every panel
+   * still pending moved to `errored`, with the run's message on `panel.error`.
+   */
+  runFailureFrame?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain and supplies its inputs. */
@@ -194,6 +201,18 @@ export interface LayoutFrameEvent {
   model: LayoutModel
 }
 
+/**
+ * The run's id, sent before the first hop.
+ *
+ * `run_complete` carries the same id at the end. This one exists because a
+ * surface that files outputs as it goes needs the name of the run before there
+ * is anything to file — the drawing writes into `<folder>/<runId>/` (ADR-0003).
+ */
+export interface RunStartEvent {
+  type: 'run_start'
+  runId: string
+}
+
 export interface RunCompleteEvent {
   type: 'run_complete'
   runId: string
@@ -220,6 +239,7 @@ export type KnownRunEvent =
   | TokenEvent
   | AgentDoneEvent
   | LayoutFrameEvent
+  | RunStartEvent
   | RunCompleteEvent
   | RunErrorEvent
 

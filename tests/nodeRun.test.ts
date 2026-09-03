@@ -10,7 +10,7 @@ import {
   SOME_UNBOUND,
 } from '@/ui/nodeRun'
 import { CHAIN_GONE, NODE_GONE } from '@/ui/chainNodes'
-import { UNSUPPORTED_ENGINE } from '@/run/stream'
+import { UNSUPPORTED_STREAMING } from '@/run/stream'
 import { OFFLINE_NOTICE } from '@/engine/guard'
 import { runLabel, type NodeRunStatus } from '@/ui/chainNode'
 import type { NodeReading, NodeSurface } from '@/ui/excalidraw'
@@ -18,14 +18,14 @@ import { OutputNotes } from '@/ui/outputNotes'
 import type { RunFrame } from '@/run/runFrame'
 import type { EngineClient } from '@/engine/client'
 import { EngineOfflineError } from '@/engine/transport'
-import type { ChainSummary, RunEvent } from '@/engine/types'
+import type { Capabilities, ChainSummary, RunEvent } from '@/engine/types'
 import type { App } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
 /**
  * The seam a run on a drawing lives in: what is checked before anything is
- * launched, what the node says while it runs, and what is left on the drawing
- * when it settles.
+ * launched, what the node says while it runs, and what the outputs do as they
+ * fill.
  *
  * The three decisions underneath are pure and checked on their own —
  * `nodeScene.test.ts` for what is bound in, `runFrame.test.ts` for where it
@@ -42,11 +42,14 @@ const nodeData = {
   chainName: 'Relay',
 }
 
-/** The scene as the surface reads it back: one text block bound in, nothing unbound. */
+const RUN_ID = '2026-09-02-ab12c'
+const FIRST = `chains/runs/${RUN_ID}/First.md`
+const SURVIVOR = `chains/runs/${RUN_ID}/Survivor.md`
+
 let reading: NodeReading | undefined
 let events: RunEvent[]
 let launchError: unknown
-let capabilities: { runLayoutFrames?: boolean }
+let capabilities: Capabilities
 let chains: ChainSummary[]
 let online: boolean
 
@@ -54,11 +57,15 @@ let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
 let notices: string[]
 let labels: string[]
 let framed: { frame: RunFrame; notes: string[] }[]
-/** Whether this Excalidraw can make a real frame. */
-let canFrame: boolean
 let vault: Record<string, string>
 let folders: string[]
 let offline: number
+/** Whether this Excalidraw can make a real frame. */
+let canFrame: boolean
+/** Every vault write, so the cadence of the streaming flush is visible. */
+let writes: string[]
+/** What the vault held after each event of the stream was handled. */
+let duringRun: Record<string, string>[]
 
 const file = (path: string): StubFile => {
   const stub = new StubFile()
@@ -84,6 +91,22 @@ const layout = (names: string[], done: number): RunEvent => ({
   },
 })
 
+/** The final frame a failed run sends: everything still pending moved to errored. */
+const failureFrame = (names: string[], done: number, error: string): RunEvent => ({
+  type: 'layout',
+  model: {
+    kind: 'timeline',
+    panels: names.map((name, index) => ({
+      name,
+      node: name.toLowerCase(),
+      text: index < done ? `${name} said something` : '',
+      lines: index < done ? 1 : 0,
+      state: index < done ? ('filled' as const) : ('errored' as const),
+      ...(index < done ? {} : { error }),
+    })),
+  },
+})
+
 function makeRun(): NodeRun {
   const app = {
     vault: {
@@ -99,7 +122,13 @@ function makeRun(): NodeRun {
       cachedRead: (target: { path: string }) => Promise.resolve(vault[target.path] ?? ''),
       create: (path: string, content: string) => {
         vault[path] = content
+        writes.push(path)
         return Promise.resolve(file(path))
+      },
+      modify: (target: { path: string }, content: string) => {
+        vault[target.path] = content
+        writes.push(target.path)
+        return Promise.resolve()
       },
       createFolder: (path: string) => {
         folders.push(path)
@@ -135,7 +164,11 @@ function makeRun(): NodeRun {
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
       launched.push(request)
       if (launchError) throw launchError
-      for (const event of events) yield event
+      for (const event of events) {
+        yield event
+        // What the vault held once the plugin had finished with that event.
+        duringRun.push({ ...vault })
+      }
     },
   } as unknown as EngineClient
 
@@ -151,12 +184,13 @@ function makeRun(): NodeRun {
   })
 }
 
-/** A run of a chain that finishes with two panels and an id. */
+/** A run that names itself, declares two outputs, fills both and completes. */
 const finishes = (): RunEvent[] => [
+  { type: 'run_start', runId: RUN_ID },
   layout(['First', 'Survivor'], 0),
   layout(['First', 'Survivor'], 1),
   layout(['First', 'Survivor'], 2),
-  { type: 'run_complete', runId: '2026-09-02-ab12c' },
+  { type: 'run_complete', runId: RUN_ID },
 ]
 
 const start = (): Promise<void> => makeRun().run(nodeData, { groupIds: ['g-1'] })
@@ -169,7 +203,7 @@ beforeEach(() => {
   }
   events = finishes()
   launchError = undefined
-  capabilities = { runLayoutFrames: true }
+  capabilities = { runLayoutFrames: true, runStartEvent: true, runFailureFrame: true }
   chains = [relay]
   online = true
   launched = []
@@ -180,6 +214,8 @@ beforeEach(() => {
   vault = {}
   folders = []
   offline = 0
+  writes = []
+  duringRun = []
 })
 
 describe('what the run is given', () => {
@@ -229,93 +265,77 @@ describe('what the run is given', () => {
   })
 })
 
-describe('what the node says', () => {
-  it('counts the panels that have landed, out of the panels declared', async () => {
+describe('outputs that fill in place', () => {
+  it('opens every output and places the frame on the first frame that names them', async () => {
     await start()
-    expect(labels).toEqual([
-      runLabel({ kind: 'running', done: 0 }),
-      runLabel({ kind: 'running', done: 0, total: 2 }),
-      runLabel({ kind: 'running', done: 1, total: 2 }),
-      runLabel({ kind: 'running', done: 2, total: 2 }),
-      runLabel({ kind: 'done' }),
-    ])
+    // The second event is the first layout frame; by the end of it both notes
+    // exist and the frame is on the drawing, with nothing written in them yet.
+    expect(Object.keys(duringRun[1]).sort()).toEqual([FIRST, SURVIVOR])
+    expect(duringRun[1][FIRST]).toContain(`run: "${RUN_ID}"`)
+    expect(duringRun[1][FIRST]).not.toContain('said something')
+    expect(framed).toHaveLength(1)
   })
 
-  it('says nothing twice: a frame that changes no count is not a write', async () => {
-    events = [layout(['First', 'Survivor'], 0), layout(['First', 'Survivor'], 0), ...finishes().slice(1)]
-    const running = labels.filter(label => label === runLabel({ kind: 'running', done: 0, total: 2 }))
+  it('fills each note as its own hop lands, before the run is over', async () => {
     await start()
-    expect(running.length).toBeLessThanOrEqual(1)
+    // Third event: the first hop has landed and the second has not.
+    expect(duringRun[2][FIRST]).toContain('First said something')
+    expect(duringRun[2][SURVIVOR]).not.toContain('said something')
   })
 
-  it('carries the engine’s own message onto the node when a hop fails', async () => {
-    events = [
-      layout(['First'], 0),
-      {
-        type: 'agent_done',
-        agentName: 'First',
-        nodeId: 'first',
-        step: 1,
-        output: { agentName: 'First', output: '', status: 'error', error: 'the model refused', timestamp: '' },
-      },
-      layout(['First'], 1),
-      { type: 'run_complete', runId: '2026-09-02-ab12c' },
-    ]
-    await start()
-    // The notice is gone by the time the reader looks back at the drawing, so the
-    // reason has to be on the node as well as in the notice.
-    expect(labels.at(-1)).toContain('the model refused')
-    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: 'the model refused' }))
-    expect(notices).toContain('the model refused')
-  })
-
-  it('shows failed when the run never reported an id', async () => {
-    events = [layout(['First'], 1)]
-    await start()
-    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed' }))
-    expect(notices).toContain(NOTHING_WRITTEN)
-  })
-
-  it('says the run is done when it finished having produced nothing', async () => {
-    events = [{ type: 'run_complete', runId: '2026-09-02-ab12c' }]
-    await start()
-    expect(labels.at(-1)).toBe(runLabel({ kind: 'done' }))
-    expect(notices).toContain(NO_OUTPUTS)
-    expect(framed).toEqual([])
-  })
-
-  it('will not start a second run on a node already running', async () => {
-    const runner = makeRun()
-    const first = runner.run(nodeData, {})
-    await runner.run(nodeData, {})
-    await first
-    expect(notices).toContain(ALREADY_RUNNING)
-    expect(launched.length).toBe(1)
-  })
-})
-
-describe('what the run leaves behind', () => {
-  it('writes every output as a note under the run’s own folder', async () => {
-    await start()
-    expect(Object.keys(vault).sort()).toEqual([
-      'chains/runs/2026-09-02-ab12c/First.md',
-      'chains/runs/2026-09-02-ab12c/Survivor.md',
-    ])
-    const note = vault['chains/runs/2026-09-02-ab12c/First.md']
-    expect(note).toContain('run: "2026-09-02-ab12c"')
-    expect(note).toContain('chain: "Relay"')
-    expect(note).toContain('output: "First"')
-    expect(note).toContain('First said something')
-  })
-
-  it('places a frame named for the chain and the run, holding one embeddable per output', async () => {
+  it('places the frame once, however many frames arrive', async () => {
     await start()
     expect(framed).toHaveLength(1)
-    expect(framed[0].frame.name).toBe('Relay · 2026-09-02-ab12c')
-    expect(framed[0].notes).toEqual([
-      'chains/runs/2026-09-02-ab12c/First.md',
-      'chains/runs/2026-09-02-ab12c/Survivor.md',
+    expect(framed[0].frame.name).toBe(`Relay · ${RUN_ID}`)
+    expect(framed[0].notes).toEqual([FIRST, SURVIVOR])
+  })
+
+  it('does not write a note per token', async () => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      layout(['First'], 0),
+      { type: 'token', nodeId: 'first', token: 'a' },
+      { type: 'token', nodeId: 'first', token: 'b' },
+      { type: 'token', nodeId: 'first', token: 'c' },
+      layout(['First'], 1),
+      { type: 'run_complete', runId: RUN_ID },
+    ]
+    await start()
+    // One create, and one write when the hop lands. The three tokens add no
+    // line, so they cost the vault nothing.
+    expect(writes.filter(path => path === `chains/runs/${RUN_ID}/First.md`)).toHaveLength(2)
+  })
+
+  it('writes a partial that has reached a new line, so the reader sees it fill', async () => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      layout(['First'], 0),
+      { type: 'token', nodeId: 'first', token: 'a line\nand another' },
+      { type: 'run_complete', runId: RUN_ID },
+    ]
+    await start()
+    expect(duringRun[2][`chains/runs/${RUN_ID}/First.md`]).toContain('and another')
+  })
+
+  it('keeps two outputs of one name as two notes', async () => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      layout(['Same', 'Same'], 2),
+      { type: 'run_complete', runId: RUN_ID },
+    ]
+    await start()
+    expect(Object.keys(vault).sort()).toEqual([
+      `chains/runs/${RUN_ID}/Same 2.md`,
+      `chains/runs/${RUN_ID}/Same.md`,
     ])
+  })
+
+  it('writes each output with its own provenance', async () => {
+    await start()
+    expect(vault[FIRST]).toContain(`run: "${RUN_ID}"`)
+    expect(vault[FIRST]).toContain('chain: "Relay"')
+    expect(vault[FIRST]).toContain('output: "First"')
+    expect(vault[FIRST]).toContain('First said something')
   })
 
   it('says so when this Excalidraw could not make a frame, and still places the outputs', async () => {
@@ -332,6 +352,87 @@ describe('what the run leaves behind', () => {
   })
 })
 
+describe('what the node says', () => {
+  it('counts the panels that have landed, out of the panels declared', async () => {
+    await start()
+    expect(labels).toEqual([
+      runLabel({ kind: 'running', done: 0 }),
+      runLabel({ kind: 'running', done: 0, total: 2 }),
+      runLabel({ kind: 'running', done: 1, total: 2 }),
+      runLabel({ kind: 'running', done: 2, total: 2 }),
+      runLabel({ kind: 'done' }),
+    ])
+  })
+
+  it('carries the engine’s own message onto the node when a hop fails', async () => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      layout(['First'], 0),
+      failureFrame(['First'], 0, 'the model refused'),
+      { type: 'error', error: 'the model refused' },
+    ]
+    await start()
+    // The notice is gone by the time the reader looks back at the drawing, so the
+    // reason has to be on the node as well as in the notice.
+    expect(labels.at(-1)).toContain('the model refused')
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: 'the model refused' }))
+    expect(notices).toContain('the model refused')
+  })
+
+  it('says the run is done when it finished having produced nothing', async () => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      { type: 'run_complete', runId: RUN_ID },
+    ]
+    await start()
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'done' }))
+    expect(notices).toContain(NO_OUTPUTS)
+    expect(framed).toEqual([])
+  })
+
+  it('shows failed when the run never reported an id', async () => {
+    events = [layout(['First'], 1)]
+    await start()
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed' }))
+    expect(notices).toContain(NOTHING_WRITTEN)
+    expect(vault).toEqual({})
+  })
+
+  it('will not start a second run on a node already running', async () => {
+    const runner = makeRun()
+    const first = runner.run(nodeData, {})
+    await runner.run(nodeData, {})
+    await first
+    expect(notices).toContain(ALREADY_RUNNING)
+    expect(launched.length).toBe(1)
+  })
+})
+
+describe('a run that dies before a hop', () => {
+  const died = 'no API key for the provider'
+
+  beforeEach(() => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      layout(['First', 'Survivor'], 0),
+      failureFrame(['First', 'Survivor'], 0, died),
+      { type: 'error', error: died },
+    ]
+  })
+
+  it('leaves a note per declared output, each saying why there is nothing', async () => {
+    await start()
+    expect(Object.keys(vault).sort()).toEqual([FIRST, SURVIVOR])
+    expect(vault[FIRST]).toContain(`> ${died}`)
+    expect(vault[SURVIVOR]).toContain(`> ${died}`)
+  })
+
+  it('says failed on the node, with the engine’s words', async () => {
+    await start()
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: died }))
+  })
+})
+
 describe('what stops a run', () => {
   it('writes nothing when the engine is offline', async () => {
     online = false
@@ -342,7 +443,7 @@ describe('what stops a run', () => {
     expect(labels).toEqual([])
   })
 
-  it('writes nothing when the engine drops mid-run, and says so', async () => {
+  it('writes nothing when the engine drops before the run is named, and says so', async () => {
     launchError = new EngineOfflineError('http://localhost:3000')
     await start()
     expect(vault).toEqual({})
@@ -352,10 +453,17 @@ describe('what stops a run', () => {
     expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: OFFLINE_NOTICE }))
   })
 
-  it('refuses an engine that does not project its own panels', async () => {
-    capabilities = {}
+  it('refuses an engine that cannot name a run before its first hop', async () => {
+    capabilities = { runLayoutFrames: true, runFailureFrame: true }
     await start()
-    expect(notices).toEqual([UNSUPPORTED_ENGINE])
+    expect(notices).toEqual([UNSUPPORTED_STREAMING])
+    expect(launched).toEqual([])
+  })
+
+  it('refuses an engine that sends no final frame when a run fails', async () => {
+    capabilities = { runLayoutFrames: true, runStartEvent: true }
+    await start()
+    expect(notices).toEqual([UNSUPPORTED_STREAMING])
     expect(launched).toEqual([])
   })
 

@@ -75,7 +75,22 @@ export function outputNoteContent(panel: RunPanel, meta: OutputNoteMeta): string
     '---',
     '',
   ]
-  return `${frontmatter.join('\n')}\n${panel.text.replace(/\n+$/, '')}\n`
+  return `${frontmatter.join('\n')}\n${body(panel)}\n`
+}
+
+/**
+ * What the note says under its frontmatter: the hop's own words, or — for a hop
+ * that failed without producing any — why there are none.
+ *
+ * A run that dies before its first hop leaves a note per declared output
+ * (ADR-0003), and a file holding nothing but frontmatter tells the reader who
+ * finds it later nothing at all. The reason is quoted, so it never reads as
+ * something the chain said.
+ */
+function body(panel: RunPanel): string {
+  const said = panel.text.replace(/\n+$/, '')
+  if (said !== '' || panel.state !== 'errored' || !panel.error) return said
+  return `> ${panel.error.trim().split('\n').join('\n> ')}`
 }
 
 /** How far the suffix walk goes before it gives up rather than spinning. */
@@ -95,11 +110,34 @@ export async function resolveOutputPath(
   content: string,
   read: (path: string) => Promise<string | undefined>,
 ): Promise<string> {
+  return walkNames(path, async candidate => {
+    const existing = await read(candidate)
+    return existing === undefined || existing === content
+  })
+}
+
+/**
+ * The path to write to when the note is opened before it has anything to say.
+ *
+ * A run that fills its outputs as it goes (ADR-0003) creates them empty, so the
+ * "already says exactly this" rule `resolveOutputPath` uses cannot apply: two
+ * outputs of one run are both empty at the moment they are opened, and reusing
+ * the first note for the second would collapse them into one that then shows
+ * whichever hop wrote last. Here only a free name will do.
+ */
+export async function freeOutputPath(
+  path: string,
+  read: (path: string) => Promise<string | undefined>,
+): Promise<string> {
+  return walkNames(path, async candidate => (await read(candidate)) === undefined)
+}
+
+/** ` 2`, ` 3` and so on until `accept` takes one. */
+async function walkNames(path: string, accept: (candidate: string) => Promise<boolean>): Promise<string> {
   const stem = path.replace(/\.md$/, '')
   for (let suffix = 1; suffix <= MOST_SUFFIXES; suffix++) {
     const candidate = suffix === 1 ? path : `${stem} ${suffix}.md`
-    const existing = await read(candidate)
-    if (existing === undefined || existing === content) return candidate
+    if (await accept(candidate)) return candidate
   }
   // Unreachable in a vault a person made: it would take a thousand notes of one
   // name. It is here so a `read` that answers wrongly ends as a notice rather

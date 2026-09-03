@@ -1,5 +1,11 @@
 import { normalizePath, TFile, TFolder, type App } from 'obsidian'
-import { outputNoteContent, outputNotePath, resolveOutputPath, type OutputNoteMeta } from '../run/outputNote'
+import {
+  freeOutputPath,
+  outputNoteContent,
+  outputNotePath,
+  resolveOutputPath,
+  type OutputNoteMeta,
+} from '../run/outputNote'
 import type { RunPanel } from '../run/panels'
 
 /**
@@ -12,10 +18,22 @@ import type { RunPanel } from '../run/panels'
  *
  * Both surfaces that keep a piece of a run go through this, so a panel saved
  * from the sidebar and the same panel landing on a drawing are one note.
+ *
+ * There are two ways in, because the two surfaces know different things when
+ * they ask. The result view keeps a panel that has already settled and hands
+ * over its final text; a run on a drawing opens its notes before the first hop
+ * and rewrites them as the hops write (ADR-0003).
  */
 
 /** Which run a panel came from. The folder is settings', and read per write. */
 export type RunProvenance = Omit<OutputNoteMeta, 'folder'>
+
+/** A note a run holds open, to rewrite as its panel fills. */
+export interface OpenOutputNote {
+  file: TFile
+  /** Rewrites the note from the panel as it now stands. */
+  write(panel: RunPanel): Promise<void>
+}
 
 export interface OutputNotesDeps {
   app: App
@@ -45,6 +63,42 @@ export class OutputNotes {
       // already says it is kept as it is rather than rewritten.
       if (existing instanceof TFile) return existing
       return await this.deps.app.vault.create(path, content)
+    } catch (error) {
+      this.deps.notify(
+        error instanceof Error ? `Could not write the note: ${error.message}` : 'Could not write the note',
+      )
+      return undefined
+    }
+  }
+
+  /**
+   * A note this run owns from now until it ends, created empty and rewritten as
+   * its panel fills.
+   *
+   * The path is settled once, here, and never asked again: the note is placed on
+   * a drawing as an embeddable moments later, and Excalidraw stores that path
+   * inside its own scene file, where Obsidian's link-updating does not reach. A
+   * note that moved after being placed would leave a dead embeddable.
+   */
+  async open(panel: RunPanel, run: RunProvenance): Promise<OpenOutputNote | undefined> {
+    const meta: OutputNoteMeta = { ...run, folder: this.deps.folder() }
+    const wanted = normalizePath(outputNotePath(panel, meta))
+    try {
+      await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
+      const path = await freeOutputPath(wanted, candidate => this.read(candidate))
+      const file = await this.deps.app.vault.create(path, outputNoteContent(panel, meta))
+      let said = ''
+      return {
+        file,
+        write: async next => {
+          const content = outputNoteContent(next, meta)
+          // A run redraws the whole note from the panel it is sent, so a flush
+          // that would write what is already there is a vault write for nothing.
+          if (content === said) return
+          said = content
+          await this.deps.app.vault.modify(file, content)
+        },
+      }
     } catch (error) {
       this.deps.notify(
         error instanceof Error ? `Could not write the note: ${error.message}` : 'Could not write the note',

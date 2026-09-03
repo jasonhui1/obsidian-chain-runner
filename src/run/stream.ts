@@ -30,6 +30,30 @@ export function streamsLayout(capabilities: Capabilities): boolean {
   return capabilities.runLayoutFrames === true
 }
 
+/**
+ * Said when the engine cannot support outputs that fill in place. Named as the
+ * two things that are missing, because the fix is on the engine's side.
+ */
+export const UNSUPPORTED_STREAMING =
+  'This engine is too old to stream a run onto a drawing: it does not report a run id up front, or a final frame when a run fails. Update maestro-playground.'
+
+/**
+ * Whether the engine supports a run whose outputs land as it goes (ADR-0003).
+ *
+ * Both halves are needed and neither is inferable. Without `run_start` there is
+ * no run id to file notes under until the run is over; without
+ * `runFailureFrame` a failed run's panels stay `pending` for ever, and deciding
+ * that a pending panel is dead would be the plugin inventing a panel state —
+ * exactly what ADR-0001 gives to the engine.
+ */
+export function streamsOutputs(capabilities: Capabilities): boolean {
+  return (
+    streamsLayout(capabilities) &&
+    capabilities.runStartEvent === true &&
+    capabilities.runFailureFrame === true
+  )
+}
+
 /** How a run's stream ended. */
 export interface RunOutcome {
   /** The fold of every event that arrived, before it is settled. */

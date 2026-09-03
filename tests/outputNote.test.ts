@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { outputNoteContent, outputNotePath, resolveOutputPath } from '@/run/outputNote'
+import { freeOutputPath, outputNoteContent, outputNotePath, resolveOutputPath } from '@/run/outputNote'
 import type { RunPanel } from '@/run/panels'
 
 /**
@@ -96,5 +96,54 @@ describe('resolveOutputPath', () => {
     await expect(resolveOutputPath('runs/Optimist.md', 'text', () => Promise.resolve('taken'))).rejects.toThrow(
       /are all taken/,
     )
+  })
+})
+
+describe('a note opened before it has content', () => {
+  /** The vault as the walk sees it: a path holds a note, or it does not. */
+  const held = (paths: string[]) => (path: string) => Promise.resolve(paths.includes(path) ? '' : undefined)
+
+  it('takes the name when nothing holds it', async () => {
+    expect(await freeOutputPath('chains/runs/r1/Optimist.md', held([]))).toBe('chains/runs/r1/Optimist.md')
+  })
+
+  it('never reuses a note that happens to say the same nothing', async () => {
+    // Two outputs of one run are both empty at the moment they are opened, so
+    // the "already says exactly this" rule would collapse them into one note
+    // that then shows whichever hop wrote last (ADR-0003).
+    expect(await freeOutputPath('chains/runs/r1/Same.md', held(['chains/runs/r1/Same.md']))).toBe(
+      'chains/runs/r1/Same 2.md',
+    )
+  })
+
+  it('walks past every name that is taken', async () => {
+    const taken = ['chains/runs/r1/Same.md', 'chains/runs/r1/Same 2.md', 'chains/runs/r1/Same 3.md']
+    expect(await freeOutputPath('chains/runs/r1/Same.md', held(taken))).toBe('chains/runs/r1/Same 4.md')
+  })
+})
+
+describe('a note for an output that never happened', () => {
+  it('says why, quoted, rather than holding nothing but frontmatter', () => {
+    const content = outputNoteContent(panel({ text: '', state: 'errored', error: 'no API key' }), meta)
+    expect(content).toContain('> no API key')
+  })
+
+  it('quotes every line of a message that has several', () => {
+    const content = outputNoteContent(panel({ text: '', state: 'errored', error: 'refused:\nno key' }), meta)
+    expect(content).toContain('> refused:\n> no key')
+  })
+
+  it('leaves a hop that genuinely said nothing empty', () => {
+    // `empty` is an answer — the hop ran and had nothing to add. Only a hop that
+    // never got to run explains itself.
+    expect(outputNoteContent(panel({ text: '', state: 'empty' }), meta)).toBe(
+      '---\nrun: "2026-09-02-ab12c"\nchain: "Five Personas"\noutput: "Optimist"\n---\n\n\n',
+    )
+  })
+
+  it('keeps the hop’s own words when it produced some as well as an error', () => {
+    const content = outputNoteContent(panel({ text: 'half an answer', state: 'errored', error: 'cut off' }), meta)
+    expect(content).toContain('half an answer')
+    expect(content).not.toContain('> cut off')
   })
 })

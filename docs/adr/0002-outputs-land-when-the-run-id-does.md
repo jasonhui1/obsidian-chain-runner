@@ -1,6 +1,12 @@
 # ADR-0002: A run's outputs land when its id does
 
-Date: 2026-09-03 · Status: accepted
+Date: 2026-09-03 · Status: superseded by [ADR-0003](0003-outputs-fill-in-place.md)
+
+> **Superseded on the same day it was written.** The engine now reports its run
+> id before the first hop, which is the exact change the last section below names
+> as the one that would reopen this. The reasoning is kept because it is why the
+> engine changed, and because the constraint it describes — an output note is
+> filed under a run id — still holds.
 
 ## Context
 

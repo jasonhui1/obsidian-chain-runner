@@ -91,6 +91,9 @@ export function applyRunEvent(state: RunState, event: RunEvent): RunState {
   // without the plugin changing (ADR-0017).
   if (isEvent(event, 'layout')) return { ...state, layout: event.model }
 
+  // Both carry the same id; the first is what lets a surface file outputs while
+  // the run is still going, and the last is what an older engine sends alone.
+  if (isEvent(event, 'run_start')) return { ...state, runId: event.runId }
   if (isEvent(event, 'run_complete')) return { ...state, runId: event.runId }
   if (isEvent(event, 'error')) return { ...state, error: event.error }
 
