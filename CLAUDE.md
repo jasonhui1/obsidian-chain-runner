@@ -12,4 +12,6 @@ The five canonical triage roles, each using its default label string. See `docs/
 
 Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
-Read @CODING_STANDAND before starting to code
+### Coding standards
+
+Read `CODING_STANDARDS.md` before writing any code.
