@@ -40,6 +40,7 @@ Any plugin action taken while the engine is offline shows a `engine offline` not
 | Command | What it does |
 | --- | --- |
 | **Chain Runner: Run chain on this note** | The quick path, below. |
+| **Chain Runner: Mark lines to keep in this note** | Keep-marks over the note in front of you, below. |
 | **Chain Runner: Add chain node** | Puts a chain node on the Excalidraw drawing in front of you. |
 | **Chain Runner: List chains on the engine** | Fetches the workspace's chains and shows the count in a notice. The smoke test below uses it. |
 
@@ -110,6 +111,19 @@ The whole convention is `src/run/outputNote.ts`: a panel and a run's meta in, a 
 **Send to drawing** asks which drawing to put it on, and writes the same note once one is picked — dismissing the suggester leaves nothing behind. The drawings offered are: the drawings open right now first, then the ones opened recently in the order they were read, then the rest newest-written first. The note lands on the picked drawing as an **embeddable at the cursor**, and the drawing is saved. A drawing that is not open is opened first — Excalidraw's `ExcalidrawAutomate` can only be pointed at a live view.
 
 This needs the Excalidraw plugin, 2.0.0 or newer; without it the action says so and writes nothing. `docs/spike-ea.md` records why those are the calls: the version floor, the mandatory `setView` on every entry point, and the observation that an embeddable re-renders live when the note behind it is written.
+
+### Keep-marks
+
+**Keep lines**, the third action on a panel, and **Chain Runner: Mark lines to keep in this note** open the same surface: every line of the text, marked by clicking it or by moving with `↑` `↓` and pressing space. Marked lines are highlighted. `Enter`, or **Done**, ends the marking; `Escape` drops it.
+
+**Marks belong to the session, not to the note.** Nothing is written while marking, and closing the modal takes the marks with it.
+
+**Where they go is asked once, at the end** — the marks are made before there is anywhere to put them:
+
+- **Keep as a trimmed note.** Marked lines off a panel are still that run's output, so they are written as an output note by the convention above, named `<output> (kept).md`, run and chain frontmatter intact. Marked lines off a note are written beside it as `<note> (kept).md`, with `kept from: "[[<note>]]"` for its provenance. Either way a collision gets a suffix, and a note already saying exactly this is reused.
+- **Run a chain on the marked lines.** The chain picker opens, and the run is seeded with the marked lines rather than the whole note. The result view names it `seed: <note> (kept lines)`.
+
+Lines marked next to each other read as one passage; passages that were apart are separated by a blank line, which is a paragraph break to every chain. Marking nothing keeps nothing, and says so. The whole rule is `src/run/keepMarks.ts`, checked in `tests/keepMarks.test.ts` without a vault.
 
 **The run is the engine's.** `POST /api/run` records it like any other, so it appears in maestro-playground's history with a normal run id. The plugin keeps no second run store.
 
@@ -279,6 +293,7 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 7j. **Where an output came from.** Run a node and open one of its output notes. Expect `source` in the frontmatter pointing at `<engine>/history/<runId>`, and one faint **source run** line above the note's words — in the note's own tab *and* in the embeddable on the drawing. Ctrl/Cmd+click it: expect the playground's own view of that run.
 7k. **An output run again.** Arrow one output's embeddable into a second chain node and run it. Expect the second run to be seeded with that output's words and nothing else — no frontmatter, no `source run` line — a second frame titled with its own run id, and both runs in the playground's history.
 7l. **A run that is gone.** Delete that run from the engine's history and reopen the drawing. Expect the line to read **source run deleted** in amber, with no link and no notice. Then stop the engine and reopen it: expect the line to stay a link, because an engine that is down is not a run that was deleted.
+7m. **Keep-marks.** With a finished run on screen, click **Keep lines** on a filled panel. Mark a few lines by clicking them and a few more with ↑ ↓ and space; expect each marked line highlighted and the row under the keyboard marked down its edge. Press Enter, choose **Keep as a trimmed note**, and expect `<output> (kept).md` beside the panel's own note, the run and chain frontmatter intact, and only the marked lines in it — lines marked next to each other in one block, blocks that were apart separated by a blank line, and any indented line still indented. Then run **Chain Runner: Mark lines to keep in this note** on a note with frontmatter: expect the frontmatter not offered as lines, and, on choosing **Run a chain on the marked lines**, the chain picker followed by a run whose header reads `seed: <note>.md (kept lines)`. Close the modal with Escape and reopen it: expect no marks remembered and nothing written to the note.
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
 9b. **The node in both themes.** With a node on a drawing, switch light ↔ dark. Expect the title, the grey moment and the two blue links all legible in both — the node uses Excalidraw's own palette rather than Obsidian's variables, because a canvas element cannot read one, and it is Excalidraw's canvas inversion that has to carry it.
 9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes, and the two panel actions hovered and not.
@@ -301,4 +316,5 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 | Run meta records the parameter | verified read-only, 2026-09-02: `POST /api/run` reads `paramValue` and writes `parameter: { name, value }` onto the run (`app/api/run/route.ts`), and two runs on disk carry it — e.g. `2026-09-02-jFKjsR`, `{ name: 'target audience', value: 'your mom' }`. Not re-attested by a plugin-launched run, which would spend model tokens. |
 | Columns and sidebar shapes (steps 6c, 6d, 9) | **not run** — the arrangement is covered pure in `tests/arrangement.test.ts` for all three kinds, but no live run in a vault has drawn a `columns` or `sidebar` chain, and neither shape has been looked at in both themes. |
 | Chain nodes on a drawing (steps 7f–7i, 9b) | **not run** — the node's shape, the click handling and the offline and version refusals are covered in `tests/chainNode.test.ts` and `tests/chainNodes.test.ts`, but no node has been placed on a live drawing. Four things only a vault can attest: that `customData` survives Excalidraw's own save and reload, that `copyViewElementsToEAforEditing` rewrites a text element rather than adding a second one, that the link hook fires on a **standalone text** element (the spike observed it only on text bound into a box — `docs/spike-ea.md`, Q1), and that the node reads correctly in both themes. |
+| Keep-marks (step 7m) | **not run** — what the marks mean is covered pure in `tests/keepMarks.test.ts` and where they go in `tests/keepMarksActions.test.ts`, but no marking has been done in a vault. Two things only a vault can attest: that the modal's scope bindings (↑ ↓, space, Enter) do not fight Obsidian's own, and that a marked line reads legibly in both themes — it pairs `--text-highlight-bg`, which is semi-transparent, with `--text-normal`. |
 | Part three, the quick path | run 2026-09-02 in the `test_chain` vault against a live engine — twice: once on the ported layout model, and again after the engine began streaming `layout` frames (ADR-0017). Chains ran and their results drew correctly both times. The run opened in the playground's own history from the id the result header shows (step 4). Not itemised step by step; the capability refusal (step 4b) is not separately attested. |

@@ -375,3 +375,64 @@
 .chain-runner-source-run--deleted {
   color: var(--text-warning);
 }
+
+/* ── Keep-marks ───────────────────────────────────────────────────────
+   The marking surface. A mark is Obsidian's own highlight, which is legible in
+   both themes because the theme owns it; the cursor line is the hover ground the
+   rest of Obsidian uses for the row under the keyboard. */
+
+.chain-runner-mark-modal {
+  max-width: 44em;
+}
+
+.chain-runner-mark-lines {
+  max-height: 55vh;
+  overflow-y: auto;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2);
+}
+
+.chain-runner-mark-line {
+  padding: 0 var(--size-2-3);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.chain-runner-mark-line:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* A marked line is one you are keeping: the theme's highlight, and its words at
+   full strength. */
+.chain-runner-mark-line--marked {
+  background-color: var(--text-highlight-bg);
+  color: var(--text-normal);
+}
+
+/* Where the keyboard is, marked down the edge so it reads even over a highlight. */
+.chain-runner-mark-line--current {
+  box-shadow: inset 2px 0 0 0 var(--text-accent);
+}
+
+.chain-runner-mark-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-3);
+}
+
+.chain-runner-mark-count {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-mark-hint {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-left: auto;
+}

@@ -193,4 +193,8 @@ describe('seedLine', () => {
   it('says a selection was run, since the run then covers less than the note', () => {
     expect(seedLine({ note: 'premise.md', from: 'selection' })).toBe('seed: premise.md (selection)')
   })
+
+  it('says a run was seeded on kept lines, which is less again', () => {
+    expect(seedLine({ note: 'premise.md', from: 'marks' })).toBe('seed: premise.md (kept lines)')
+  })
 })

@@ -1,9 +1,9 @@
-import { MarkdownView, TFile, type App } from 'obsidian'
+import { MarkdownView, type App } from 'obsidian'
 import { ChainPicker, ParameterPicker } from './chainPicker'
 import type { RunResultView } from './resultView'
 import { buildRunResult, emptyRunState, settleRun } from '../run/session'
 import { streamRun, streamsLayout, UNSUPPORTED_ENGINE } from '../run/stream'
-import { chooseSeed, type Seed } from '../run/seed'
+import { chooseSeed, type Seed, type SeedSource } from '../run/seed'
 import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
 
@@ -22,9 +22,10 @@ export interface QuickRunDeps {
 /** One run, as the reader assembled it: what to run, on what, with what set. */
 interface QuickRun {
   chain: ChainSummary
-  /** The note's text, or the selection when there was one, and which of the two. */
+  /** The words the engine is given, and how much of the note they are. */
   seed: Seed
-  note: TFile
+  /** The note behind those words, which the header names and links resolve against. */
+  source: SeedSource
   /** The chain's dropdown, when it declares one. */
   paramValue?: string
 }
@@ -59,6 +60,14 @@ export class QuickRunner {
       return
     }
 
+    await this.runOn(seed, { name: note.name, path: note.path })
+  }
+
+  /**
+   * A run on words already chosen — the note the command read, or the lines a
+   * reader kept off one. The picker, then the run.
+   */
+  async runOn(seed: Seed, source: SeedSource): Promise<void> {
     const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
     if (!workspace) return
     // The panels are the engine's to project (ADR-0001), so an engine too old to
@@ -73,7 +82,7 @@ export class QuickRunner {
     }
 
     new ChainPicker(this.deps.app, workspace.chains, chain =>
-      this.pickParameter({ chain, seed, note }),
+      this.pickParameter({ chain, seed, source }),
     ).open()
   }
 
@@ -96,7 +105,7 @@ export class QuickRunner {
   }
 
   private async launch(run: QuickRun): Promise<void> {
-    const { chain, seed, note, paramValue } = run
+    const { chain, seed, source, paramValue } = run
     const view = await this.deps.openResultView()
     if (!view) {
       this.deps.notify('No room in the sidebar for the result')
@@ -111,8 +120,8 @@ export class QuickRunner {
     // The header names the note, not the seed text, which has gone to the engine.
     const show = (): void =>
       view.show(
-        buildRunResult({ chain, seed: { note: note.name, from: seed.from }, state, paramValue }),
-        note.path,
+        buildRunResult({ chain, seed: { note: source.name, from: seed.from }, state, paramValue }),
+        source.path,
       )
     show()
 

@@ -44,7 +44,7 @@ export function outputNotePath(panel: RunPanel, meta: OutputNoteMeta): string {
 }
 
 /** A frontmatter value. Everything is quoted, so a chain named `yes` stays a string. */
-function yaml(value: string): string {
+export function yaml(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 

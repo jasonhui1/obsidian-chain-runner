@@ -3,10 +3,13 @@ import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
+import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
 import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
+import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
+import { MarkLinesModal } from './ui/markLines'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
@@ -62,12 +65,20 @@ export default class ChainRunnerPlugin extends Plugin {
       notes,
       drawing: createDrawingSurface(this.app),
     })
+    const marks = new KeepMarks({
+      app: this.app,
+      notify: message => new Notice(message),
+      notes,
+      mark: (text, onDone) => new MarkLinesModal(this.app, text, onDone).open(),
+      runChain: ({ text, source }) => void this.quickRun.runOn({ text, from: 'marks' }, source),
+    })
     this.registerView(
       RESULT_VIEW_TYPE,
       leaf =>
         new RunResultView(leaf, {
           saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
           sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
+          keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
         }),
     )
     this.quickRun = new QuickRunner({
@@ -130,6 +141,12 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void this.quickRun.start(),
     })
 
+    this.addCommand({
+      id: 'mark-lines-to-keep',
+      name: 'Mark lines to keep in this note',
+      callback: () => void this.markLines(marks),
+    })
+
     // Proof the client reaches a live engine, and something to exercise the
     // offline path against (#3).
     this.addCommand({
@@ -142,6 +159,20 @@ export default class ChainRunnerPlugin extends Plugin {
         })
       },
     })
+  }
+
+  /**
+   * Marks lines of the note in front of the reader. Frontmatter comes off first,
+   * as it does for a run: it is the vault's bookkeeping, not the note's words.
+   */
+  private async markLines(marks: KeepMarks): Promise<void> {
+    const file = this.app.workspace.getActiveFile()
+    if (!file || file.extension !== 'md') {
+      new Notice('Open a note to mark lines in it')
+      return
+    }
+    const text = seedFromNote(await this.app.vault.cachedRead(file))
+    marks.start({ kind: 'note', text, file })
   }
 
   /**

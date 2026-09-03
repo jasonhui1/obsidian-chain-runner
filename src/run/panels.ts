@@ -47,7 +47,8 @@ function scoped(text: string, socket: string | undefined): string {
   return extractSection(text, socket)
 }
 
-function lineCount(text: string): number {
+/** How much a panel holds, in the one count every surface shows. */
+export function lineCount(text: string): number {
   const trimmed = text.trim()
   return trimmed === '' ? 0 : trimmed.split('\n').length
 }

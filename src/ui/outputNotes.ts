@@ -36,14 +36,27 @@ export class OutputNotes {
 
   /** A settled panel's note. `undefined` means the vault refused it, and said so. */
   async write(panel: RunPanel, run: RunProvenance): Promise<TFile | undefined> {
-    return this.inFolder(panel, run, async (meta, wanted) => {
-      const content = outputNoteContent(panel, meta)
-      const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))
-      const existing = this.deps.app.vault.getAbstractFileByPath(path)
-      // The path is free, or already holds exactly this.
-      if (existing instanceof TFile) return existing
-      return this.deps.app.vault.create(path, content)
+    return this.inFolder(panel, run, (meta, wanted) => this.writeOrReuse(wanted, outputNoteContent(panel, meta)))
+  }
+
+  /**
+   * A note at a path the caller chose, written by the convention's own rules —
+   * for what no run wrote, such as the lines kept off a note.
+   */
+  async writeNote(path: string, content: string): Promise<TFile | undefined> {
+    return this.guard(async () => {
+      const wanted = normalizePath(path)
+      await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
+      return this.writeOrReuse(wanted, content)
     })
+  }
+
+  /** The note at `wanted`, written or already there: one saying exactly this is reused. */
+  private async writeOrReuse(wanted: string, content: string): Promise<TFile> {
+    const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))
+    const existing = this.deps.app.vault.getAbstractFileByPath(path)
+    if (existing instanceof TFile) return existing
+    return this.deps.app.vault.create(path, content)
   }
 
   /**
@@ -68,7 +81,7 @@ export class OutputNotes {
     })
   }
 
-  /** Runs `use` with the folder made; a refusal is one notice and `undefined`. */
+  /** Runs `use` with the run's folder made; a refusal is one notice and `undefined`. */
   private async inFolder<T>(
     panel: RunPanel,
     run: RunProvenance,
@@ -76,9 +89,16 @@ export class OutputNotes {
   ): Promise<T | undefined> {
     const meta: OutputNoteMeta = { ...run, folder: this.deps.folder(), engineUrl: this.deps.engineUrl() }
     const wanted = normalizePath(outputNotePath(panel, meta))
-    try {
+    return this.guard(async () => {
       await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
-      return await use(meta, wanted)
+      return use(meta, wanted)
+    })
+  }
+
+  /** Every write the vault can refuse goes through here: one notice, and `undefined`. */
+  private async guard<T>(use: () => Promise<T>): Promise<T | undefined> {
+    try {
+      return await use()
     } catch (error) {
       this.deps.notify(
         error instanceof Error ? `Could not write the note: ${error.message}` : 'Could not write the note',

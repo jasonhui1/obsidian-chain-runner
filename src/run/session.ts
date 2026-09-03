@@ -107,9 +107,15 @@ export interface RunSeed {
   from: SeedOrigin
 }
 
-/** The header's one line about the seed; only a selection run needs the qualifier. */
+/** How much of the note a run read; the whole note needs no qualifier. */
+const HOW_MUCH: Partial<Record<SeedOrigin, string>> = {
+  selection: ' (selection)',
+  marks: ' (kept lines)',
+}
+
+/** The header's one line about the seed. */
 export function seedLine(seed: RunSeed): string {
-  return seed.from === 'selection' ? `seed: ${seed.note} (selection)` : `seed: ${seed.note}`
+  return `seed: ${seed.note}${HOW_MUCH[seed.from] ?? ''}`
 }
 
 /** Everything the result view renders, for a run at one moment. */

@@ -11,6 +11,8 @@ export const RESULT_VIEW_TYPE = 'chain-runner-result'
 export interface PanelActions {
   saveAsNote: (panel: RunPanel, run: RunResult) => void
   sendToDrawing: (panel: RunPanel, run: RunResult) => void
+  /** Marks lines of the panel to keep, and asks at the end where they go. */
+  keepLines: (panel: RunPanel, run: RunResult) => void
 }
 
 const STATUS_LABEL: Record<RunStatus, string> = {
@@ -195,6 +197,7 @@ export class RunResultView extends ItemView {
     if (!this.actions || !run?.runId || panel.state !== 'filled') return
     const actions = parent.createDiv({ cls: 'chain-runner-panel-actions' })
     this.drawAction(actions, 'Save as note', () => this.actions?.saveAsNote(panel, run))
+    this.drawAction(actions, 'Keep lines', () => this.actions?.keepLines(panel, run))
     this.drawAction(actions, 'Send to drawing', () => this.actions?.sendToDrawing(panel, run))
   }
 

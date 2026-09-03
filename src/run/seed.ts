@@ -9,8 +9,14 @@ export function seedFromNote(text: string): string {
   return text.replace(FRONTMATTER, '').trim()
 }
 
-/** Where a run's seed came from — the whole note, or the passage in front of you. */
-export type SeedOrigin = 'selection' | 'note'
+/** Where a run's seed came from — the whole note, the passage in front of you, or the lines kept off one. */
+export type SeedOrigin = 'selection' | 'note' | 'marks'
+
+/** The note a run was launched from: how the header names it, and what its links resolve against. */
+export interface SeedSource {
+  name: string
+  path: string
+}
 
 /** The text a run was given, and what it came from; `RunSeed` is the header's half. */
 export interface Seed {
