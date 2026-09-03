@@ -125,6 +125,7 @@ explicit.
 | `addText(x, y, text, {box, boxPadding, width, textAlign})` | the chain-node box |
 | `addRect(x, y, w, h)` | plain shapes |
 | `addEmbeddable(x, y, w, h, undefined, tFile)` | output notes on the drawing |
+| `addFrame(x, y, w, h, name)` | the frame a run's outputs land in |
 | `getElement(id)` / `getElements()` | set `.link` and `.customData` before committing |
 | `getViewElements()` | read what is already in the scene |
 | `addElementsToView(false, true)` | commit + save |
@@ -159,6 +160,13 @@ thrown, so scripts appear to run successfully while drawing nothing.
 **Stream into embeddables.** Q2 confirms a live re-render, so the run can create each
 output note empty, place its embeddable immediately, and append to the note as the
 engine's SSE stream arrives. The user watches outputs fill in place.
+
+**Shipped in #9, and confirmed by hand.** Outputs fill in place as the run streams;
+an output dragged out of its frame stays where it is put and edits in place.
+`addFrame` — the one method in the table this spike never exercised — **exists and
+works**, so a run's outputs land in a real Excalidraw frame rather than the loose
+fallback the plugin carries for engines that lack it. Getting there needed three
+engine changes, not just the two calls above: see ADR-0003.
 
 Cadence: flush to the note per line or per paragraph, not per token — each flush is a
 vault write, and the embeddable only repaints per write anyway.
