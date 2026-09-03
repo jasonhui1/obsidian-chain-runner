@@ -53,11 +53,7 @@ interface ExcalidrawAutomate {
   style: ElementStyle
   addEmbeddable(x: number, y: number, width: number, height: number, url?: string, file?: TFile): string
   addRect(x: number, y: number, width: number, height: number): string
-  /**
-   * Excalidraw's own frame. Feature-detected rather than required: the spike
-   * verified the four `add*` calls below and not this one, and a drawing is
-   * better off with a labelled rectangle than with nothing.
-   */
+  /** Feature-detected: the spike verified the other `add*` calls, not this one. */
   addFrame?(x: number, y: number, width: number, height: number, name?: string): string
   addText(x: number, y: number, text: string, formatting?: TextFormatting): string
   getElement(id: string): SceneElement | undefined
@@ -123,11 +119,9 @@ export type DrawingView = unknown
 
 /** What a node's drawing says about it, at the moment it was asked. */
 export interface NodeReading {
-  /** Where the node sits, which is what its run's frame is placed against. */
   box: Box
-  /** What is bound into it, in reading order. */
   inputs: NodeInputs
-  /** The drawing's own path, which is what a wiki link on it resolves against. */
+  /** The drawing's path, which a wiki link on it resolves against. */
   drawing: string
 }
 
@@ -154,11 +148,7 @@ export interface NodeSurface {
   read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
   /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
   setRunStatus(target: NodeTarget, status: NodeRunStatus, on?: DrawingView): Promise<boolean>
-  /**
-   * Puts a run's outputs on the drawing: a frame, and one embeddable per output.
-   * `false` means this Excalidraw could not make a frame, so the outputs were
-   * placed beside the node without one.
-   */
+  /** `false` means no frame could be made and the outputs landed loose. */
   placeRun(frame: RunFrame, outputs: readonly PlacedOutput[], on?: DrawingView): Promise<boolean>
 }
 
@@ -256,9 +246,7 @@ export function createNodeSurface(app: App): NodeSurface {
     placeRun: async (frame, outputs, on) => {
       const { ea } = bind(on)
 
-      // The frame comes first so the panels can name it as their container. An
-      // Excalidraw with no `addFrame` still gets the outputs — they are the run —
-      // and the caller is told they landed loose rather than being grouped.
+      // First, so the panels can name it as their container.
       const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
 
       for (const { placed, note } of outputs) {
@@ -266,15 +254,11 @@ export function createNodeSurface(app: App): NodeSurface {
         const { box } = placed
         const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
         const element = ea.getElement(id)
-        // Excalidraw works out frame membership when a reader drops something in
-        // one; an element placed by a script has to say so itself. Without this
-        // the panels would sit over the frame rather than in it, and dragging the
-        // frame would leave them behind.
+        // A scripted element has to claim its frame; only a drop is worked out.
         if (element && frameId) element.frameId = frameId
       }
       ea.style.strokeWidth = PLAIN_STROKE
-      // Not repositioned to the cursor: the coordinates are the node's own, and
-      // a run's outputs belong beside the node that produced them.
+      // Not repositioned to the cursor: the coordinates are the node's own.
       await ea.addElementsToView(false, true)
       return frameId !== undefined
     },
@@ -285,11 +269,7 @@ export function createNodeSurface(app: App): NodeSurface {
 const EMPHASIS_STROKE = 4
 const PLAIN_STROKE = 1
 
-/**
- * Writes edits back to the node they came from. `false` means there was nothing
- * to write to, which is what a node deleted between the click and the write
- * looks like.
- */
+/** `false` means the node was deleted between the click and the write. */
 async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): Promise<boolean> {
   if (edits.length === 0) return false
   // Editing in place rather than adding: the copies keep their ids, so

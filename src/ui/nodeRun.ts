@@ -13,68 +13,48 @@ import type { EngineClient } from '../engine/client'
 import type { ChainSummary, LayoutModel, PanelState } from '../engine/types'
 
 /**
- * Running a chain node: the arrows into it become the seed, and what comes back
- * becomes notes on the drawing.
- *
- * The three decisions this makes are each somewhere else, and pure: what is
- * bound in is `./nodeScene.ts`, what a panel *is* is the engine's (ADR-0001),
- * and where each one lands is `../run/runFrame.ts`. What is left here is the
- * order — what is checked before anything is launched, what the node says while
- * it runs, and what is written when it settles.
- *
- * The outputs fill in place. The engine names the run before its first hop, so
- * every declared output is opened as an empty note and placed on the drawing as
- * soon as the first layout frame says what they are; each one is then rewritten
- * as its hop writes, and the reader watches the drawing fill (ADR-0003).
+ * Running a chain node: the arrows in become the seed, and the outputs become
+ * notes that fill in place on the drawing (ADR-0003). What is bound in is
+ * `./nodeScene.ts`; where each output lands is `../run/runFrame.ts`.
  */
 
 export const NO_INPUTS =
   'Nothing is bound into this chain node. Draw an arrow into it from a text block or an embedded note.'
 
-/** Said when arrows were drawn into the node that say nothing, alongside ones that do. */
 export const SOME_UNBOUND = (count: number): string =>
   count === 1
     ? 'One arrow into this node came from nothing readable, and was skipped.'
     : `${count} arrows into this node came from nothing readable, and were skipped.`
 
-/** A note an embeddable points at that the vault no longer holds. */
 export const MISSING_NOTE = (linkpath: string): string => `${linkpath} is no longer in the vault, so it was skipped.`
 
-/** Said on a second click while the first run is still going. */
 export const ALREADY_RUNNING = 'This chain node is already running.'
 
-/** The run reached the engine and never got an id, so there is nothing to file under. */
 export const NOTHING_WRITTEN = 'The run did not finish, so nothing was written.'
 
-/** The run finished and the chain produced no panels; there is nothing to place. */
 export const NO_OUTPUTS = 'The run finished without producing any output.'
 
-/** This Excalidraw cannot make a frame, so the outputs were placed without one. */
 export const NO_FRAME =
   'This Excalidraw cannot make frames, so the outputs were placed loose beside the node. Update it to group them.'
 
 export interface NodeRunDeps {
   app: App
   engine: EngineClient
-  /** Every call that needs the engine goes through this; offline is a notice and nothing else. */
+  /** Offline is a notice and nothing else. */
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
-  /** Moves the status pill offline on first-hand evidence, rather than at the next poll. */
   markOffline: () => void
   surface: NodeSurface
-  /** The output-note convention, shared with the result view's own actions. */
   notes: OutputNotes
 }
 
 /** One run of one node, as the click assembled it. */
 interface NodeRunPlan {
   chain: ChainSummary
-  /** What the arrows into the node came to, as one piece of text. */
   seed: string
   target: NodeTarget
-  /** The view the click happened in, which is the only handle on an embedded drawing. */
+  /** The click's own view — the only handle on a drawing embedded in a note. */
   view: DrawingView | undefined
-  /** Where the node sits, which is what the run's frame is placed against. */
   node: Box
   parameterValue?: string
 }
@@ -85,13 +65,7 @@ export class NodeRun {
 
   constructor(private readonly deps: NodeRunDeps) {}
 
-  /**
-   * A click on a node's `▶ Run`.
-   *
-   * Everything that could stop the run is checked before the node is marked as
-   * running: a reader whose engine is offline or whose arrows are bound to
-   * nothing should see a notice and a node that still says `▶ Run`.
-   */
+  /** A click on a node's `▶ Run`. */
   async run(data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView): Promise<void> {
     const target: NodeTarget = {
       nodeId: data.nodeId,
@@ -101,9 +75,7 @@ export class NodeRun {
       this.deps.notify(ALREADY_RUNNING)
       return
     }
-    // Claimed before the first await, not when the stream opens: the checks below
-    // reach the engine, and a second click during one of them is still a second
-    // run on a node that is already starting one.
+    // Claimed before the first await: the checks below reach the engine.
     const controller = new AbortController()
     this.inFlight.set(data.nodeId, controller)
     try {
@@ -131,10 +103,6 @@ export class NodeRun {
 
     const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
     if (!workspace) return
-    // The panels are the engine's to project (ADR-0001) and the frame is placed
-    // from them, so an engine that does not stream them cannot be drawn for —
-    // and one that cannot name a run up front cannot have its outputs filled in
-    // place (ADR-0003).
     if (!streamsOutputs(workspace.capabilities)) {
       this.deps.notify(UNSUPPORTED_STREAMING)
       return
@@ -147,8 +115,7 @@ export class NodeRun {
 
     const seed = await this.seed(reading.inputs.inputs, reading.drawing)
     if (reading.inputs.unbound > 0) this.deps.notify(SOME_UNBOUND(reading.inputs.unbound))
-    // A chain that pins its own files reads nothing from the drawing, so an
-    // empty seed is only a mistake for a chain that asked for one.
+    // A chain that pins its own files reads nothing from the drawing.
     if (seed === '' && chain.seeded !== false) {
       this.deps.notify(NO_INPUTS)
       return
@@ -183,11 +150,7 @@ export class NodeRun {
     return undefined
   }
 
-  /**
-   * The inputs as one piece of text. A note contributes its body — the vault's
-   * own frontmatter is bookkeeping and not part of the argument, the same rule
-   * the quick path reads a note by.
-   */
+  /** The inputs as one piece of text; a note contributes its body, minus frontmatter. */
   private async seed(inputs: NodeInput[], drawing: string): Promise<string> {
     const parts: string[] = []
     for (const input of inputs) {
@@ -209,8 +172,7 @@ export class NodeRun {
     const { chain, seed, target, view, parameterValue } = plan
 
     let said = ''
-    // The node is written to only when its words change: every write to a
-    // drawing is a save, and a run of forty tokens is not forty saves.
+    // Every write to a drawing is a save, so only a change of words earns one.
     const say = async (status: NodeRunStatus): Promise<void> => {
       const next = JSON.stringify(status)
       if (next === said) return
@@ -220,7 +182,6 @@ export class NodeRun {
 
     await say({ kind: 'running', done: 0 })
 
-    /** The outputs on the drawing, from the first layout frame that names them. */
     let live: LiveOutputs | undefined
 
     const outcome = await streamRun({
@@ -240,21 +201,16 @@ export class NodeRun {
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
     })
-    // A run dropped because the plugin unloaded has no node left to tell. The
-    // notes it opened stay as they are: they are a real record of a real run.
+    // Dropped by an unload: the notes stay as a record of a real run.
     if (outcome.aborted) return
 
     await this.finish(settleRun(outcome.state, outcome.failure), plan, outcome.failure, live)
   }
 
   /**
-   * Opens the run's outputs and puts them on the drawing: one empty note per
-   * declared output, each inside the frame, before any of them has anything to
-   * say.
-   *
-   * This happens once, on the first frame that names the panels. Later frames
-   * change what the panels hold and never where they are — placement is initial
-   * only, and a reader who has dragged an output somewhere better keeps it.
+   * One empty note per declared output, placed in the frame. Once, on the first
+   * frame that names the panels: placement is initial only, so an output the
+   * reader drags somewhere better stays there.
    */
   private async open(
     runId: string | undefined,
@@ -268,8 +224,7 @@ export class NodeRun {
     const placed: PlacedOutput[] = []
     for (const one of frame.panels) {
       const note = await this.deps.notes.open(one.panel, { runId, chainName: plan.chain.name })
-      // A note the vault refused has said so already; the rest of the run still
-      // lands, so one unwritable name does not cost the reader the whole frame.
+      // A refused note has said so already; the rest of the run still lands.
       if (!note) continue
       outputs.push({ index: one.index, note, written: { text: '', state: 'pending' } })
       placed.push({ placed: one, note: note.file })
@@ -279,18 +234,10 @@ export class NodeRun {
     return { frame, outputs }
   }
 
-  /**
-   * Writes what each output says now into the note showing it.
-   *
-   * Not every frame: the spike found an embeddable repaints per write and not
-   * per character (`docs/spike-ea.md`, Q2), so the cadence that costs least and
-   * shows the same thing is a line at a time. `force` is the last flush of a
-   * settled run, where every note takes the panel's final word whatever it is.
-   */
+  /** Writes each output into its note. `force` is a settled run's last flush. */
   private async fill(live: LiveOutputs, layout: RunLayout, force: boolean): Promise<void> {
     for (const output of live.outputs) {
-      // The frame's order is not the engine's, so the panel is found by the index
-      // it was opened against and never by where it sits in the frame.
+      // By index, never by place in the frame: `columns` reorders.
       const panel = layout.panels[output.index]
       if (!panel) continue
       const shown = { ...panel, text: shownText(panel) }
@@ -301,26 +248,20 @@ export class NodeRun {
   }
 
   /**
-   * The run is over: the outputs take their final text, and the node says how it
-   * went.
-   *
-   * A run that never reported an id opened nothing, so there is nothing to
-   * finish and nothing was written. A run that finished having produced no
-   * panels is done, not failed: an empty answer is still the chain's answer.
+   * The outputs take their final text and the node says how it went. A run that
+   * produced no panels is done, not failed — an empty answer is still an answer.
    */
   private async finish(
     state: RunState,
     plan: NodeRunPlan,
-    /** What was already said on the way out, so a failure is not said twice. */
+    /** Already said on the way out, so a failure is not said twice. */
     said: string | undefined,
     live: LiveOutputs | undefined,
   ): Promise<void> {
     const { chain, target, view } = plan
     const error = runFailure(state)
-    // A hop that failed is the engine's own message, and nothing has said it yet.
     if (error && error !== said) this.deps.notify(error)
-    // The reason travels onto the node itself: a notice is gone by the time the
-    // reader looks back at the drawing, and the node is what they look at.
+    // The reason goes onto the node too: a notice is gone when the reader looks back.
     const outcome: NodeRunStatus = error ? { kind: 'failed', error } : { kind: 'done' }
 
     if (!live) {
@@ -336,9 +277,7 @@ export class NodeRun {
       return
     }
 
-    // The engine sends one last frame when a run fails, every panel still
-    // pending moved to `errored` with its message (ADR-0003) — so this writes
-    // the outcome the engine settled, and never one worked out here.
+    // A failed run's last frame carries the outcome, so nothing is settled here (ADR-0003).
     await this.fill(live, buildRunPanels(chain, state.layout, state.nodes), true)
     await this.onDrawing(() => this.deps.surface.setRunStatus(target, outcome, view))
   }
@@ -346,8 +285,6 @@ export class NodeRun {
   /** Puts the frame on the drawing, saying so when it could not be a real frame. */
   private async place(frame: RunFrame, outputs: PlacedOutput[], view: DrawingView | undefined): Promise<void> {
     await this.onDrawing(async () => {
-      // The outputs are the run; a frame that could not be made is worth saying
-      // and not worth withholding them over.
       if (!(await this.deps.surface.placeRun(frame, outputs, view))) this.deps.notify(NO_FRAME)
       return true
     })
@@ -365,52 +302,40 @@ export class NodeRun {
 
 /** One output being filled: the note, and which panel's words go in it. */
 interface LiveOutput {
-  /** Which of the layout's panels this note holds, in the engine's own order. */
+  /** Its panel's position in the engine's order. */
   index: number
   note: OpenOutputNote
-  /** What the note was last written from, which is what sets the flush cadence. */
+  /** What it was last written from, which sets the flush cadence. */
   written: { text: string; state: PanelState }
 }
 
-/** A run's outputs on the drawing, once the first layout frame has named them. */
 interface LiveOutputs {
   frame: RunFrame
-  /** Only the outputs that got a note; one the vault refused is simply absent. */
+  /** Only the outputs that got a note. */
   outputs: LiveOutput[]
 }
 
-/** What a panel has to show right now: its settled text, or the tokens so far. */
+/** A panel's settled text, or the tokens so far. */
 function shownText(panel: RunPanel): string {
   return panel.streaming ?? panel.text
 }
 
 /**
- * Whether a panel has moved on enough to be worth a vault write — it has
- * finished another line, or its outcome changed.
- *
- * The spike's cadence, taken literally (`docs/spike-ea.md`, Q2): an embeddable
- * repaints per write and not per character, so a write per token would be a
- * vault write per character and would show the reader nothing that a line at a
- * time does not. A hop's last, unfinished line is never lost — the change of
- * state when it settles flushes whatever it ended on.
+ * A line at a time, the spike's cadence (`docs/spike-ea.md`, Q2): an embeddable
+ * repaints per write, so a write per token buys nothing. A hop's unfinished last
+ * line is flushed by the state change when it settles.
  */
 function worthWriting(before: { text: string; state: PanelState }, panel: RunPanel): boolean {
   if (before.state !== panel.state) return true
   return finishedLines(panel.text) > finishedLines(before.text)
 }
 
-/** Lines the text has actually ended. The one still being written is not one. */
+/** The line still being written is not a finished one. */
 function finishedLines(text: string): number {
   return text.trimEnd().split('\n').length - 1
 }
 
-/**
- * What the node says while a run is going: panels landed, out of panels declared.
- *
- * The count comes from the engine's own layout frame, which arrives before the
- * first hop — so a node counts steps as soon as there is a total to count
- * against, and says only that it is running before then.
- */
+/** Panels landed, out of panels declared; the total arrives with the first frame. */
 function progress(model: LayoutModel | undefined): NodeRunStatus {
   if (!model || model.panels.length === 0) return { kind: 'running', done: 0 }
   return {

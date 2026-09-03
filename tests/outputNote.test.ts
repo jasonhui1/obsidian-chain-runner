@@ -108,9 +108,7 @@ describe('a note opened before it has content', () => {
   })
 
   it('never reuses a note that happens to say the same nothing', async () => {
-    // Two outputs of one run are both empty at the moment they are opened, so
-    // the "already says exactly this" rule would collapse them into one note
-    // that then shows whichever hop wrote last (ADR-0003).
+    // Both are empty when opened, so the reuse rule would collapse them (ADR-0003).
     expect(await freeOutputPath('chains/runs/r1/Same.md', held(['chains/runs/r1/Same.md']))).toBe(
       'chains/runs/r1/Same 2.md',
     )
@@ -134,8 +132,7 @@ describe('a note for an output that never happened', () => {
   })
 
   it('leaves a hop that genuinely said nothing empty', () => {
-    // `empty` is an answer — the hop ran and had nothing to add. Only a hop that
-    // never got to run explains itself.
+    // `empty` is an answer; only a hop that never ran explains itself.
     expect(outputNoteContent(panel({ text: '', state: 'empty' }), meta)).toBe(
       '---\nrun: "2026-09-02-ab12c"\nchain: "Five Personas"\noutput: "Optimist"\n---\n\n\n',
     )

@@ -1,18 +1,8 @@
 import { chainNodeData, nodeElementData, type MaybeNodeElement, type NodeTarget } from './chainNode'
 
 /**
- * What the drawing tells a chain node about itself: what is bound into it, and
- * where it sits.
- *
- * A node's inputs are not stored anywhere — they are the arrows the reader drew,
- * read off the scene each time Run is clicked. That is the whole point of the
- * surface: the drawing is the document, and moving an arrow changes what the
- * next run reads with nothing to re-save.
- *
- * Everything here is a pure function of a scene, so the reading — which arrows
- * count, what each source contributes, what order they come in — is checkable
- * without Excalidraw. `src/ui/excalidraw.ts` is the only thing that hands it a
- * real scene.
+ * What a node reads off its drawing: the arrows bound into it, and where it
+ * sits. Pure, so it is checkable without Excalidraw.
  */
 
 /** An element on the scene, narrowed to what a node's reading looks at. */
@@ -33,26 +23,16 @@ export interface SceneShape extends MaybeNodeElement {
   endBinding?: { elementId?: string } | null
 }
 
-/**
- * One thing bound into a node. A text element carries its words; an embeddable
- * carries a note, which only the vault can read — so the link is passed on
- * rather than resolved here.
- */
+/** An embeddable carries a note only the vault can read, so the link is passed on. */
 export type NodeInput = { kind: 'text'; text: string } | { kind: 'note'; linkpath: string }
 
 export interface NodeInputs {
-  /** In reading order: top of the drawing to the bottom of it. */
+  /** Top of the drawing to the bottom of it. */
   inputs: NodeInput[]
-  /**
-   * Arrows into the node whose far end says nothing — bound to nothing, to an
-   * element that has since been deleted, to a web page, or to an empty shape.
-   * Counted rather than dropped silently: a reader who drew an arrow expects it
-   * to have arrived.
-   */
+  /** Arrows whose far end says nothing. Counted, so the reader can be told. */
   unbound: number
 }
 
-/** A rectangle on the drawing, in the scene's own coordinates. */
 export interface Box {
   x: number
   y: number
@@ -60,13 +40,7 @@ export interface Box {
   height: number
 }
 
-/**
- * Where a node sits, from its box element — the one element of the five whose
- * size is the node's size.
- *
- * `undefined` means the node is no longer on this drawing, which is what a click
- * arriving after a delete looks like.
- */
+/** Where a node sits; `undefined` once it is off the drawing. */
 export function nodeBox(scene: readonly SceneShape[], target: NodeTarget): Box | undefined {
   for (const element of scene) {
     const data = nodeElementData(element, target)
@@ -82,15 +56,9 @@ export function nodeBox(scene: readonly SceneShape[], target: NodeTarget): Box |
 }
 
 /**
- * What is bound into a node, in the order a reader would read it.
- *
- * Only arrows *ending* on the node count. An arrow drawn the other way points at
- * something the node feeds, and treating it as an input would make the direction
- * the reader drew mean nothing.
- *
- * Order is top-to-bottom by where each source sits, not the order the arrows
- * were drawn: the drawing is what the reader sees, and two inputs swap places by
- * being dragged past each other rather than by being redrawn.
+ * What is bound into a node. Only arrows *ending* on it count — one drawn the
+ * other way points at something the node feeds. Ordered by where each source
+ * sits, so inputs reorder by being dragged rather than redrawn.
  */
 export function resolveInputs(scene: readonly SceneShape[], target: NodeTarget): NodeInputs {
   const byId = new Map(scene.map(element => [element.id, element]))
@@ -102,8 +70,7 @@ export function resolveInputs(scene: readonly SceneShape[], target: NodeTarget):
     if (element.type !== 'arrow') continue
     if (!ours.has(element.endBinding?.elementId ?? '')) continue
     const source = byId.get(element.startBinding?.elementId ?? '')
-    // An arrow from one node into another is a shape this ticket does not read;
-    // it is counted as unbound rather than pasted in as the other node's title.
+    // One node feeding another is not read; counted rather than pasted in.
     if (!source || ours.has(source.id) || chainNodeData(source)) {
       unbound++
       continue
@@ -120,16 +87,12 @@ export function resolveInputs(scene: readonly SceneShape[], target: NodeTarget):
   return { inputs, unbound }
 }
 
-/** Reading order on a drawing. `x` and the id only break ties, so it is stable. */
+/** `x` and the id only break ties, so the order is stable. */
 function topToBottom(left: SceneShape, right: SceneShape): number {
   return (left.y ?? 0) - (right.y ?? 0) || (left.x ?? 0) - (right.x ?? 0) || left.id.localeCompare(right.id)
 }
 
-/**
- * What one bound element contributes. A shape with text bound inside it — the
- * ordinary way a reader writes a note to themselves on a drawing — contributes
- * that text, so a labelled rectangle works as well as a bare text element.
- */
+/** A labelled shape contributes its bound text, as a bare text element does. */
 function readSource(source: SceneShape, scene: readonly SceneShape[]): NodeInput | undefined {
   if (source.type === 'embeddable' || source.type === 'iframe') {
     const linkpath = linkpathOf(source.link)
@@ -152,19 +115,13 @@ function boundText(container: SceneShape, scene: readonly SceneShape[]): string 
 }
 
 /**
- * The note an embeddable shows, or `undefined` when it shows something the vault
- * has no body for.
- *
- * Excalidraw writes a file embeddable's link as a wiki link, and the reader may
- * have pointed one at a heading or given it an alias — both name the same note,
- * and the whole of it is what the chain is given.
+ * The note an embeddable shows. An alias or a heading names the same note, and
+ * the whole of it is what the chain is given; a web page is not a note.
  */
 function linkpathOf(link: string | null | undefined): string | undefined {
   if (!link) return undefined
   const wiki = /^\[\[(.+)\]\]$/.exec(link.trim())
   const raw = (wiki ? wiki[1] : link.trim()).trim()
-  // A web page is a perfectly good thing to put on a drawing, and nothing this
-  // plugin can read as a seed.
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return undefined
   const withoutAlias = raw.split('|')[0] ?? ''
   const note = (withoutAlias.split('#')[0] ?? '').trim()

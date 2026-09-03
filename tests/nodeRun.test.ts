@@ -22,16 +22,7 @@ import type { Capabilities, ChainSummary, RunEvent } from '@/engine/types'
 import type { App } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
-/**
- * The seam a run on a drawing lives in: what is checked before anything is
- * launched, what the node says while it runs, and what the outputs do as they
- * fill.
- *
- * The three decisions underneath are pure and checked on their own —
- * `nodeScene.test.ts` for what is bound in, `runFrame.test.ts` for where it
- * lands, and the engine's own repo for what a panel is. This is the order they
- * happen in.
- */
+/** The order a run happens in. The pure pieces are checked in their own files. */
 
 const relay: ChainSummary = { slug: 'relay', name: 'Relay', view: 'timeline', seeded: true }
 
@@ -293,8 +284,7 @@ describe('what the run is given', () => {
 describe('outputs that fill in place', () => {
   it('opens every output and places the frame on the first frame that names them', async () => {
     await start()
-    // The second event is the first layout frame; by the end of it both notes
-    // exist and the frame is on the drawing, with nothing written in them yet.
+    // By the end of the first layout frame both notes exist, still empty.
     expect(Object.keys(duringRun[1]).sort()).toEqual([FIRST, SURVIVOR])
     expect(duringRun[1][FIRST]).toContain(`run: "${RUN_ID}"`)
     expect(duringRun[1][FIRST]).not.toContain('said something')
@@ -326,8 +316,7 @@ describe('outputs that fill in place', () => {
       { type: 'run_complete', runId: RUN_ID },
     ]
     await start()
-    // One create, and one write when the hop lands. The three tokens add no
-    // line, so they cost the vault nothing.
+    // One create, one write when the hop lands; the tokens add no line.
     expect(writes.filter(path => path === `chains/runs/${RUN_ID}/First.md`)).toHaveLength(2)
   })
 
@@ -356,9 +345,7 @@ describe('outputs that fill in place', () => {
   })
 
   it('fills each note from its own panel when the join is not declared last', async () => {
-    // The frame draws branches before the panel they converge on, so the frame's
-    // order is not the engine's. Following a panel by its place in the frame
-    // would give every note its neighbour's words.
+    // The frame draws branches first, so its order is not the engine's.
     events = [
       { type: 'run_start', runId: RUN_ID },
       joinFirst(0),
@@ -418,8 +405,7 @@ describe('what the node says', () => {
       { type: 'error', error: 'the model refused' },
     ]
     await start()
-    // The notice is gone by the time the reader looks back at the drawing, so the
-    // reason has to be on the node as well as in the notice.
+    // The notice fades; the node has to keep the reason.
     expect(labels.at(-1)).toContain('the model refused')
     expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: 'the model refused' }))
     expect(notices).toContain('the model refused')
@@ -495,7 +481,6 @@ describe('what stops a run', () => {
     expect(vault).toEqual({})
     expect(framed).toEqual([])
     expect(offline).toBe(1)
-    // The node carries why, not just that: a notice is gone the moment it fades.
     expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: OFFLINE_NOTICE }))
   })
 

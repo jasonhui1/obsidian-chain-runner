@@ -273,13 +273,9 @@ export interface NodeTarget {
 /** One element to write back, and what changes on it. */
 export interface NodeEdit<E> {
   element: E
-  /** The new label, on the one line whose words change; absent on the rest. */
+  /** The new label, on the one line whose words change. */
   text?: string
-  /**
-   * Keep the element's right edge where it is as the new label re-measures.
-   * The `run` line is set against the box's right edge, and a label that grows
-   * from the left would run out through it.
-   */
+  /** The `run` line sits against the box's right edge; a grown label moves left. */
   keepRightEdge?: boolean
   data: ChainNodeData
 }
@@ -313,14 +309,7 @@ export function parameterEdits<E extends MaybeNodeElement>(
   return edits
 }
 
-/**
- * The node identity on an element that belongs to the copy of the node named by
- * `target`, and `undefined` for everything else on the drawing.
- *
- * This is the one test for "is this element part of that node", so a reading of
- * the scene and a write back to it can never disagree about which elements are
- * the node's.
- */
+/** The one test for "is this element part of that node", used reading and writing. */
 export function nodeElementData(element: MaybeNodeElement, target: NodeTarget): ChainNodeData | undefined {
   const data = chainNodeData(element)
   if (!data || data.nodeId !== target.nodeId) return undefined
@@ -350,15 +339,8 @@ export type NodeRunStatus =
   | { kind: 'failed'; error?: string }
 
 /**
- * The `▶ Run` line's words for a status.
- *
- * A settled run keeps `▶ Run` on the line: the outcome is worth reading, and the
- * node is still the thing you click to run it again. A running one does not —
- * clicking it again while it is going is not an offer this makes.
- *
- * A failure carries the engine's own message, trimmed to the line. A notice is
- * gone by the time the reader looks back at the drawing, and the node is what
- * they look at — so the reason has to live where the failure does.
+ * The `▶ Run` line's words. A settled run keeps `▶ Run` on the line, because it
+ * is still the thing you click to run again; a running one does not.
  */
 export function runLabel(status: NodeRunStatus): string {
   if (status.kind === 'running') {
@@ -369,18 +351,13 @@ export function runLabel(status: NodeRunStatus): string {
   return RUN_LABEL
 }
 
-/**
- * How much of the engine's message fits on the line beside everything else it
- * has to carry — the mark, the separator and `▶ Run`, which keeps its place
- * because a failed node is still the thing you click to run it again.
- *
- * It is not much. The node is a label, not a report: the whole message is said
- * as a notice when it happens, and a failed run's output notes carry it in full
- * (ADR-0003). What the line is for is telling a reader glancing at the drawing
- * which node failed and roughly why.
- */
 const NEWLINE = '\n'
 
+/**
+ * What is left for the message beside the mark and `▶ Run` — about 19
+ * characters. The node is a label, not a report: the whole message is a notice,
+ * and a failed run's notes carry it in full (ADR-0003).
+ */
 const FAILURE_ROOM = WIDTH - PADDING * 2 - textWidth(`✕  · ${RUN_LABEL}`, LINE_SIZE)
 
 function failureWords(error: string | undefined): string {
@@ -388,13 +365,7 @@ function failureWords(error: string | undefined): string {
   return said === '' ? 'failed' : oneLine(said, LINE_SIZE, FAILURE_ROOM)
 }
 
-/**
- * What changes on a drawing when a node's run reaches `status`.
- *
- * Only the `run` line changes, and its identity is written back unchanged: a
- * run's progress is what is happening now, not something a copy of the node
- * should carry off with it.
- */
+/** Only the `run` line changes; a run's progress is not a node's identity. */
 export function runEdits<E extends MaybeNodeElement>(
   scene: readonly E[],
   target: NodeTarget,

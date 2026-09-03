@@ -3,11 +3,7 @@ import { nodeBox, resolveInputs, type SceneShape } from '@/ui/nodeScene'
 import { buildChainNode } from '@/ui/chainNode'
 import type { ChainSummary } from '@/engine/types'
 
-/**
- * What a node reads off the drawing it sits on. The scene is the only input, so
- * every case here — a text block, a note, an arrow bound to nothing, the order
- * two inputs come in — is checkable without Excalidraw.
- */
+/** What a node reads off its drawing; the scene is the only input. */
 
 const chain: ChainSummary = { slug: 'relay', name: 'Relay', moment: 'when an idea needs handing on' }
 

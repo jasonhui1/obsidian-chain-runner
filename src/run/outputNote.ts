@@ -79,13 +79,9 @@ export function outputNoteContent(panel: RunPanel, meta: OutputNoteMeta): string
 }
 
 /**
- * What the note says under its frontmatter: the hop's own words, or — for a hop
- * that failed without producing any — why there are none.
- *
- * A run that dies before its first hop leaves a note per declared output
- * (ADR-0003), and a file holding nothing but frontmatter tells the reader who
- * finds it later nothing at all. The reason is quoted, so it never reads as
- * something the chain said.
+ * The hop's words, or why there are none. A run that dies before its first hop
+ * leaves a note per output (ADR-0003), and a file of bare frontmatter says
+ * nothing. Quoted, so it never reads as the chain's words.
  */
 function body(panel: RunPanel): string {
   const said = panel.text.replace(/\n+$/, '')
@@ -117,13 +113,9 @@ export async function resolveOutputPath(
 }
 
 /**
- * The path to write to when the note is opened before it has anything to say.
- *
- * A run that fills its outputs as it goes (ADR-0003) creates them empty, so the
- * "already says exactly this" rule `resolveOutputPath` uses cannot apply: two
- * outputs of one run are both empty at the moment they are opened, and reusing
- * the first note for the second would collapse them into one that then shows
- * whichever hop wrote last. Here only a free name will do.
+ * For a note opened before it has content (ADR-0003). Only a free name will do:
+ * two outputs are both empty when opened, so `resolveOutputPath`'s reuse rule
+ * would collapse them into one.
  */
 export async function freeOutputPath(
   path: string,

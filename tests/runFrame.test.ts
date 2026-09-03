@@ -3,11 +3,7 @@ import { buildRunFrame } from '@/run/runFrame'
 import type { RunLayout, RunPanel } from '@/run/panels'
 import type { Box } from '@/ui/nodeScene'
 
-/**
- * Where a run's outputs land. The transform is layout model plus node position
- * in, coordinates out — no drawing, so the two arrangements the plan asks for
- * are checkable as arithmetic.
- */
+/** Where a run's outputs land: layout plus node position in, coordinates out. */
 
 const node: Box = { x: 100, y: 200, width: 300, height: 140 }
 
@@ -124,9 +120,7 @@ describe('buildRunFrame', () => {
   })
 
   it('remembers where each panel sat in the engine’s order, however it is drawn', () => {
-    // A columns chain is drawn branches-first whatever order its ports were
-    // declared in, so the frame's order is not the engine's. Anything following
-    // a panel across frames reads `index`, never the position in the frame.
+    // Branches are drawn first whatever order the ports were declared in.
     const frame = frameOf({
       kind: 'columns',
       panels: [panel('Synthesis', { emphasis: 'join' }), panel('Optimist'), panel('Skeptic')],

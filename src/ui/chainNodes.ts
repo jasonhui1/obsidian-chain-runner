@@ -44,7 +44,7 @@ export interface ChainNodesDeps {
   surface: NodeSurface
   /** A fresh identity for a node, injected so a placed node is checkable. */
   newNodeId: () => string
-  /** What a click on `▶ Run` sets off. The run itself is `./nodeRun.ts`. */
+  /** The run itself is `./nodeRun.ts`. */
   run: (data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView) => void
 }
 
@@ -96,9 +96,8 @@ export class ChainNodes {
     const data = chainNodeData(element)
     // Not ours: a wiki link the reader drew themselves, and theirs to follow.
     if (!data) return true
-    // The element and the view travel on for the same two reasons the parameter
-    // click sends them: the groups say which copy of the node was clicked, and
-    // the view is the only handle on a drawing embedded in a note.
+    // The groups say which copy was clicked; the view is the only handle on a
+    // drawing embedded in a note.
     if (data.role === 'run') this.deps.run(data, element, view)
     if (data.role === 'parameter') void this.editParameter(data, element, view)
     return false

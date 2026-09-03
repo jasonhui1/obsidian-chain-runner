@@ -152,11 +152,7 @@ export interface RunResult {
   layout: RunLayout
 }
 
-/**
- * Why a run failed, in the engine's own words, or `undefined` for one that did
- * not: what stopped it reaching the engine at all, else the first hop that
- * failed. Every surface that shows a run's outcome reads this one rule.
- */
+/** Why a run failed, in the engine's words: what stopped it, else the first failed hop. */
 export function runFailure(state: RunState): string | undefined {
   if (state.error) return state.error
   const failed = state.nodes.outputs.find(output => output.status === 'error')

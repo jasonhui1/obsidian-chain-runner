@@ -1,56 +1,27 @@
 import type { RunLayout, RunPanel } from './panels'
 import type { Box } from '../ui/nodeScene'
 
-/**
- * Where a run's outputs go on the drawing.
- *
- * The engine says what the panels *are* (ADR-0001); this says where each one is
- * put the first time. Two arrangements, because the two layouts the engine
- * declares read differently: a `columns` chain fans out and converges, so its
- * branches sit side by side with the panel they were run to produce beneath
- * them; anything else is a relay, and reads as a row that narrows hop by hop
- * with the survivor at the end.
- *
- * Placement is initial only. The frame and its embeddables are ordinary
- * Excalidraw elements from the moment they land, and the reader owns them —
- * dragging one out of the frame is a thing they are allowed to do, and nothing
- * here ever puts it back.
- */
+/** Initial placement for a run's outputs. The engine decides what the panels are (ADR-0001). */
 
 /** One output, and the rectangle its embeddable is placed in. */
 export interface FramedPanel {
   panel: RunPanel
-  /**
-   * Which of the layout's panels this is, in the engine's own order.
-   *
-   * A columns chain is drawn with its branches before the panel they converge
-   * on, whatever order the chain declared its ports in — so the frame's order is
-   * not the engine's, and anything that follows a panel across frames has to say
-   * which one it means. Without this, a chain declaring its join anywhere but
-   * last would fill each output's note from its neighbour's hop.
-   */
+  /** Its position in the engine's order, which `columns` does not draw in. */
   index: number
   box: Box
-  /**
-   * The panel the layout is *about* — a columns chain's converging panel, a
-   * relay's survivor. Drawn with a heavier stroke, so the shape of the run reads
-   * from across the canvas.
-   */
+  /** A columns chain's converging panel, or a relay's survivor. Drawn heavier. */
   emphasis: boolean
 }
 
 /** A run's outputs, as a frame holding placed panels. */
 export interface RunFrame {
-  /** The frame's title: the chain, and the run this was. */
   name: string
   box: Box
   panels: FramedPanel[]
 }
 
-/** An embeddable's size. Wide enough to read a paragraph of prose in. */
 const PANEL_WIDTH = 320
 const PANEL_HEIGHT = 240
-/** The converging panel of a columns chain, which is the one worth reading first. */
 const JOIN_WIDTH = 480
 const GAP = 24
 /** Room inside the frame around its panels. */
@@ -60,21 +31,14 @@ const NODE_GAP = 80
 
 /** How much of the previous panel's width each hop of a relay keeps. */
 const SHRINK = 0.82
-/** Below this a panel is a sliver rather than something to read; the row stops narrowing. */
+/** Below this a panel is a sliver rather than something to read. */
 const MIN_WIDTH = 160
 
-/**
- * The frame for a run, positioned against the node that produced it.
- *
- * The frame goes to the right of the node, top-aligned with it: the node is the
- * thing the reader clicked and the outputs are what came of it, so they read in
- * that order, and nothing lands on top of whatever is above or below the node.
- */
+/** The frame for a run, to the right of the node that produced it and top-aligned with it. */
 export function buildRunFrame(input: {
   layout: RunLayout
   chainName: string
   runId: string
-  /** Where the node sits, from `nodeBox`. */
   node: Box
 }): RunFrame {
   const { layout, chainName, runId, node } = input
@@ -91,8 +55,7 @@ export function buildRunFrame(input: {
       width: bounds.width + PADDING * 2,
       height: bounds.height + PADDING * 2,
     },
-    // The panels are laid out from zero and moved as a set, so an arrangement
-    // never has to know where on the canvas it ended up.
+    // Arranged from zero, then moved as a set.
     panels: placed.map(one => ({
       ...one,
       box: {
@@ -104,14 +67,7 @@ export function buildRunFrame(input: {
   }
 }
 
-/**
- * Which picture a layout gets.
- *
- * Every kind is named, and the compiler holds it that way: a kind the engine
- * adds later stops this file compiling rather than quietly getting a picture
- * drawn for something else. `sidebar` is a loop's rounds, and rounds are peers,
- * so they get an even row rather than a narrowing one — nothing is handed on.
- */
+/** `sidebar` is a loop's rounds, which are peers, so they get an even row. */
 function arrange(layout: RunLayout): FramedPanel[] {
   const panels = layout.panels.map((panel, index) => ({ panel, index }))
   switch (layout.kind) {
@@ -123,27 +79,19 @@ function arrange(layout: RunLayout): FramedPanel[] {
     case 'undeclared':
       return shrinkingRow(panels)
     default: {
-      // Unreachable while `LayoutKind` holds the four above; this is the line
-      // that fails to compile when it gains a fifth (ADR-0001).
+      // Fails to compile when `LayoutKind` gains a member (ADR-0001).
       const unknown: never = layout.kind
       return unknown
     }
   }
 }
 
-/** A panel and where it sits in the engine's order, which the frame must keep. */
 interface Ordered {
   panel: RunPanel
   index: number
 }
 
-/**
- * A columns chain: the branches in a row, and the panel they converge on
- * centred beneath them, wider.
- *
- * A chain that declares no join is just the row — and one that is *only* a join
- * is one wide panel, which is the degenerate case of the same picture.
- */
+/** Branches in a row, and the panel they converge on centred beneath them, wider. */
 function columns(panels: Ordered[]): FramedPanel[] {
   const branches = panels.filter(one => one.panel.emphasis !== 'join')
   const joins = panels.filter(one => one.panel.emphasis === 'join')
@@ -153,8 +101,6 @@ function columns(panels: Ordered[]): FramedPanel[] {
   if (joins.length === 0) return top.placed
 
   const below = row(joins, JOIN_WIDTH, 0, PANEL_HEIGHT + GAP * 2)
-  // Centred under the branches, which is what makes the row above read as
-  // feeding it rather than as a second, unrelated row.
   const shift = (top.width - below.width) / 2
   return [
     ...top.placed,
@@ -162,7 +108,6 @@ function columns(panels: Ordered[]): FramedPanel[] {
   ]
 }
 
-/** One row of equal panels, left to right. */
 function row(panels: Ordered[], width: number, x: number, y: number): { placed: FramedPanel[]; width: number } {
   let left = x
   const placed = panels.map(({ panel, index }) => {
@@ -174,15 +119,8 @@ function row(panels: Ordered[], width: number, x: number, y: number): { placed: 
 }
 
 /**
- * A relay: a row that narrows hop by hop, ending on the survivor.
- *
- * The narrowing is the picture of what a relay does — each hop hands on less
- * than it was given — and it stops at `MIN_WIDTH` so a long chain ends in
- * something still readable rather than in a stack of slivers.
- *
- * The engine marks the survivor with `emphasis: 'last'`. A layout that marks
- * none — the trace fallback for a chain that declares no view — emphasises its
- * final panel, which is the same panel by a weaker rule.
+ * A relay: a row that narrows hop by hop, ending on the survivor the engine
+ * marked `last`. A layout that marks none emphasises its final panel.
  */
 function shrinkingRow(panels: Ordered[]): FramedPanel[] {
   const declared = panels.some(one => one.panel.emphasis !== undefined)
@@ -200,7 +138,6 @@ function shrinkingRow(panels: Ordered[]): FramedPanel[] {
   })
 }
 
-/** The rectangle a set of boxes takes up. */
 function extent(boxes: Box[]): Box {
   if (boxes.length === 0) return { x: 0, y: 0, width: 0, height: 0 }
   const x = Math.min(...boxes.map(box => box.x))

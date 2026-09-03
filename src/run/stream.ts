@@ -4,47 +4,23 @@ import { applyRunEvent, emptyRunState, type RunState } from './session'
 import type { EngineClient } from '../engine/client'
 import type { Capabilities, RunRequest } from '../engine/types'
 
-/**
- * One run, from launch to the last event — for every surface that shows one.
- *
- * The two surfaces differ in what they *do* with a run: the quick path redraws a
- * sidebar, the drawing relabels a node and then writes notes. What a run's
- * stream means — which errors are the engine's, which end it quietly, what a
- * dropped connection is worth saying — is the same on both, and is here so there
- * is one copy of it. That is ADR-0001's argument applied one layer down: a rule
- * with two implementations drifts, and nothing fails when it does.
- */
+/** One run, from launch to the last event, for both surfaces that show one. */
 
-/**
- * Said when the engine does not stream layout frames. Named as the thing that is
- * missing rather than as a failure, because the fix is on the engine's side.
- */
 export const UNSUPPORTED_ENGINE =
   'This engine is too old for Chain Runner: it does not stream layout frames. Update maestro-playground.'
 
-/**
- * Whether the engine projects its own panels (ADR-0001). A surface that draws a
- * run refuses one that does not, rather than drawing a rule it no longer owns.
- */
+/** Whether the engine projects its own panels (ADR-0001). */
 export function streamsLayout(capabilities: Capabilities): boolean {
   return capabilities.runLayoutFrames === true
 }
 
-/**
- * Said when the engine cannot support outputs that fill in place. Named as the
- * two things that are missing, because the fix is on the engine's side.
- */
 export const UNSUPPORTED_STREAMING =
   'This engine is too old to stream a run onto a drawing: it does not report a run id up front, or a final frame when a run fails. Update maestro-playground.'
 
 /**
- * Whether the engine supports a run whose outputs land as it goes (ADR-0003).
- *
- * Both halves are needed and neither is inferable. Without `run_start` there is
- * no run id to file notes under until the run is over; without
- * `runFailureFrame` a failed run's panels stay `pending` for ever, and deciding
- * that a pending panel is dead would be the plugin inventing a panel state —
- * exactly what ADR-0001 gives to the engine.
+ * Whether outputs can land as the run goes (ADR-0003). `run_start` names the run
+ * before there is anything to file; without a failure frame, a dead panel stays
+ * `pending` and only the plugin could say otherwise.
  */
 export function streamsOutputs(capabilities: Capabilities): boolean {
   return (
@@ -56,33 +32,24 @@ export function streamsOutputs(capabilities: Capabilities): boolean {
 
 /** How a run's stream ended. */
 export interface RunOutcome {
-  /** The fold of every event that arrived, before it is settled. */
   state: RunState
   /** What stopped the caller reaching the end — an offline engine, a refusal. */
   failure?: string
-  /**
-   * The run was dropped rather than finished: the plugin unloaded, or a newer
-   * run replaced it. Nothing is left to tell, and the caller does nothing.
-   */
+  /** Dropped rather than finished: the plugin unloaded, or a newer run replaced it. */
   aborted: boolean
 }
 
 /**
- * Runs a chain, handing each new state to `onState` as it arrives.
- *
- * An engine `error` event is part of the state, not a throw — the run reached
- * the engine and the engine has something to say. Only an unreachable engine or
- * a refused request ends up here, and both are said once and reported back.
- * Anything else is a bug and is rethrown.
+ * Runs a chain, handing each new state to `onState`. An engine `error` event is
+ * part of the state, not a throw; anything but an unreachable engine or a
+ * refused request is a bug and is rethrown.
  */
 export async function streamRun(input: {
   engine: EngineClient
   request: RunRequest
   signal: AbortSignal
-  /** Called after every event, with the run so far. */
   onState: (state: RunState) => void | Promise<void>
   notify: (message: string) => void
-  /** Moves the status pill offline on first-hand evidence, rather than at the next poll. */
   markOffline: () => void
 }): Promise<RunOutcome> {
   let state = emptyRunState()

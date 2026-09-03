@@ -9,67 +9,47 @@ import {
 import type { RunPanel } from '../run/panels'
 
 /**
- * The vault half of the output-note convention.
- *
- * What the note *is* — its path, its frontmatter, what a second save of the same
- * panel does — is `src/run/outputNote.ts` and checked without a vault. What is
- * left here is the writing: folders made a segment at a time, and a note that
- * already says exactly this reused rather than duplicated.
- *
- * Both surfaces that keep a piece of a run go through this, so a panel saved
- * from the sidebar and the same panel landing on a drawing are one note.
- *
- * There are two ways in, because the two surfaces know different things when
- * they ask. The result view keeps a panel that has already settled and hands
- * over its final text; a run on a drawing opens its notes before the first hop
- * and rewrites them as the hops write (ADR-0003).
+ * The vault half of the output-note convention; the note itself is
+ * `src/run/outputNote.ts`. Both surfaces write through this, so a panel kept
+ * twice is one note. `write` takes a settled panel, `open` one still filling.
  */
 
-/** Which run a panel came from. The folder is settings', and read per write. */
+/** Which run a panel came from; the folder is settings'. */
 export type RunProvenance = Omit<OutputNoteMeta, 'folder'>
 
 /** A note a run holds open, to rewrite as its panel fills. */
 export interface OpenOutputNote {
   file: TFile
-  /** Rewrites the note from the panel as it now stands. */
   write(panel: RunPanel): Promise<void>
 }
 
 export interface OutputNotesDeps {
   app: App
   notify: (message: string) => void
-  /** Where output notes go. Read per write, so changing the setting takes at once. */
+  /** Read per write, so changing the setting takes at once. */
   folder: () => string
 }
 
 export class OutputNotes {
   constructor(private readonly deps: OutputNotesDeps) {}
 
-  /**
-   * The note for a panel that has already settled, written or already there.
-   * `undefined` means the vault refused it, which has been said as a notice by
-   * then — the caller has nothing left to decide.
-   */
+  /** A settled panel's note. `undefined` means the vault refused it, and said so. */
   async write(panel: RunPanel, run: RunProvenance): Promise<TFile | undefined> {
     return this.inFolder(panel, run, async (meta, wanted) => {
       const content = outputNoteContent(panel, meta)
       const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))
       const existing = this.deps.app.vault.getAbstractFileByPath(path)
-      // The path either is free or already holds exactly this; a note that
-      // already says it is kept as it is rather than rewritten.
+      // The path is free, or already holds exactly this.
       if (existing instanceof TFile) return existing
       return this.deps.app.vault.create(path, content)
     })
   }
 
   /**
-   * A note this run owns from now until it ends, created empty and rewritten as
-   * its panel fills.
-   *
-   * The path is settled once, here, and never asked again: the note is placed on
-   * a drawing as an embeddable moments later, and Excalidraw stores that path
-   * inside its own scene file, where Obsidian's link-updating does not reach. A
-   * note that moved after being placed would leave a dead embeddable.
+   * A note created empty and rewritten as its panel fills. The path is settled
+   * once: Excalidraw stores it inside its scene file, which Obsidian's
+   * link-updating does not reach, so a note that moved would leave a dead
+   * embeddable.
    */
   async open(panel: RunPanel, run: RunProvenance): Promise<OpenOutputNote | undefined> {
     return this.inFolder(panel, run, async (meta, wanted) => {
@@ -80,8 +60,6 @@ export class OutputNotes {
         file,
         write: async next => {
           const content = outputNoteContent(next, meta)
-          // A run redraws the whole note from the panel it is sent, so a flush
-          // that would write what is already there is a vault write for nothing.
           if (content === said) return
           said = content
           await this.deps.app.vault.modify(file, content)
@@ -90,11 +68,7 @@ export class OutputNotes {
     })
   }
 
-  /**
-   * Runs `use` with the note's folder made and its wanted path worked out.
-   * A vault that refuses any of it is one notice and `undefined`, so no caller
-   * has to decide what a failed write means.
-   */
+  /** Runs `use` with the folder made; a refusal is one notice and `undefined`. */
   private async inFolder<T>(
     panel: RunPanel,
     run: RunProvenance,
@@ -127,7 +101,7 @@ export class OutputNotes {
       path = path === '' ? segment : `${path}/${segment}`
       const existing = this.deps.app.vault.getAbstractFileByPath(path)
       if (existing instanceof TFolder) continue
-      // A note sitting where the folder should be is the reader's, not ours to move.
+      // A note where the folder should be is the reader's, not ours to move.
       if (existing) throw new Error(`${path} is a note, not a folder`)
       await this.deps.app.vault.createFolder(path)
     }
