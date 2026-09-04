@@ -37,6 +37,9 @@ export const NO_PARAMETER = (chainName: string): string => `${chainName} no long
 /** The node was deleted between the click and the pick. */
 export const NODE_GONE = 'That chain node is no longer on this drawing.'
 
+/** How long after the first click its element still counts as the one being double-clicked. */
+const DOUBLE_CLICK_MS = 1000
+
 /** A chain changed mid-run would leave the node saying one thing and running another. */
 export const RUNNING_NOW = 'This chain node is running. Wait for it to finish before changing its chain.'
 
@@ -61,11 +64,15 @@ export interface ChainNodesDeps {
   clickSpot: (settled: (at: Point | undefined) => void) => void
   /** Where the reader last pressed, for the routes that already know a click happened. */
   pressSpot: () => Point | undefined
+  /** The clock the double-click's freshness window is measured on. */
+  now: () => number
 }
 
 export class ChainNodes {
   /** The drawing a node was last selected on — an embedded one is not a tab. */
   private lastView: DrawingView | undefined
+  /** What the first click of a double-click selected, before the second arrives. */
+  private lastClick: { element: MaybeNodeElement; at: number } | undefined
 
   constructor(private readonly deps: ChainNodesDeps) {}
 
@@ -114,6 +121,7 @@ export class ChainNodes {
     const data = chainNodeData(element)
     if (!data) return
     this.lastView = view
+    this.lastClick = { element, at: this.deps.now() }
     // Nothing opens until the press ends, because a drag starts the same way.
     this.deps.clickSpot(at => {
       if (at) this.openDecision(data, element, at, view)
@@ -126,14 +134,29 @@ export class ChainNodes {
    * the drawing is asked what is selected instead (ADR-0010).
    */
   handleDoubleClick(): void {
-    let element: MaybeNodeElement | undefined
+    const element = this.justClicked() ?? this.stillSelected()
+    if (element) this.runFromGesture(element, this.lastView)
+  }
+
+  /**
+   * What the first click of the double already selected. The drawing is not
+   * asked, because by the second click it may have opened its text editor and
+   * cleared the selection (ADR-0010). Spent once, so it cannot fire twice.
+   */
+  private justClicked(): MaybeNodeElement | undefined {
+    const last = this.lastClick
+    this.lastClick = undefined
+    return last && this.deps.now() - last.at <= DOUBLE_CLICK_MS ? last.element : undefined
+  }
+
+  /** The node still selected, for a double-click whose first click changed nothing. */
+  private stillSelected(): MaybeNodeElement | undefined {
     try {
-      element = this.deps.surface.selectedNode(this.lastView)
+      return this.deps.surface.selectedNode(this.lastView)
     } catch {
       // Every double-click in the workspace arrives here; only a drawing answers.
-      return
+      return undefined
     }
-    if (element) this.runFromGesture(element, this.lastView)
   }
 
   /**

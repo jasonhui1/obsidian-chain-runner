@@ -40,6 +40,8 @@ let selected: { customData?: unknown } | undefined
 let selectedNodeOn: unknown[]
 /** The drawings a finished drag asked to re-cut. */
 let reflowedOn: unknown[]
+/** The clock the double-click's freshness window is measured on. */
+let clock: number
 /**
  * How the press behind a selection settles: a point when it was a click, and
  * `undefined` for a drag, a keyboard selection or no press at all.
@@ -101,6 +103,7 @@ function makeNodes(): ChainNodes {
     isRunning: nodeId => running.includes(nodeId),
     clickSpot: settled => settled(clickSpot),
     pressSpot: () => clickSpot,
+    now: () => clock,
   })
 }
 
@@ -136,6 +139,7 @@ beforeEach(() => {
   selected = undefined
   selectedNodeOn = []
   reflowedOn = []
+  clock = 1000
   resetModals()
 })
 
@@ -521,6 +525,7 @@ describe('what a selection has to be before anything opens', () => {
         settle = settled
       },
       pressSpot: () => undefined,
+      now: () => clock,
     })
 
     nodes.handleSelection(chainLine())
@@ -586,20 +591,51 @@ describe('double-clicking a node', () => {
     expect(runs).toHaveLength(1)
   })
 
-  it('runs the node when ▶ Run is what is selected', () => {
+  it('runs the node the first click of the double already selected', () => {
+    // From an empty canvas: click one selects ▶ Run, click two is the double.
+    const nodes = makeNodes()
+    nodes.handleSelection(line('run'))
+    nodes.handleDoubleClick()
+    expect(runs).toEqual([{ nodeId: 'n-1', groupIds: undefined, view: undefined }])
+  })
+
+  it('runs the node still selected, when the first click changed nothing', () => {
     selected = line('run')
     makeNodes().handleDoubleClick()
     expect(runs).toEqual([{ nodeId: 'n-1', groupIds: undefined, view: undefined }])
   })
 
+  it('does not take a click too old to be half of this double', () => {
+    const nodes = makeNodes()
+    nodes.handleSelection(line('run'))
+    clock = 9000
+    nodes.handleDoubleClick()
+    expect(runs).toEqual([])
+  })
+
+  it('spends the first click once, so one double-click is one run', () => {
+    const nodes = makeNodes()
+    nodes.handleSelection(line('run'))
+    nodes.handleDoubleClick()
+    nodes.handleDoubleClick()
+    expect(runs).toHaveLength(1)
+  })
+
   it('runs on the drawing the click that selected it came from', () => {
     const view = { embedded: true }
     const nodes = makeNodes()
-    selected = line('run')
     nodes.handleSelection(line('run'), view)
     nodes.handleDoubleClick()
-    expect(selectedNodeOn).toEqual([view])
     expect(runs[0]?.view).toBe(view)
+  })
+
+  it('asks the drawing on the view the node was last selected on', () => {
+    const view = { embedded: true }
+    const nodes = makeNodes()
+    nodes.handleSelection(line('chain'), view)
+    clock = 9000
+    nodes.handleDoubleClick()
+    expect(selectedNodeOn).toEqual([view])
   })
 
   it('runs nothing when the selection is another part of the node', () => {

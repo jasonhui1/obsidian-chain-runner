@@ -54,18 +54,22 @@ does not apply to them.
 **A double-click is reported two ways, because neither is reliable alone.** The
 second click of a double changes no selection, so the scene hook never sees it.
 
-- The **browser** counts the clicks, and the drawing is asked what is selected
-  (`selectedNode`, one element only, so a double-click on a rubber-banded group
-  runs nothing).
+- The **browser** counts the clicks, and the element the *first* click selected
+  is what the double acts on. The first click of a double is an ordinary click,
+  so the selection hook has already reported it; it is held for a second and
+  spent once. Failing that — a double whose first click changed nothing, because
+  the line was selected already — the drawing is asked what is selected.
 - Excalidraw **opens its text editor** on a double-clicked text element, and
   `appState.editingTextElement` names it. The scene hook watches that key.
 
-A first vault run found the browser route alone did nothing: opening the editor
-appears to clear the selection, so by the time `dblclick` arrives there is
-nothing selected to ask about. The editor route survives that, because it names
-the element rather than asking what is selected. Both are kept — they fail in
-different places — and a run already going is not restarted, so one gesture
-reported twice starts one run.
+Two vault runs shaped this. The first found that asking the drawing what is
+selected returned nothing, because opening the editor clears the selection
+before `dblclick` arrives — which is why the editor route exists. The second
+found that from an *empty* canvas the editor does not open until the element is
+already selected, so a run took three clicks: one to select, then a double. The
+element remembered from the first click needs neither, which is why it is tried
+first. All three are kept — they fail in different places — and a run already
+going is not restarted, so one gesture reported twice starts one run.
 
 Every double-click in the workspace reaches the handler, so anything that is not
 a drawing is answered with silence rather than a notice.

@@ -154,6 +154,7 @@ export default class ChainRunnerPlugin extends Plugin {
       isRunning: nodeId => nodeRun.isRunning(nodeId),
       clickSpot: settled => clicks.onSettled(settled),
       pressSpot: () => clicks.pressed(),
+      now: () => Date.now(),
     }))
     const expand = new Expand({
       app: this.app,
