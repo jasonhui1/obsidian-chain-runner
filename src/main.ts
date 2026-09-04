@@ -42,7 +42,13 @@ export default class ChainRunnerPlugin extends Plugin {
 
     this.pill = this.addStatusBarItem()
     this.renderPill()
-    this.register(this.status.onChange(() => this.renderPill()))
+    this.register(
+      this.status.onChange(() => {
+        this.renderPill()
+        // The empty result view says whether there is an engine, so it moves with the pill.
+        this.refreshResultViews()
+      }),
+    )
     this.register(() => this.status.stop())
     this.status.start()
 
@@ -76,11 +82,15 @@ export default class ChainRunnerPlugin extends Plugin {
     this.registerView(
       RESULT_VIEW_TYPE,
       leaf =>
-        new RunResultView(leaf, {
-          saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
-          sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
-          keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
-        }),
+        new RunResultView(
+          leaf,
+          {
+            saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
+            sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
+            keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
+          },
+          { state: () => this.status.state, url: () => this.settings.engineUrl },
+        ),
     )
     this.quickRun = new QuickRunner({
       app: this.app,
@@ -226,10 +236,18 @@ export default class ChainRunnerPlugin extends Plugin {
     return leaf.view instanceof RunResultView ? leaf.view : undefined
   }
 
+  private refreshResultViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(RESULT_VIEW_TYPE)) {
+      if (leaf.view instanceof RunResultView) leaf.view.refresh()
+    }
+  }
+
   /** Persists only; re-checking the engine is the settings tab's call. */
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings)
     this.renderPill()
+    // The engine URL is named in the offline empty state.
+    this.refreshResultViews()
   }
 
   private renderPill(): void {

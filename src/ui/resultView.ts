@@ -1,7 +1,9 @@
 import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
 import { arrangeRun, type Arrangement, type RoundEntry } from './arrangement'
+import { emptyStateFor, type EmptyState } from './emptyState'
 import { noticeFor } from './panelCopy'
 import { createThrottle } from './throttle'
+import type { EngineState } from '../engine/status'
 import type { RunPanel } from '../run/panels'
 import { seedLine, type RunResult, type RunStatus } from '../run/session'
 
@@ -13,6 +15,12 @@ export interface PanelActions {
   sendToDrawing: (panel: RunPanel, run: RunResult) => void
   /** Marks lines of the panel to keep, and asks at the end where they go. */
   keepLines: (panel: RunPanel, run: RunResult) => void
+}
+
+/** What the view asks about the engine, to say something useful when it is empty. */
+export interface EngineView {
+  state: () => EngineState
+  url: () => string
 }
 
 const STATUS_LABEL: Record<RunStatus, string> = {
@@ -45,6 +53,8 @@ export class RunResultView extends ItemView {
     leaf: WorkspaceLeaf,
     /** What the two panel actions do. They write to the vault; the view does not. */
     private readonly actions?: PanelActions,
+    /** Unset in a test or a bare view: the empty state then reads as if online. */
+    private readonly engine?: EngineView,
   ) {
     super(leaf)
   }
@@ -67,6 +77,15 @@ export class RunResultView extends ItemView {
 
   override async onClose(): Promise<void> {
     this.throttle.cancel()
+  }
+
+  /**
+   * Redraws for something outside the run — the engine coming or going. Only the
+   * empty state reads it, and a run in flight owns the screen, so a redraw here
+   * would only interrupt one.
+   */
+  refresh(): void {
+    if (!this.result) this.draw()
   }
 
   /**
@@ -95,19 +114,28 @@ export class RunResultView extends ItemView {
     contentEl.addClass('chain-runner-result')
 
     if (!this.result) {
-      contentEl.createDiv({
-        cls: 'chain-runner-empty',
-        text: 'Run a chain on a note — the result reads here.',
-      })
+      this.drawEmpty(contentEl, undefined)
       return
     }
 
     this.drawHeader(contentEl, this.result)
     if (this.result.layout.panels.length === 0) {
-      contentEl.createDiv({ cls: 'chain-runner-empty', text: 'Nothing has run yet.' })
+      this.drawEmpty(contentEl, this.result.status)
       return
     }
     this.drawArrangement(contentEl, arrangeRun(this.result.layout, this.pickedRound), this.result.status)
+  }
+
+  /** A view with no panels, said as one of the five designed states. */
+  private drawEmpty(parent: HTMLElement, status: RunStatus | undefined): void {
+    const empty: EmptyState = emptyStateFor({
+      run: status ? { status } : undefined,
+      engine: this.engine?.state() ?? 'online',
+      engineUrl: this.engine?.url() ?? '',
+    })
+    const el = parent.createDiv({ cls: `chain-runner-empty chain-runner-empty--${empty.tone}` })
+    el.createDiv({ cls: 'chain-runner-empty-title', text: empty.title })
+    el.createDiv({ cls: 'chain-runner-empty-hint', text: empty.hint })
   }
 
   /** The arrangement as elements; `arrangeRun` has already decided what goes where. */
@@ -125,6 +153,7 @@ export class RunResultView extends ItemView {
     if (arrangement.kind === 'sidebar') {
       const split = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--sidebar' })
       const list = split.createDiv({ cls: 'chain-runner-rounds' })
+      list.setAttribute('role', 'listbox')
       for (const entry of arrangement.rounds) this.drawRound(list, entry)
       const detail = split.createDiv({ cls: 'chain-runner-detail' })
       if (arrangement.detail) this.drawPanel(detail, arrangement.detail, status)
@@ -147,11 +176,21 @@ export class RunResultView extends ItemView {
     }
     el.createSpan({ cls: 'chain-runner-round-name', text: panel.name })
     this.drawLines(el, 'chain-runner-round-lines', panel)
+    // A row is a control, so it answers the keyboard as well as the mouse.
+    el.tabIndex = 0
+    el.setAttribute('role', 'option')
+    el.setAttribute('aria-selected', String(entry.selected))
     // Redraw at once, not through the throttle, so the click feels like a click.
-    el.onclick = (): void => {
+    const open = (): void => {
       this.pickedRound = entry.index
       this.throttle.cancel()
       this.draw()
+    }
+    el.onclick = open
+    el.onkeydown = (event): void => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      open()
     }
   }
 

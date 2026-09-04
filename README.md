@@ -33,7 +33,7 @@ An engine that answers with an *error* is still online — a broken workspace is
 
 The poll asks for `/api/runs/chain-runner-probe`, a run id nothing matches, because the engine answers it from one failed file read. `/api/workspace` would also answer, but it reads and serialises the whole workspace off disk — too much to repeat every three seconds.
 
-Any plugin action taken while the engine is offline shows a `engine offline` notice and does nothing else.
+Any plugin action taken while the engine is offline shows a `The engine is offline` notice and does nothing else.
 
 ## Commands
 
@@ -80,6 +80,38 @@ A panel shows the section its port asked for, resolved the way the engine resolv
 | *nothing survived* | The hop finished and dropped the section the chain asked it for. |
 | *this hop failed* | The hop errored; the engine's own message follows. |
 | *skipped* | Control flow went the other way. |
+
+**A view with no panels is still a designed view.** The sidebar never shows a
+blank pane or a bare sentence; it says which of five situations it is in, and
+what to do about it:
+
+| Situation | The view says |
+| --- | --- |
+| Nothing run yet, engine up | **No run yet** — and names the command. |
+| Nothing run yet, engine down | **No engine** — and names the URL it looked at, in red. |
+| Launched, no panel landed yet | **Waiting for the first hop** — breathing while it waits. |
+| Failed before any hop wrote | **The run landed nothing**, in red; the reason is in the header above. |
+| Finished holding nothing | **The run landed nothing**. |
+
+The engine's own state is read live, so stopping the engine turns an idle
+sidebar into the offline state without a run being attempted, and changing the
+engine URL in settings re-reads it. Which of the five it is lives in
+`src/ui/emptyState.ts` and is checked in `tests/emptyState.test.ts`; the view
+only draws it.
+
+**Motion says what is still happening, and nothing else.** Anything in flight —
+the `running` status, a `writing…` panel, the pill before its first answer —
+breathes; hover and focus transition. There are no one-shot flourishes: the
+result view rebuilds its contents on every draw, so a one-shot animation would
+re-fire on the next redraw rather than mark the change that earned it. All of it
+is off under `prefers-reduced-motion: reduce`, and every duration and easing is
+Obsidian's own `--anim-*`.
+
+**The keyboard reaches everything the mouse does.** A round row in a sidebar
+layout is focusable and answers `Enter` and `Space`, the list is a `listbox` and
+each row an `option` carrying `aria-selected`; the three panel actions are real
+buttons and draw a focus ring of their own, since they have no chrome to borrow
+one from.
 
 ### Keeping a piece
 
@@ -228,6 +260,7 @@ src/
     chainPicker.ts        the chain and parameter modals
     drawingPicker.ts      the drawing suggester
     panelCopy.ts          what a panel says when it has nothing to show
+    emptyState.ts         what the result view says when it has no panels at all
     throttle.ts           how often the result view redraws
     resultView.ts         the right-sidebar view
     keepPiece.ts          the two panel actions: write the note, put it on a drawing
@@ -278,7 +311,7 @@ npm run smoke -- --launch                    # also launchRun — spends real mo
 1. **Build and install the plugin.** `npm run build` here, then copy `main.js`, `manifest.json`, `styles.css` into `<vault>/.obsidian/plugins/chain-runner/` and enable it.
 2. **Status bar, online.** The pill should read `⛓ engine` within a few seconds of the vault opening. Hovering it shows the engine URL.
 3. **Status bar, offline.** Stop the engine (Ctrl-C). The pill flips to `⛓ offline` within a few seconds. Start it again; it flips back within a few seconds.
-4. **Offline action.** With the engine stopped, run **Chain Runner: List chains on the engine** from the command palette. Expect exactly one notice, `engine offline`, and nothing else.
+4. **Offline action.** With the engine stopped, run **Chain Runner: List chains on the engine** from the command palette. Expect exactly one notice, `The engine is offline`, and nothing else.
 5. **Online action.** Start the engine and run the same command. Expect a notice naming the chains in the workspace — the same names the playground's own chain list shows.
 6. **Wrong URL.** Set **Engine URL** to `http://localhost:3999`. The pill goes offline without a restart. Set it back; it comes online.
 7. **Both themes.** Switch between light and dark (**Settings → Appearance**). The pill stays legible in each; it uses `--text-success`, `--text-error`, `--text-faint` and no colours of its own.
@@ -315,11 +348,35 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 
 7o. **Keep and drop.** Ctrl/Cmd+click `✓ Keep` on one card: expect its stroke and its arrow to go solid black, both labels to vanish, and the note to stay in `chains/runs/<runId>/`. Ctrl/Cmd+click `✕ Drop` on another: expect the card, its arrow and its labels all gone, and the note in the trash. Then select a third card and use the palette — **Keep the selected proposal** and **Drop the selected proposal** — and expect the same two outcomes with no modifier key. Reopen the drawing: expect a kept card still solid and still showing its note, and no trace of the dropped ones.
 
-7p. **What Expand refuses.** Run the command with nothing selected, and with two things selected: expect one notice asking for a single block, and no picker. Select an embeddable showing a note and expand it: expect the note's body to be the seed, minus its frontmatter. Select a chain node and expand it: expect the same refusal — a node is not material. Stop the engine and run it: expect one `engine offline` notice and nothing drawn.
+7p. **What Expand refuses.** Run the command with nothing selected, and with two things selected: expect one notice asking for a single block, and no picker. Select an embeddable showing a note and expand it: expect the note's body to be the seed, minus its frontmatter. Select a chain node and expand it: expect the same refusal — a node is not material. Stop the engine and run it: expect one `The engine is offline` notice and nothing drawn.
 
 8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
 9b. **The node in both themes.** With a node on a drawing, switch light ↔ dark. Expect the title, the grey moment and the two blue links all legible in both — the node uses Excalidraw's own palette rather than Obsidian's variables, because a canvas element cannot read one, and it is Excalidraw's canvas inversion that has to carry it.
 9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes, and the two panel actions hovered and not.
+
+### Part four — the polish pass, by hand
+
+Everything above checks that a surface *works*. This checks that it *looks like
+Obsidian*, which only a vault can answer. Run it in light and dark, and under
+two community themes as well as the default — a theme that redefines the
+variables is the real test of using them.
+
+1. **The five empty states.** With no run on screen, expect **No run yet** and
+   the command named. Stop the engine and, without touching the sidebar, expect
+   it to turn into **No engine** naming the URL. Point the engine URL at a dead
+   port in settings and expect the same, with the new URL. Then launch a run and
+   expect **Waiting for the first hop**, breathing, until the first panel lands.
+2. **Motion.** Watch a run: expect the `running` status and each `writing…`
+   panel to breathe, and nothing else to move. Turn on **Reduce motion** in the
+   OS and expect all of it to stop dead with the colours unchanged.
+3. **The keyboard.** In a sidebar-layout run, Tab to a round row: expect a focus
+   ring, and `Enter` or `Space` to open it. Tab to a panel's actions: expect a
+   ring on each of the three, and `Enter` to fire it.
+4. **Every surface, both themes, three themes.** Walk the picker, all three
+   result shapes, a chain node, a run frame, the output embeddables, the source
+   run header, the status pill, the keep-marks modal, and each empty and failed
+   state. Nothing should carry a colour or a font the theme did not give it.
+   Screenshot each, before and after.
 
 ### Last recorded run
 
@@ -341,4 +398,5 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 | Chain nodes on a drawing (steps 7f–7i, 9b) | **not run** — the node's shape, the click handling and the offline and version refusals are covered in `tests/chainNode.test.ts` and `tests/chainNodes.test.ts`, but no node has been placed on a live drawing. Four things only a vault can attest: that `customData` survives Excalidraw's own save and reload, that `copyViewElementsToEAforEditing` rewrites a text element rather than adding a second one, that the link hook fires on a **standalone text** element (the spike observed it only on text bound into a box — `docs/spike-ea.md`, Q1), and that the node reads correctly in both themes. |
 | Expand (steps 7n-7p) | run 2026-09-04 in the `test_chain` vault against a live engine on Excalidraw 2.26.4. All of 7n-7p pass. The three unverified EA calls all hold: `addArrow` binds a connector to both ends, `getViewSelectedElements` returns the selection, and `isDeleted` on a copied element removes it. Both decision routes work — the labels under Ctrl/Cmd+click, and the two palette commands on a selected card. Checked in both themes: the dashes survive Excalidraw's canvas inversion on card borders and connectors alike, and a proposal differs from accepted material structurally as well as by colour — dashed with two labels under it, against solid with none — so the distinction does not rest on the inversion being kind to grey. Step 9b (the node in both themes) was attested in the same pass. A vault found two things the tests could not: cards were spaced 24px apart while a card's labels reach 30px below it, so every card but the last had its labels on its neighbour; and **Insert file from vault** draws a note as an *image* element, which `blockInput` could not read, so expanding one was refused. Both fixed, and the spacing is now derived from the labels' own reach with a test that fails if it drifts. |
 | Keep-marks (step 7m) | **not run** — what the marks mean is covered pure in `tests/keepMarks.test.ts` and where they go in `tests/keepMarksActions.test.ts`, but no marking has been done in a vault. Two things only a vault can attest: that the modal's scope bindings (↑ ↓, space, Enter) do not fight Obsidian's own, and that a marked line reads legibly in both themes — it pairs `--text-highlight-bg`, which is semi-transparent, with `--text-normal`. |
+| Part four, the polish pass | **not run** — the fixes are in (five designed empty states, motion under `prefers-reduced-motion`, focus rings, keyboard-reachable round rows, the offline notice in sentence case), and the audit that no hard-coded colour or font remains is mechanical and passes: `styles.css` holds no hex, `rgb()`, colour keyword or `font-family` literal, and no module writes an inline style. What is **not** attested is the part that needs eyes: the before/after screenshots of each surface in light and dark under two community themes. `src/ui/ink.ts` is the one deliberate exception to the no-literal-colours rule, and stays one — a canvas element cannot read a CSS variable, so a chain node uses Excalidraw's own palette and its canvas inversion carries dark mode. |
 | Part three, the quick path | run 2026-09-02 in the `test_chain` vault against a live engine — twice: once on the ported layout model, and again after the engine began streaming `layout` frames (ADR-0017). Chains ran and their results drew correctly both times. The run opened in the playground's own history from the id the result header shows (step 4). Not itemised step by step; the capability refusal (step 4b) is not separately attested. |

@@ -56,9 +56,46 @@
   padding: var(--size-4-3);
 }
 
+/* ── The empty states ────────────────────────────────────────────────────────
+   A view with no panels is still a designed view: a title saying what the
+   situation is, and a hint saying what to do about it. `src/ui/emptyState.ts`
+   decides which of the five it is; the tone is the only thing colour carries. */
+
 .chain-runner-empty {
-  color: var(--text-faint);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  padding: var(--size-4-6) var(--size-4-2);
+  text-align: center;
+  align-items: center;
+}
+
+.chain-runner-empty-title {
+  color: var(--text-muted);
   font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-empty-hint {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  max-width: 34ch;
+  line-height: var(--line-height-tight, 1.3);
+}
+
+/* No engine is not a failure of the run — it is a thing to go and fix. */
+.chain-runner-empty--offline .chain-runner-empty-title {
+  color: var(--text-error);
+}
+
+/* The reason is in the header above; the title only says nothing landed. */
+.chain-runner-empty--failed .chain-runner-empty-title {
+  color: var(--text-error);
+}
+
+/* Waiting is the one empty state that is going somewhere, so it breathes. */
+.chain-runner-empty--waiting .chain-runner-empty-title {
+  animation: chain-runner-breathe 1.6s ease-in-out infinite;
 }
 
 .chain-runner-run-header {
@@ -171,6 +208,15 @@
   background: none;
   box-shadow: none;
   color: var(--text-accent);
+}
+
+/* The action is a button with no chrome, so the keyboard needs a ring of its
+   own — `box-shadow: none` above would otherwise take Obsidian's with it. */
+.chain-runner-panel-action:focus-visible {
+  color: var(--text-accent);
+  outline: 2px solid var(--background-modifier-border-focus, var(--text-accent));
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
 }
 
 .chain-runner-panel-name {
@@ -300,6 +346,12 @@
 
 .chain-runner-round:hover {
   background-color: var(--background-modifier-hover);
+}
+
+.chain-runner-round:focus-visible {
+  outline: 2px solid var(--background-modifier-border-focus, var(--text-accent));
+  outline-offset: -2px;
+  color: var(--text-normal);
 }
 
 /* The round in the detail pane, marked the way Obsidian marks an active row. */
@@ -435,4 +487,57 @@
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
   margin-left: auto;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────────────
+   Two kinds, and no third. Hover and focus *transition*, because those elements
+   stay on the page between states. Anything still in flight *pulses*, because
+   the result view rebuilds its contents on every draw — a one-shot animation
+   would re-fire on the next redraw rather than marking the change that earned
+   it. Duration comes from Obsidian's own `--anim-duration-*`. */
+
+@keyframes chain-runner-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.chain-runner-round,
+.chain-runner-panel-action,
+.chain-runner-mark-line,
+.chain-runner-source-run a,
+.chain-runner-engine-pill {
+  transition:
+    color var(--anim-duration-fast, 100ms) var(--anim-motion-smooth, ease-in-out),
+    background-color var(--anim-duration-fast, 100ms) var(--anim-motion-smooth, ease-in-out);
+}
+
+/* The three things that are still happening. Each says so by breathing rather
+   than by a spinner: a sidebar of spinners would be busier than the words. */
+.chain-runner-run-status--running,
+.chain-runner-panel-notice--writing,
+.chain-runner-engine-pill--unknown {
+  animation: chain-runner-breathe 1.6s ease-in-out infinite;
+}
+
+/* A reader who has asked for stillness gets the same colours and no movement. */
+@media (prefers-reduced-motion: reduce) {
+  .chain-runner-round,
+  .chain-runner-panel-action,
+  .chain-runner-mark-line,
+  .chain-runner-source-run a,
+  .chain-runner-engine-pill {
+    transition: none;
+  }
+
+  .chain-runner-run-status--running,
+  .chain-runner-panel-notice--writing,
+  .chain-runner-engine-pill--unknown,
+  .chain-runner-empty--waiting .chain-runner-empty-title {
+    animation: none;
+  }
 }

@@ -2,7 +2,7 @@ import { EngineHttpError, EngineOfflineError } from './transport'
 import type { EngineState } from './status'
 
 /** The one thing the plugin says when the engine is not there. */
-export const OFFLINE_NOTICE = 'engine offline'
+export const OFFLINE_NOTICE = 'The engine is offline'
 
 /**
  * What to say about a failure that is the engine's, and `undefined` for anything
@@ -10,7 +10,7 @@ export const OFFLINE_NOTICE = 'engine offline'
  */
 export function engineFailureMessage(error: unknown): string | undefined {
   if (error instanceof EngineOfflineError) return OFFLINE_NOTICE
-  if (error instanceof EngineHttpError) return `engine error ${error.status}: ${error.body || error.message}`
+  if (error instanceof EngineHttpError) return `Engine error ${error.status}: ${error.body || error.message}`
   return undefined
 }
 
