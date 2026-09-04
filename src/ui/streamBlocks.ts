@@ -4,8 +4,8 @@
  * rule is checkable without a DOM.
  */
 
-/** An opening or closing fence line: up to three spaces, then three or more marks. */
-const FENCE = /^ {0,3}(`{3,}|~{3,})/
+/** A fence line: any quote it is inside, three or more marks, then the info string. */
+const FENCE = /^ {0,3}(?:> ?)*(`{3,}|~{3,})(.*)/
 
 /**
  * `text` as blocks that join back into it. A block ends at a blank line outside a
@@ -28,9 +28,10 @@ export function splitBlocks(text: string): string[] {
     }
     block += line
 
-    const mark = FENCE.exec(line)?.[1]
+    const [, mark, info] = FENCE.exec(line) ?? []
     if (fence === undefined) fence = mark
-    else if (mark && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined
+    // A fence carrying an info string opens a block; it never closes one.
+    else if (mark && info?.trim() === '' && mark[0] === fence[0] && mark.length >= fence.length) fence = undefined
 
     if (fence === undefined && line.trim() === '') closed = true
   }

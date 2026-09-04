@@ -48,6 +48,11 @@ change is for.
 siblings in the box tree and their margins collapse as they did when the whole
 answer was one render.
 
+**The boundary rule reads fences, not every way markdown holds a blank line.** A
+code block written with four spaces rather than a fence still splits at its blank
+lines, and so does a fence indented past three spaces inside a list. Both show
+only while the hop writes, and both heal in the settled pass.
+
 **The split is a pure function with its own node tests.** The boundary rule —
 including what a fence protects — is checkable without a DOM, and the invariant
 that the blocks join back into the text is what keeps the render faithful.

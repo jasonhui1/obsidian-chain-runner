@@ -45,6 +45,16 @@ describe('splitBlocks', () => {
     expect(splitBlocks(text)).toEqual([text])
   })
 
+  it('does not let a fence carrying an info string close one, since it opens a nested block', () => {
+    const text = '```\ncode\n```js\n\nstill code\n'
+    expect(splitBlocks(text)).toEqual([text])
+  })
+
+  it('reads a fence inside a quote, so a quoted code block is not split either', () => {
+    const text = '> quoted\n>\n> ```\n> code\n\n> more\n'
+    expect(splitBlocks(text)).toEqual([text])
+  })
+
   it('holds the last block back even when it is complete, since it can still grow', () => {
     expect(splitBlocks('done\n\nlist item')).toEqual(['done\n\n', 'list item'])
   })

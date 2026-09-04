@@ -43,14 +43,14 @@ export class PanelBody {
   private draw(pieces: string[]): void {
     pieces.forEach((piece, index) => {
       const key = String(index)
-      const { el } = this.blocks.use(key, this.el)
+      const { el: block } = this.blocks.use(key, this.el)
       // Blank lines close a block without changing what it renders to.
       const text = piece.trimEnd()
       if (this.rendered.get(key) === text) return
       this.drop(key)
-      el.replaceChildren()
+      block.replaceChildren()
       this.rendered.set(key, text)
-      if (text !== '') this.releases.set(key, this.renderMarkdown(text, el))
+      if (text !== '') this.releases.set(key, this.renderMarkdown(text, block))
     })
     this.blocks.end()
   }
