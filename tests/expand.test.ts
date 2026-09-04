@@ -117,6 +117,7 @@ function makeExpand(): Expand {
   const surface: NodeSurface = {
     unavailable: () => undefined,
     hasActiveDrawing: () => true,
+    selectedNode: () => undefined,
     place: () => Promise.resolve(),
     setParameter: () => Promise.resolve(true),
     setChain: () => Promise.resolve(true),

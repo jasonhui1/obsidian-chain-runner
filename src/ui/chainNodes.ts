@@ -64,6 +64,9 @@ export interface ChainNodesDeps {
 }
 
 export class ChainNodes {
+  /** The drawing a node was last selected on — an embedded one is not a tab. */
+  private lastView: DrawingView | undefined
+
   constructor(private readonly deps: ChainNodesDeps) {}
 
   /** The "Add chain node" command: a chain picked first, then a node holding it. */
@@ -110,10 +113,30 @@ export class ChainNodes {
   handleSelection(element: MaybeNodeElement, view?: DrawingView): void {
     const data = chainNodeData(element)
     if (!data) return
+    this.lastView = view
     // Nothing opens until the press ends, because a drag starts the same way.
     this.deps.clickSpot(at => {
       if (at) this.openDecision(data, element, at, view)
     })
+  }
+
+  /**
+   * A double-click, which is how `▶ Run` is reached without a modifier. The
+   * second click of one changes no selection, so the scene hook never sees it —
+   * the drawing is asked what is selected instead (ADR-0010).
+   */
+  handleDoubleClick(): void {
+    let element: MaybeNodeElement | undefined
+    try {
+      element = this.deps.surface.selectedNode(this.lastView)
+    } catch {
+      // Every double-click in the workspace arrives here; only a drawing answers.
+      return
+    }
+    const data = element && chainNodeData(element)
+    if (!element || !data || chainNodeRole(data.role) !== 'run') return
+    if (!this.usable()) return
+    this.deps.run(data, element, this.lastView)
   }
 
   /** The picker a line opens, if it opens one. `▶ Run` is not one of them. */

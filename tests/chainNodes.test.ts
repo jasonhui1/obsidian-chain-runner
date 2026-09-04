@@ -35,6 +35,9 @@ let runs: { nodeId: string; groupIds?: readonly string[]; view?: unknown }[]
 let chainSet: { nodeId: string; chain: string; value?: string; on?: unknown }[]
 /** The nodes with a run going, which is when a chain is not changed underneath one. */
 let running: string[]
+/** What the drawing says is selected when a double-click asks it. */
+let selected: { customData?: unknown } | undefined
+let selectedNodeOn: unknown[]
 /**
  * How the press behind a selection settles: a point when it was a click, and
  * `undefined` for a drag, a keyboard selection or no press at all.
@@ -47,6 +50,11 @@ const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0)
 function makeSurface(): NodeSurface {
   return {
     selection: () => undefined,
+    selectedNode: on => {
+      selectedNodeOn.push(on)
+      if (!drawingOpen) throw new Error('Open the Excalidraw drawing as its own tab to do that.')
+      return selected
+    },
     selectedProposal: () => undefined,
     placeProposals: async () => {},
     editProposal: async () => false,
@@ -118,6 +126,8 @@ beforeEach(() => {
   drawingOpen = true
   runs = []
   clickSpot = { x: 0, y: 0 }
+  selected = undefined
+  selectedNodeOn = []
   resetModals()
 })
 
@@ -520,5 +530,53 @@ describe('what a selection has to be before anything opens', () => {
     makeNodes().handleLinkClick(chainLine())
     await flush()
     expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
+  })
+})
+
+describe('double-clicking a node', () => {
+  const line = (role: string): { customData?: unknown } => element({ role })
+
+  it('runs the node when ▶ Run is what is selected', () => {
+    selected = line('run')
+    makeNodes().handleDoubleClick()
+    expect(runs).toEqual([{ nodeId: 'n-1', groupIds: undefined, view: undefined }])
+  })
+
+  it('runs on the drawing the click that selected it came from', () => {
+    const view = { embedded: true }
+    const nodes = makeNodes()
+    selected = line('run')
+    nodes.handleSelection(line('run'), view)
+    nodes.handleDoubleClick()
+    expect(selectedNodeOn).toEqual([view])
+    expect(runs[0]?.view).toBe(view)
+  })
+
+  it('runs nothing when the selection is another part of the node', () => {
+    selected = line('chain')
+    makeNodes().handleDoubleClick()
+    expect(runs).toEqual([])
+  })
+
+  it('runs nothing when nothing on the drawing is selected', () => {
+    selected = undefined
+    makeNodes().handleDoubleClick()
+    expect(runs).toEqual([])
+  })
+
+  it('says nothing when the double-click was not on a drawing at all', () => {
+    // Every double-click in the workspace reaches this; only a drawing answers.
+    drawingOpen = false
+    makeNodes().handleDoubleClick()
+    expect(notices).toEqual([])
+    expect(runs).toEqual([])
+  })
+
+  it('says why when Excalidraw cannot be used, rather than running', () => {
+    unavailable = 'This Excalidraw is too old'
+    selected = line('run')
+    makeNodes().handleDoubleClick()
+    expect(runs).toEqual([])
+    expect(notices).toEqual(['This Excalidraw is too old'])
   })
 })

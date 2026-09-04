@@ -129,6 +129,9 @@ export default class ChainRunnerPlugin extends Plugin {
     this.registerDomEvent(document, 'pointerdown', event => clicks.press(spot(event), Date.now()), { capture: true })
     this.registerDomEvent(document, 'pointerup', event => clicks.release(spot(event), Date.now()), { capture: true })
     this.registerDomEvent(document, 'pointercancel', () => clicks.cancel(), { capture: true })
+    // `▶ Run` without a modifier. The browser counts the two clicks; the second
+    // changes no selection, so the scene hook never sees it (ADR-0010).
+    this.registerDomEvent(document, 'dblclick', () => nodes.handleDoubleClick(), { capture: true })
 
     const nodes = (this.nodes = new ChainNodes({
       app: this.app,

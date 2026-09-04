@@ -232,6 +232,8 @@ export interface NodeSurface {
   placeProposals(proposals: readonly PlacedProposal[], source: BlockReading, on?: DrawingView): Promise<void>
   /** The proposal the reader has selected, for the commands that decide one. */
   selectedProposal(on?: DrawingView): ProposalData | undefined
+  /** The one node element the reader has selected, for the gestures the hook cannot see. */
+  selectedNode(on?: DrawingView): MaybeNodeElement | undefined
   /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
   editProposal(proposalId: string, action: 'accept' | 'dismiss', on?: DrawingView): Promise<boolean>
 }
@@ -348,6 +350,14 @@ export function createNodeSurface(app: App): NodeSurface {
         input,
         drawing: drawingPath(view),
       }
+    },
+
+    selectedNode: on => {
+      const { ea } = bind(on)
+      const selected = selectedElements(ea)
+      // One element, so a double-click on a rubber-banded group runs nothing.
+      const only = selected.length === 1 ? selected[0] : undefined
+      return only && chainNodeData(only) ? only : undefined
     },
 
     selectedProposal: on => {

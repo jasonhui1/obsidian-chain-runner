@@ -166,6 +166,7 @@ function makeRun(): NodeRun {
   const surface: NodeSurface = {
     selection: () => undefined,
     selectedProposal: () => undefined,
+    selectedNode: () => undefined,
     placeProposals: async () => {},
     editProposal: async () => false,
     unavailable: () => undefined,

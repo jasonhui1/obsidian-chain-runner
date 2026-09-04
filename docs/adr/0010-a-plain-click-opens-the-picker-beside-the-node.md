@@ -43,10 +43,20 @@ click as "no press in flight" and opened nothing. So a finished click is held,
 unclaimed, for half a second; the first selection to ask for it takes it, and a
 drag leaves nothing behind to take.
 
-**The click reaches the two lines that open a picker, and not `▶ Run`.**
+**A single click reaches the two lines that open a picker, and not `▶ Run`.**
 Selecting a node is not asking to run it, and a run cannot be taken back — where
-a picker can be dismissed. Ctrl/Cmd+click and `Run chain on this note` still
-start a run, so nothing is lost.
+a picker can be dismissed.
+
+**`▶ Run` answers a double-click instead.** Two clicks are a deliberate gesture
+in a way one selection is not, so the reason to keep a run off the single click
+does not apply to them. The second click of a double changes no selection, so
+the scene hook never sees it: the browser counts the clicks, and the drawing is
+asked what is selected (`selectedNode` on the surface, one element only, so a
+double-click on a rubber-banded group runs nothing). Every double-click in the
+workspace reaches the handler, so anything that is not a drawing is answered
+with silence rather than a notice.
+
+Ctrl/Cmd+click and the palette still start a run, so all three routes stand.
 
 **Both routes stay.** The link hook, the commands and the toolbar button are
 untouched; this adds a route.
@@ -104,4 +114,12 @@ merged with ours so chaining never narrows what it asked for.
 lookup, on a hook Excalidraw already fires for anything holding one.
 
 **A proposal's decisions are still Ctrl/Cmd+click.** Keep and drop write to the
-vault, and this ADR's reasoning about `▶ Run` applies to them the same way.
+vault, and this ADR's reasoning about a single click applies to them the same
+way.
+
+**Excalidraw opens its own text editor on a double-click.** Double-clicking a
+text element is how a reader edits it, so running a node this way puts the `▶
+Run` line into edit mode at the same time. Pressing Escape leaves it untouched —
+the words are rewritten from the node's own state on the next status write — but
+it is a gesture doing two things, and a vault should say whether that reads as
+broken.

@@ -88,7 +88,12 @@ change:
 - a drag of the element reports exactly the same selection change as a click, so
   a hook that acts on the report alone pops a modal in the middle of a drag;
 - selection is not only clicking — a keyboard selection has no press behind it at
-  all, and the same wait is what catches that.
+  all, and the same wait is what catches that;
+- **a second click on an already-selected element changes nothing**, so the hook
+  never fires for it. A double-click is therefore unreachable from the hook: let
+  the browser count the clicks and ask the drawing what is selected
+  (`getViewSelectedElements`). Note that Excalidraw opens its **own text editor**
+  on a double-clicked text element, so the gesture is never yours alone.
 
 EA holds one of each hook, so the last installer wins; chain the previous one
 and put it back on unload, as `registerLinkHook` already does. Handlers claim
