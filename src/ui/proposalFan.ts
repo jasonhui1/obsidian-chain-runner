@@ -1,5 +1,6 @@
-import type { RunLayout, RunPanel } from './panels'
-import type { Box } from '../ui/nodeScene'
+import type { Box } from './nodeScene'
+import { LABEL_ROOM } from './proposal'
+import type { RunLayout, RunPanel } from '../run/panels'
 
 /**
  * Initial placement for an expansion's proposals: a column of cards beside the
@@ -17,7 +18,8 @@ export interface ProposedPanel {
 
 const CARD_WIDTH = 300
 const CARD_HEIGHT = 200
-const GAP = 24
+/** Enough for a card's own labels and a gap after them. */
+const GAP = LABEL_ROOM + 24
 /** Between the source block and the column, with room for the connectors. */
 const SOURCE_GAP = 140
 

@@ -59,6 +59,12 @@ const GLYPH_WIDTH = 0.58
 const LABEL_GAP = 10
 const LABEL_SPACING = 24
 
+/**
+ * How far below a card its labels reach. What places the cards has to leave at
+ * least this much under each one, or a card's labels land on its neighbour.
+ */
+export const LABEL_ROOM = LABEL_GAP + Math.round(LABEL_SIZE * LINE_HEIGHT)
+
 /** One of the two labels under a card, in the shapes Excalidraw is later asked for. */
 export interface ProposalLabelElement {
   role: 'accept' | 'dismiss'

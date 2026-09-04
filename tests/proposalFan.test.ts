@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildProposalFan } from '@/run/proposalFan'
+import { buildProposalFan } from '@/ui/proposalFan'
+import { buildProposalLabels } from '@/ui/proposal'
 import type { RunLayout, RunPanel } from '@/run/panels'
 import type { Box } from '@/ui/nodeScene'
 
@@ -18,6 +19,8 @@ const panel = (name: string, over: Partial<RunPanel> = {}): RunPanel => ({
 
 const fanOf = (layout: RunLayout, from: Box = source): ReturnType<typeof buildProposalFan> =>
   buildProposalFan({ layout, source: from })
+
+const identity = { proposalId: 'p-1', chainName: 'c', runId: 'r', notePath: 'n.md' }
 
 const three: RunLayout = {
   kind: 'columns',
@@ -47,6 +50,16 @@ describe('buildProposalFan', () => {
       const above = boxes[i - 1]!
       const below = boxes[i]!
       expect(below.y).toBeGreaterThanOrEqual(above.y + above.height)
+    }
+  })
+
+  it('leaves each card room for its own labels', () => {
+    const boxes = fanOf(three).map(one => one.box)
+    for (let i = 1; i < boxes.length; i++) {
+      const above = boxes[i - 1]!
+      for (const label of buildProposalLabels(above, identity)) {
+        expect(label.y + label.height).toBeLessThanOrEqual(boxes[i]!.y)
+      }
     }
   })
 

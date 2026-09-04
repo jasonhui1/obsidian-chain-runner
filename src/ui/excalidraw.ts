@@ -68,6 +68,8 @@ interface ExcalidrawAutomate {
   getViewElements(): SceneElement[]
   /** What the reader has selected. Feature-detected, like `addFrame`. */
   getViewSelectedElements?(): SceneElement[]
+  /** The note behind an image element — how a file inserted from the vault is drawn. */
+  getViewFileForImageElement?(element: SceneElement): TFile | null
   /** Puts existing scene elements on the workbench, ids kept, so a write updates them. */
   copyViewElementsToEAforEditing(elements: SceneElement[]): void
   addToGroup(elementIds: string[]): string
@@ -285,7 +287,7 @@ export function createNodeSurface(app: App): NodeSurface {
       const element = selected[0]
       // Our own furniture is not material to expand: a node, or another proposal.
       if (!element || chainNodeData(element) || proposalData(element)) return undefined
-      const input = blockInput(element, ea.getViewElements())
+      const input = imageNote(ea, element) ?? blockInput(element, ea.getViewElements())
       if (!input) return undefined
       return {
         id: element.id,
@@ -424,6 +426,17 @@ function embedNote(ea: ExcalidrawAutomate, box: Box, note: TFile): SceneElement 
 /** Outputs the layout is about are drawn heavier. */
 const EMPHASIS_STROKE = 4
 const PLAIN_STROKE = 1
+
+/**
+ * The note an image element draws. `Insert file from vault` renders a note as an
+ * image whose file is Excalidraw's own bookkeeping, not a link we can read; only
+ * a markdown note has a body to read, so a picture is not one.
+ */
+function imageNote(ea: ExcalidrawAutomate, element: SceneElement): NodeInput | undefined {
+  if (element.type !== 'image') return undefined
+  const note = ea.getViewFileForImageElement?.(element)
+  return note && note.extension === 'md' ? { kind: 'note', linkpath: note.path } : undefined
+}
 
 /** What the reader has selected; an Excalidraw that cannot say is too old to expand on. */
 function selectedElements(ea: ExcalidrawAutomate): SceneElement[] {
