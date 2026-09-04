@@ -55,6 +55,6 @@ transitions and animations across everything the plugin styles without deciding
 anything case by case — and whatever is added later is covered by default.
 
 **A reader loses nothing by turning motion off.** Every pulsing thing also says
-what it is in words: `running`, `writing…`, and the pill's `⛓ …`. Motion is a
+what it is in words: `running`, `writing…`, and the pill's `…`. Motion is a
 second channel here, never the only one — which is also what makes it safe for a
 reader who cannot perceive it.
