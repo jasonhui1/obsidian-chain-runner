@@ -80,6 +80,11 @@ export class TFolder {
 }
 export class MarkdownView {}
 
+/** Records the icon on the element, so a test can read which one was asked for. */
+export function setIcon(parent: HTMLElement, iconId: string): void {
+  parent.setAttribute('data-icon', iconId)
+}
+
 /** Obsidian's own path tidy, narrowed to what the vault writes go through. */
 export function normalizePath(path: string): string {
   return path.replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '')

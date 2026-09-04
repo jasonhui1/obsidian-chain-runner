@@ -5,7 +5,7 @@ import type { EngineState } from '@/engine/status'
 const URL = 'http://localhost:3000'
 
 function state(over: Partial<EmptyStateInput> = {}) {
-  return emptyStateFor({ run: undefined, engine: 'online', engineUrl: URL, ...over })
+  return emptyStateFor({ run: undefined, engine: { state: 'online', url: URL }, ...over })
 }
 
 describe('emptyStateFor: nothing has been run', () => {
@@ -16,13 +16,13 @@ describe('emptyStateFor: nothing has been run', () => {
   })
 
   it('says the engine is missing, and where it looked, rather than inviting a run', () => {
-    const empty = state({ engine: 'offline' })
+    const empty = state({ engine: { state: 'offline', url: URL } })
     expect(empty.tone).toBe('offline')
     expect(empty.hint).toContain(URL)
   })
 
   it('does not claim offline before the first check has answered', () => {
-    expect(state({ engine: 'unknown' }).tone).toBe('idle')
+    expect(state({ engine: { state: 'unknown', url: URL } }).tone).toBe('idle')
   })
 })
 
@@ -46,19 +46,20 @@ describe('emptyStateFor: a run with no panels yet', () => {
 
   it('lets a launched run speak for itself, whatever the engine is doing now', () => {
     const engines: EngineState[] = ['online', 'offline', 'unknown']
-    const tones = engines.map(engine => emptyStateFor({ run: { status: 'running' }, engine, engineUrl: URL }).tone)
+    const tones = engines.map(state => emptyStateFor({ run: { status: 'running' }, engine: { state, url: URL } }).tone)
     expect(new Set(tones)).toEqual(new Set(['waiting']))
   })
 })
 
 describe('emptyStateFor: every state is a designed one', () => {
   it('gives each a title and a hint, and never an empty string', () => {
+    const online = { state: 'online', url: URL } as const
     const cases: EmptyStateInput[] = [
-      { run: undefined, engine: 'online', engineUrl: URL },
-      { run: undefined, engine: 'offline', engineUrl: URL },
-      { run: { status: 'running' }, engine: 'online', engineUrl: URL },
-      { run: { status: 'failed' }, engine: 'online', engineUrl: URL },
-      { run: { status: 'done' }, engine: 'online', engineUrl: URL },
+      { run: undefined, engine: online },
+      { run: undefined, engine: { state: 'offline', url: URL } },
+      { run: { status: 'running' }, engine: online },
+      { run: { status: 'failed' }, engine: online },
+      { run: { status: 'done' }, engine: online },
     ]
     for (const input of cases) {
       const empty = emptyStateFor(input)

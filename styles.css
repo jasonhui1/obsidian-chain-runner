@@ -93,10 +93,6 @@
   color: var(--text-error);
 }
 
-/* Waiting is the one empty state that is going somewhere, so it breathes. */
-.chain-runner-empty--waiting .chain-runner-empty-title {
-  animation: chain-runner-breathe 1.6s ease-in-out infinite;
-}
 
 .chain-runner-run-header {
   padding-bottom: var(--size-4-2);
@@ -490,11 +486,10 @@
 }
 
 /* ── Motion ──────────────────────────────────────────────────────────────────
-   Two kinds, and no third. Hover and focus *transition*, because those elements
-   stay on the page between states. Anything still in flight *pulses*, because
-   the result view rebuilds its contents on every draw — a one-shot animation
-   would re-fire on the next redraw rather than marking the change that earned
-   it. Duration comes from Obsidian's own `--anim-duration-*`. */
+   Motion marks what is still in flight, and nothing else — no one-shot cues
+   until the result view stops rebuilding itself (ADR-0006). Hover and focus
+   transition on Obsidian's own `--anim-*`; the pulse's period is its own, for
+   the reason the ADR gives. */
 
 @keyframes chain-runner-breathe {
   0%,
@@ -516,28 +511,20 @@
     background-color var(--anim-duration-fast, 100ms) var(--anim-motion-smooth, ease-in-out);
 }
 
-/* The three things that are still happening. Each says so by breathing rather
-   than by a spinner: a sidebar of spinners would be busier than the words. */
+/* The four things still happening. Each also says so in words, so the pulse is
+   never the only channel. */
 .chain-runner-run-status--running,
 .chain-runner-panel-notice--writing,
-.chain-runner-engine-pill--unknown {
+.chain-runner-engine-pill--unknown,
+.chain-runner-empty--waiting .chain-runner-empty-title {
   animation: chain-runner-breathe 1.6s ease-in-out infinite;
 }
 
-/* A reader who has asked for stillness gets the same colours and no movement. */
+/* One rule rather than a list to keep in sync: the policy above is what makes
+   that safe, since nothing here moves except to mark work in flight. */
 @media (prefers-reduced-motion: reduce) {
-  .chain-runner-round,
-  .chain-runner-panel-action,
-  .chain-runner-mark-line,
-  .chain-runner-source-run a,
-  .chain-runner-engine-pill {
-    transition: none;
-  }
-
-  .chain-runner-run-status--running,
-  .chain-runner-panel-notice--writing,
-  .chain-runner-engine-pill--unknown,
-  .chain-runner-empty--waiting .chain-runner-empty-title {
-    animation: none;
+  [class*='chain-runner-'] {
+    transition: none !important;
+    animation: none !important;
   }
 }

@@ -25,9 +25,12 @@ A pill in the status bar says whether the engine answers, re-checked every three
 
 | Pill | Meaning |
 | --- | --- |
-| `⛓ …` | The first check has not answered yet. |
-| `⛓ engine` | The engine answered. |
-| `⛓ offline` | Nothing is listening at the engine URL. |
+| a spinner, `…` | The first check has not answered yet. |
+| a link, `engine` | The engine answered. |
+| a broken link, `offline` | Nothing is listening at the engine URL. |
+
+The icon is lucide and the word is plain text, so the pill is the theme's to
+colour and looks like Obsidian's own status items rather than like a plugin's.
 
 An engine that answers with an *error* is still online — a broken workspace is not a stopped server.
 
@@ -93,19 +96,24 @@ what to do about it:
 | Failed before any hop wrote | **The run landed nothing**, in red; the reason is in the header above. |
 | Finished holding nothing | **The run landed nothing**. |
 
-The engine's own state is read live, so stopping the engine turns an idle
-sidebar into the offline state without a run being attempted, and changing the
-engine URL in settings re-reads it. Which of the five it is lives in
+Only the first two read the engine — a run that has been launched says what
+happened to *it*, whatever the engine is doing now. So stopping the engine turns
+an *idle* sidebar into the offline state without a run being attempted, and
+changing the engine URL in settings re-reads it, while a run already on screen is
+left alone. Which of the five it is lives in
 `src/ui/emptyState.ts` and is checked in `tests/emptyState.test.ts`; the view
 only draws it.
 
 **Motion says what is still happening, and nothing else.** Anything in flight —
 the `running` status, a `writing…` panel, the pill before its first answer —
-breathes; hover and focus transition. There are no one-shot flourishes: the
-result view rebuilds its contents on every draw, so a one-shot animation would
-re-fire on the next redraw rather than mark the change that earned it. All of it
-is off under `prefers-reduced-motion: reduce`, and every duration and easing is
-Obsidian's own `--anim-*`.
+breathes; hover and focus transition. There are no one-shot cues, because the
+result view rebuilds its contents on every draw — ADR-0006 has the reasoning and
+#16 is the fix. All of it is off under `prefers-reduced-motion: reduce`. Every
+*transition* duration and easing is Obsidian's own `--anim-*`, with a fallback so
+a theme that has dropped the variable loses the motion rather than the rule; the
+pulse's own period is a literal, for the reason the ADR gives. Nothing pulses
+that does not also say what it is in words, so a reader who turns motion off, or
+cannot perceive it, loses nothing.
 
 **The keyboard reaches everything the mouse does.** A round row in a sidebar
 layout is focusable and answers `Enter` and `Space`, the list is a `listbox` and
@@ -309,8 +317,8 @@ npm run smoke -- --launch                    # also launchRun — spends real mo
 ### Part two — the Obsidian half, by hand
 
 1. **Build and install the plugin.** `npm run build` here, then copy `main.js`, `manifest.json`, `styles.css` into `<vault>/.obsidian/plugins/chain-runner/` and enable it.
-2. **Status bar, online.** The pill should read `⛓ engine` within a few seconds of the vault opening. Hovering it shows the engine URL.
-3. **Status bar, offline.** Stop the engine (Ctrl-C). The pill flips to `⛓ offline` within a few seconds. Start it again; it flips back within a few seconds.
+2. **Status bar, online.** The pill should read a link icon and `engine` within a few seconds of the vault opening. Hovering it shows the engine URL.
+3. **Status bar, offline.** Stop the engine (Ctrl-C). The pill flips to a broken-link icon and `offline` within a few seconds. Start it again; it flips back within a few seconds.
 4. **Offline action.** With the engine stopped, run **Chain Runner: List chains on the engine** from the command palette. Expect exactly one notice, `The engine is offline`, and nothing else.
 5. **Online action.** Start the engine and run the same command. Expect a notice naming the chains in the workspace — the same names the playground's own chain list shows.
 6. **Wrong URL.** Set **Engine URL** to `http://localhost:3999`. The pill goes offline without a restart. Set it back; it comes online.
@@ -350,7 +358,7 @@ This half spends model tokens: every step from 3 onwards starts a real run.
 
 7p. **What Expand refuses.** Run the command with nothing selected, and with two things selected: expect one notice asking for a single block, and no picker. Select an embeddable showing a note and expand it: expect the note's body to be the seed, minus its frontmatter. Select a chain node and expand it: expect the same refusal — a node is not material. Stop the engine and run it: expect one `The engine is offline` notice and nothing drawn.
 
-8. **Offline.** Stop the engine and run the command. Expect one `engine offline` notice and nothing else.
+8. **Offline.** Stop the engine and run the command. Expect one `The engine is offline` notice and nothing else.
 9b. **The node in both themes.** With a node on a drawing, switch light ↔ dark. Expect the title, the grey moment and the two blue links all legible in both — the node uses Excalidraw's own palette rather than Obsidian's variables, because a canvas element cannot read one, and it is Excalidraw's canvas inversion that has to carry it.
 9. **Both themes.** With a finished run on screen, switch light ↔ dark. Expect every panel state legible in both: the plugin sets no colour of its own, only `--text-normal`, `--text-muted`, `--text-faint`, `--text-accent`, `--text-warning`, `--text-error`, `--background-modifier-hover` and `--background-modifier-active-hover` — the last two on a round row, hovered and selected. Check all three shapes, and the two panel actions hovered and not.
 
@@ -372,10 +380,15 @@ variables is the real test of using them.
 3. **The keyboard.** In a sidebar-layout run, Tab to a round row: expect a focus
    ring, and `Enter` or `Space` to open it. Tab to a panel's actions: expect a
    ring on each of the three, and `Enter` to fire it.
-4. **Every surface, both themes, three themes.** Walk the picker, all three
+4. **The status pill.** Expect a lucide icon and a plain word, sitting among
+   Obsidian's own status items without standing out as a plugin's — and
+   following the theme's status-bar colour, not a colour of its own.
+5. **Every surface, both themes, three themes.** Walk the picker, all three
    result shapes, a chain node, a run frame, the output embeddables, the source
    run header, the status pill, the keep-marks modal, and each empty and failed
-   state. Nothing should carry a colour or a font the theme did not give it.
+   state. That nothing carries a colour or font of its own is already checked by
+   reading (see the table below); what only eyes can answer is whether each one
+   *reads* right — contrast, weight, spacing, and what the eye reaches first.
    Screenshot each, before and after.
 
 ### Last recorded run
@@ -398,5 +411,5 @@ variables is the real test of using them.
 | Chain nodes on a drawing (steps 7f–7i, 9b) | **not run** — the node's shape, the click handling and the offline and version refusals are covered in `tests/chainNode.test.ts` and `tests/chainNodes.test.ts`, but no node has been placed on a live drawing. Four things only a vault can attest: that `customData` survives Excalidraw's own save and reload, that `copyViewElementsToEAforEditing` rewrites a text element rather than adding a second one, that the link hook fires on a **standalone text** element (the spike observed it only on text bound into a box — `docs/spike-ea.md`, Q1), and that the node reads correctly in both themes. |
 | Expand (steps 7n-7p) | run 2026-09-04 in the `test_chain` vault against a live engine on Excalidraw 2.26.4. All of 7n-7p pass. The three unverified EA calls all hold: `addArrow` binds a connector to both ends, `getViewSelectedElements` returns the selection, and `isDeleted` on a copied element removes it. Both decision routes work — the labels under Ctrl/Cmd+click, and the two palette commands on a selected card. Checked in both themes: the dashes survive Excalidraw's canvas inversion on card borders and connectors alike, and a proposal differs from accepted material structurally as well as by colour — dashed with two labels under it, against solid with none — so the distinction does not rest on the inversion being kind to grey. Step 9b (the node in both themes) was attested in the same pass. A vault found two things the tests could not: cards were spaced 24px apart while a card's labels reach 30px below it, so every card but the last had its labels on its neighbour; and **Insert file from vault** draws a note as an *image* element, which `blockInput` could not read, so expanding one was refused. Both fixed, and the spacing is now derived from the labels' own reach with a test that fails if it drifts. |
 | Keep-marks (step 7m) | **not run** — what the marks mean is covered pure in `tests/keepMarks.test.ts` and where they go in `tests/keepMarksActions.test.ts`, but no marking has been done in a vault. Two things only a vault can attest: that the modal's scope bindings (↑ ↓, space, Enter) do not fight Obsidian's own, and that a marked line reads legibly in both themes — it pairs `--text-highlight-bg`, which is semi-transparent, with `--text-normal`. |
-| Part four, the polish pass | **not run** — the fixes are in (five designed empty states, motion under `prefers-reduced-motion`, focus rings, keyboard-reachable round rows, the offline notice in sentence case), and the audit that no hard-coded colour or font remains is mechanical and passes: `styles.css` holds no hex, `rgb()`, colour keyword or `font-family` literal, and no module writes an inline style. What is **not** attested is the part that needs eyes: the before/after screenshots of each surface in light and dark under two community themes. `src/ui/ink.ts` is the one deliberate exception to the no-literal-colours rule, and stays one — a canvas element cannot read a CSS variable, so a chain node uses Excalidraw's own palette and its canvas inversion carries dark mode. |
+| Part four, the polish pass | **partly run — nothing in a vault.** What was checked, and how: **by reading, and it holds** — no surface carries a colour or font of its own. `styles.css` holds no hex, `rgb()`, `hsl()` or colour keyword, and its one `font-family` is `var(--font-monospace)`; no module writes an inline style, sets `cssText`, or injects a `<style>` tag; every rule resolves through Obsidian's variables, and the three added since (`--anim-duration-fast`, `--anim-motion-smooth`, `--background-modifier-border-focus`) carry fallbacks. That covers the picker, all three result shapes, the empty and failed states, the source-run header, the keep-marks modal and the status pill. The chain node and the run frame are Excalidraw's canvas, where `src/ui/ink.ts` is the one deliberate exception and stays one — a canvas element cannot read a CSS variable, so the node uses Excalidraw's own palette and its canvas inversion carries dark mode. **Fixed in the same pass:** five designed empty states, motion under `prefers-reduced-motion` (ADR-0006), focus rings and keyboard-reachable round rows, the status pill's emoji replaced by a lucide icon, and the two lowercase notices put in sentence case. **Not attested, and only a vault can:** every step of Part four above — that each surface *reads* right in light and dark under two community themes, which is a judgement no audit makes. Tracked as #18. Remaining nits are #16 and #17. |
 | Part three, the quick path | run 2026-09-02 in the `test_chain` vault against a live engine — twice: once on the ported layout model, and again after the engine began streaming `layout` frames (ADR-0017). Chains ran and their results drew correctly both times. The run opened in the playground's own history from the id the result header shows (step 4). Not itemised step by step; the capability refusal (step 4b) is not separately attested. |

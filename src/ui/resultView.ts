@@ -1,9 +1,8 @@
 import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
 import { arrangeRun, type Arrangement, type RoundEntry } from './arrangement'
-import { emptyStateFor, type EmptyState } from './emptyState'
+import { emptyStateFor, type EmptyState, type EngineReading } from './emptyState'
 import { noticeFor } from './panelCopy'
 import { createThrottle } from './throttle'
-import type { EngineState } from '../engine/status'
 import type { RunPanel } from '../run/panels'
 import { seedLine, type RunResult, type RunStatus } from '../run/session'
 
@@ -17,11 +16,6 @@ export interface PanelActions {
   keepLines: (panel: RunPanel, run: RunResult) => void
 }
 
-/** What the view asks about the engine, to say something useful when it is empty. */
-export interface EngineView {
-  state: () => EngineState
-  url: () => string
-}
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   running: 'running',
@@ -51,10 +45,10 @@ export class RunResultView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    /** What the two panel actions do. They write to the vault; the view does not. */
+    /** Read on every draw, so the empty state moves with the engine. */
+    private readonly engine: () => EngineReading,
+    /** What the panel actions do. They write to the vault; the view does not. */
     private readonly actions?: PanelActions,
-    /** Unset in a test or a bare view: the empty state then reads as if online. */
-    private readonly engine?: EngineView,
   ) {
     super(leaf)
   }
@@ -64,7 +58,7 @@ export class RunResultView extends ItemView {
   }
 
   override getDisplayText(): string {
-    return this.result ? `⛓ ${this.result.chainName}` : 'Chain run'
+    return this.result?.chainName ?? 'Chain run'
   }
 
   override getIcon(): IconName {
@@ -79,11 +73,7 @@ export class RunResultView extends ItemView {
     this.throttle.cancel()
   }
 
-  /**
-   * Redraws for something outside the run — the engine coming or going. Only the
-   * empty state reads it, and a run in flight owns the screen, so a redraw here
-   * would only interrupt one.
-   */
+  /** Redraws for the engine coming or going, which only the no-run state reads. */
   refresh(): void {
     if (!this.result) this.draw()
   }
@@ -126,13 +116,9 @@ export class RunResultView extends ItemView {
     this.drawArrangement(contentEl, arrangeRun(this.result.layout, this.pickedRound), this.result.status)
   }
 
-  /** A view with no panels, said as one of the five designed states. */
+  /** A view with no panels, said as the designed state that fits. */
   private drawEmpty(parent: HTMLElement, status: RunStatus | undefined): void {
-    const empty: EmptyState = emptyStateFor({
-      run: status ? { status } : undefined,
-      engine: this.engine?.state() ?? 'online',
-      engineUrl: this.engine?.url() ?? '',
-    })
+    const empty: EmptyState = emptyStateFor({ run: status ? { status } : undefined, engine: this.engine() })
     const el = parent.createDiv({ cls: `chain-runner-empty chain-runner-empty--${empty.tone}` })
     el.createDiv({ cls: 'chain-runner-empty-title', text: empty.title })
     el.createDiv({ cls: 'chain-runner-empty-hint', text: empty.hint })

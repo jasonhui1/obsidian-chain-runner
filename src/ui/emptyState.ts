@@ -2,9 +2,9 @@ import type { EngineState } from '../engine/status'
 import type { RunStatus } from '../run/session'
 
 /**
- * What the result view says when it has no panels to draw. Five situations, and
- * a designed state for each: `tone` names the condition and the stylesheet
- * colours it, the way `panelCopy.ts` does for a panel.
+ * What the result view says when it has no panels to draw. `tone` names the
+ * condition and the stylesheet colours it, the way `panelCopy.ts` does for a
+ * panel.
  */
 export type EmptyTone = 'idle' | 'offline' | 'waiting' | 'failed'
 
@@ -16,24 +16,28 @@ export interface EmptyState {
   hint: string
 }
 
+/** Where the engine is and whether it answers, as the empty state reads it. */
+export interface EngineReading {
+  state: EngineState
+  url: string
+}
+
 export interface EmptyStateInput {
   /** The run on screen, or `undefined` when none has been launched. */
   run: { status: RunStatus } | undefined
-  engine: EngineState
-  engineUrl: string
+  engine: EngineReading
 }
 
-export function emptyStateFor({ run, engine, engineUrl }: EmptyStateInput): EmptyState {
-  // A launched run says what happened to it. The engine may have gone since,
-  // but what is on screen is this run's news, not the engine's.
+export function emptyStateFor({ run, engine }: EmptyStateInput): EmptyState {
+  // A launched run says what happened to it, whatever the engine is doing now.
   if (run) return LAUNCHED[run.status]
-  // `unknown` is the state before the first check answered, and claiming the
-  // engine is gone on no evidence is worse than inviting a run that then fails.
-  if (engine === 'offline') {
+  // Only `offline` is evidence; `unknown` is the state before the first check
+  // answered (`engine/status.ts`).
+  if (engine.state === 'offline') {
     return {
       tone: 'offline',
       title: 'No engine',
-      hint: `Nothing is listening at ${engineUrl}. Start maestro-playground, or set another engine URL in settings.`,
+      hint: `Nothing is listening at ${engine.url}. Start maestro-playground, or set another engine URL in settings.`,
     }
   }
   return {
