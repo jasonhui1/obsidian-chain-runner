@@ -118,6 +118,7 @@ function makeExpand(): Expand {
     unavailable: () => undefined,
     hasActiveDrawing: () => true,
     selectedNode: () => undefined,
+    reflow: () => Promise.resolve(false),
     place: () => Promise.resolve(),
     setParameter: () => Promise.resolve(true),
     setChain: () => Promise.resolve(true),

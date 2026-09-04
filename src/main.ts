@@ -127,7 +127,17 @@ export default class ChainRunnerPlugin extends Plugin {
     const clicks = new PointerClicks(() => Date.now())
     const spot = (event: PointerEvent): { x: number; y: number } => ({ x: event.clientX, y: event.clientY })
     this.registerDomEvent(document, 'pointerdown', event => clicks.press(spot(event), Date.now()), { capture: true })
-    this.registerDomEvent(document, 'pointerup', event => clicks.release(spot(event), Date.now()), { capture: true })
+    this.registerDomEvent(
+      document,
+      'pointerup',
+      event => {
+        clicks.release(spot(event), Date.now())
+        // A drag that resized a node is finished; its lines are re-cut now
+        // rather than on every frame, because every write is a save (ADR-0011).
+        nodes.handleResize()
+      },
+      { capture: true },
+    )
     this.registerDomEvent(document, 'pointercancel', () => clicks.cancel(), { capture: true })
     // `▶ Run` without a modifier. The browser counts the two clicks; the second
     // changes no selection, so the scene hook never sees it (ADR-0010).

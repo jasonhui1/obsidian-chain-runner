@@ -28,6 +28,10 @@ export interface ChainNodeData {
   chainName: string
   parameterName?: string
   parameterValue?: string
+  /** The chain's moment in full, which only the node records once it is drawn. */
+  moment?: string
+  /** The box width these lines were cut to fit, so a resize is noticed once. */
+  laidOut?: number
 }
 
 /** One element of the node, in the shapes Excalidraw is later asked for. */
@@ -118,6 +122,8 @@ export function buildChainNode(chain: ChainSummary | undefined, options: ChainNo
       role,
       chain: chain?.slug ?? '',
       chainName: chain?.name ?? '',
+      laidOut: WIDTH,
+      ...(chain && momentOf(chain) ? { moment: momentOf(chain) } : {}),
       ...(parameter ? { parameterName: parameter.name } : {}),
       ...(options.parameterValue ? { parameterValue: options.parameterValue } : {}),
     },
@@ -210,7 +216,8 @@ export function chainNodeData(element: MaybeNodeElement): ChainNodeData | undefi
   if (typeof custom !== 'object' || custom === null) return undefined
   const stamp = (custom as Record<string, unknown>)[DATA_KEY]
   if (typeof stamp !== 'object' || stamp === null) return undefined
-  const { nodeId, role, chain, chainName, parameterName, parameterValue } = stamp as Record<string, unknown>
+  const { nodeId, role, chain, chainName, parameterName, parameterValue, moment, laidOut } =
+    stamp as Record<string, unknown>
   if (typeof nodeId !== 'string' || typeof chain !== 'string' || typeof chainName !== 'string') return undefined
   if (!isRole(role)) return undefined
   return {
@@ -220,6 +227,8 @@ export function chainNodeData(element: MaybeNodeElement): ChainNodeData | undefi
     chainName,
     ...(typeof parameterName === 'string' ? { parameterName } : {}),
     ...(typeof parameterValue === 'string' ? { parameterValue } : {}),
+    ...(typeof moment === 'string' ? { moment } : {}),
+    ...(typeof laidOut === 'number' ? { laidOut } : {}),
   }
 }
 
@@ -260,6 +269,12 @@ export interface NodeEdit<E> {
   y?: number
   /** The box's own height, when the lines inside it changed. */
   height?: number
+  /** Where the line starts, when the box it sits in changed width. */
+  x?: number
+  /** How wide the line may draw, when the box it sits in changed width. */
+  width?: number
+  /** Put back to the size the node was designed at, after a drag scaled it. */
+  fontSize?: number
   data: ChainNodeData
 }
 
@@ -343,6 +358,94 @@ export function chainEdits<E extends MaybeNodeElement>(
 
   const kept = new Set(wanted.map(shape => shape.role))
   return { edits, additions, removals: mine.filter(one => !kept.has(one.role)).map(one => one.element) }
+}
+
+/**
+ * Every node on the scene, one target each. The box is the one element a node
+ * has exactly one of; a copy carries the same `nodeId` and is told apart by the
+ * group Excalidraw re-made for it.
+ */
+export function nodeTargets(scene: readonly MaybeNodeElement[]): NodeTarget[] {
+  return scene.flatMap(element => {
+    const data = chainNodeData(element)
+    if (!data || chainNodeRole(data.role) !== 'box') return []
+    return [{ nodeId: data.nodeId, ...(element.groupIds ? { groupIds: element.groupIds } : {}) }]
+  })
+}
+
+/** The lines of a node, top to bottom, which is the order they are laid out in. */
+const STACK: ChainNodeRole[] = ['chain', 'title', 'moment', 'parameter']
+
+/** What a line's words are before they were ever cut to fit. */
+function fullText(data: ChainNodeData, shown: string): string {
+  const role = chainNodeRole(data.role)
+  if (role === 'chain') return chainLabel(data.chainName)
+  if (role === 'parameter' && data.parameterName) {
+    return parameterLabel(data.parameterName, data.parameterValue)
+  }
+  // The moment of a node drawn before it was kept, and the run's own words.
+  if (role === 'moment' && data.moment) return `“${data.moment}”`
+  return shown
+}
+
+/**
+ * What changes when the reader drags a node wider or narrower: every line cut
+ * again to the box's new width, at the size the node was designed at rather
+ * than the size a drag scaled it to (ADR-0010). Empty when the box is still the
+ * width its lines were cut for, so a scene that has settled is never written.
+ */
+export function reflowEdits<E extends MaybeNodeElement & { text?: string; fontSize?: number; width?: number }>(
+  scene: readonly E[],
+  target: NodeTarget,
+): NodeEdit<E>[] {
+  const mine = scene.flatMap(element => {
+    const data = nodeElementData(element, target)
+    return data ? [{ element, data, role: chainNodeRole(data.role) }] : []
+  })
+  const box = mine.find(one => one.role === 'box')
+  const width = box?.element.width
+  if (!box || width === undefined) return []
+  if (Math.round(width) === Math.round(box.data.laidOut ?? WIDTH)) return []
+
+  const lineWidth = width - PADDING * 2
+  const left = box.element.x ?? 0
+  const top = box.element.y ?? 0
+  const edits: NodeEdit<E>[] = []
+  let y = PADDING
+
+  for (const role of STACK) {
+    const found = mine.find(one => one.role === role)
+    if (!found) continue
+    const fontSize = role === 'chain' || role === 'title' ? TITLE_SIZE : LINE_SIZE
+    const height = Math.round(fontSize * LINE_HEIGHT)
+    edits.push({
+      element: found.element,
+      x: left + PADDING,
+      y: top + y,
+      width: lineWidth,
+      fontSize,
+      text: oneLine(fullText(found.data, found.element.text ?? ''), fontSize, lineWidth),
+      data: { ...found.data, laidOut: width },
+    })
+    y += height + LINE_GAP
+  }
+
+  const run = mine.find(one => one.role === 'run')
+  if (run) {
+    const height = Math.round(LINE_SIZE * LINE_HEIGHT)
+    edits.push({
+      element: run.element,
+      // The words are the run's, not the box's; only where they sit changes.
+      x: left + width - PADDING - (run.element.width ?? 0),
+      y: top + y,
+      fontSize: LINE_SIZE,
+      data: { ...run.data, laidOut: width },
+    })
+    y += height
+  }
+
+  edits.push({ element: box.element, y: top, height: y + PADDING, data: { ...box.data, laidOut: width } })
+  return edits
 }
 
 /** The one test for "is this element part of that node", used reading and writing. */

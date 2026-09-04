@@ -12,8 +12,9 @@ import {
   chainNodeRole,
   parameterEdits,
   parameterLabel,
+  reflowEdits,
 } from '@/ui/chainNode'
-import type { ChainNodeElement } from '@/ui/chainNode'
+import type { ChainNodeElement, NodeEdit } from '@/ui/chainNode'
 import type { ChainSummary } from '@/engine/types'
 
 /**
@@ -350,5 +351,106 @@ describe('changing which chain a node runs', () => {
 
   it('touches nothing when the node is no longer on the drawing', () => {
     expect(chainEdits(scene(), { nodeId: 'n-gone' }, relay)).toEqual({ edits: [], additions: [], removals: [] })
+  })
+})
+
+describe('re-cutting a node the reader resized', () => {
+  const long = chain({
+    name: 'A chain whose name is far too long to sit in a three-hundred-pixel box',
+    moment: 'when the sentence explaining the moment runs on well past what the box can hold',
+  })
+
+  /** The node on a drawing, its box dragged to `width`. */
+  const resized = (width: number, value = 'engineers'): ChainNodeElement[] =>
+    buildChainNode(long, { nodeId: 'n-1', parameterValue: value }).map((element, index) => ({
+      ...element,
+      id: `e-${index}`,
+      ...(element.role === 'box' ? { width } : {}),
+    }))
+
+  const edit = (elements: ChainNodeElement[], role: string): NodeEdit<ChainNodeElement> | undefined =>
+    reflowEdits(elements, { nodeId: 'n-1' }).find(one => one.data.role === role)
+
+  it('does nothing while the box is still the width its lines were cut for', () => {
+    expect(reflowEdits(resized(300), { nodeId: 'n-1' })).toEqual([])
+  })
+
+  it('shows more of the chain name when the box is dragged wider', () => {
+    const before = byRole(resized(300), 'chain').text ?? ''
+    const after = edit(resized(600), 'chain')?.text ?? ''
+    expect(after.length).toBeGreaterThan(before.length)
+    expect(after).toContain('A chain whose name is far too long')
+  })
+
+  it('shows more of the moment too, which the node is the only record of', () => {
+    const before = byRole(resized(300), 'moment').text ?? ''
+    const after = edit(resized(600), 'moment')?.text ?? ''
+    expect(after.length).toBeGreaterThan(before.length)
+    expect(after).toContain('when the sentence explaining the moment')
+  })
+
+  it('cuts back down when the box is dragged narrower', () => {
+    const wide = edit(resized(600), 'chain')?.text ?? ''
+    const narrow = edit(resized(200), 'chain')?.text ?? ''
+    expect(narrow.length).toBeLessThan(wide.length)
+    expect(narrow.endsWith('…')).toBe(true)
+  })
+
+  it('puts the type size back, so a dragged node reads at the size it was designed at', () => {
+    const scaled = resized(600).map(element =>
+      element.role === 'chain' ? { ...element, fontSize: 44 } : element,
+    )
+    expect(reflowEdits(scaled, { nodeId: 'n-1' }).find(one => one.data.role === 'chain')?.fontSize).toBe(20)
+  })
+
+  it('keeps the lines inside the box it was given', () => {
+    const chainLine = edit(resized(600), 'chain')
+    expect(chainLine?.width).toBe(600 - 14 * 2)
+  })
+
+  it('keeps ▶ Run against the box’s right edge', () => {
+    const run = edit(resized(600), 'run')
+    const width = byRole(resized(600), 'run').width
+    expect(run?.x).toBe(600 - 14 - width)
+  })
+
+  it('leaves the ▶ Run line’s words alone: they belong to the run, not the box', () => {
+    // Rewriting them would put `▶ Run` back over a run that is still going.
+    expect(edit(resized(600), 'run')?.text).toBeUndefined()
+  })
+
+  it('closes the box around the lines it now holds', () => {
+    const box = edit(resized(600), 'box')
+    expect(box?.height).toBeGreaterThan(0)
+    expect(box?.data.laidOut).toBe(600)
+  })
+
+  it('records the new width on every element, so one re-cut is not repeated', () => {
+    const done = reflowEdits(resized(600), { nodeId: 'n-1' }).map(one => ({
+      ...one.element,
+      ...(one.data.role === 'box' ? { width: 600 } : {}),
+      customData: { chainRunner: one.data },
+    }))
+    expect(reflowEdits(done, { nodeId: 'n-1' })).toEqual([])
+  })
+
+  it('leaves other nodes on the drawing alone', () => {
+    const other = buildChainNode(chain({ slug: 'other' }), { nodeId: 'n-2' })
+    const edits = reflowEdits([...resized(600), ...other], { nodeId: 'n-1' })
+    expect(edits.every(one => one.data.nodeId === 'n-1')).toBe(true)
+  })
+
+  it('says nothing about a node that is not on the drawing', () => {
+    expect(reflowEdits(resized(600), { nodeId: 'gone' })).toEqual([])
+  })
+
+  it('re-cuts a node drawn before the words were kept, from what it still shows', () => {
+    // An older node carries no `moment`, so its own line is all there is to cut.
+    const older = resized(600).map(element => ({
+      ...element,
+      customData: { chainRunner: { ...chainNodeData(element)!, moment: undefined } },
+    }))
+    const moment = reflowEdits(older, { nodeId: 'n-1' }).find(one => one.data.role === 'moment')
+    expect(moment?.text).toBe(byRole(resized(300), 'moment').text)
   })
 })

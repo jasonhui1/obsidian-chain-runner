@@ -139,6 +139,19 @@ export class ChainNodes {
     this.deps.run(data, element, this.lastView)
   }
 
+  /**
+   * The pointer coming up, which is when a node dragged to a new size has its
+   * lines cut again to fit it (ADR-0011). Nothing is written unless a box
+   * actually changed width, so a drawing at rest is never saved.
+   */
+  handleResize(): void {
+    try {
+      void this.deps.surface.reflow(this.lastView).catch(() => {})
+    } catch {
+      // Every release in the workspace arrives here; only a drawing answers.
+    }
+  }
+
   /** The picker a line opens, if it opens one. `▶ Run` is not one of them. */
   private openDecision(
     data: ChainNodeData,

@@ -38,6 +38,8 @@ let running: string[]
 /** What the drawing says is selected when a double-click asks it. */
 let selected: { customData?: unknown } | undefined
 let selectedNodeOn: unknown[]
+/** The drawings a finished drag asked to re-cut. */
+let reflowedOn: unknown[]
 /**
  * How the press behind a selection settles: a point when it was a click, and
  * `undefined` for a drag, a keyboard selection or no press at all.
@@ -54,6 +56,11 @@ function makeSurface(): NodeSurface {
       selectedNodeOn.push(on)
       if (!drawingOpen) throw new Error('Open the Excalidraw drawing as its own tab to do that.')
       return selected
+    },
+    reflow: on => {
+      if (!drawingOpen) return Promise.reject(new Error('Open the Excalidraw drawing as its own tab to do that.'))
+      reflowedOn.push(on)
+      return Promise.resolve(true)
     },
     selectedProposal: () => undefined,
     placeProposals: async () => {},
@@ -128,6 +135,7 @@ beforeEach(() => {
   clickSpot = { x: 0, y: 0 }
   selected = undefined
   selectedNodeOn = []
+  reflowedOn = []
   resetModals()
 })
 
@@ -578,5 +586,28 @@ describe('double-clicking a node', () => {
     makeNodes().handleDoubleClick()
     expect(runs).toEqual([])
     expect(notices).toEqual(['This Excalidraw is too old'])
+  })
+})
+
+describe('finishing a drag that resized a node', () => {
+  it('asks the drawing to cut the node’s lines to its new width', () => {
+    makeNodes().handleResize()
+    expect(reflowedOn).toEqual([undefined])
+  })
+
+  it('asks the drawing the node was last selected on, not the tab in front', () => {
+    const view = { embedded: true }
+    const nodes = makeNodes()
+    nodes.handleSelection(element({ role: 'chain' }), view)
+    nodes.handleResize()
+    expect(reflowedOn).toEqual([view])
+  })
+
+  it('says nothing when the drag was not on a drawing at all', async () => {
+    // Every pointer release in the workspace reaches this.
+    drawingOpen = false
+    makeNodes().handleResize()
+    await flush()
+    expect(notices).toEqual([])
   })
 })

@@ -3,7 +3,9 @@ import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoi
 import {
   chainEdits,
   chainNodeData,
+  nodeTargets,
   parameterEdits,
+  reflowEdits,
   runEdits,
   type ChainNodeElement,
   type MaybeNodeElement,
@@ -128,6 +130,8 @@ interface SceneElement extends SceneShape {
   isDeleted?: boolean
   /** The words as Excalidraw saves and re-parses them; the third place a text element holds them. */
   rawText?: string
+  /** A drag scales this; a re-cut puts it back to the size the node was designed at. */
+  fontSize?: number
 }
 
 /** EA's link-click hook; returning `false` stops the link opening (`docs/spike-ea.md`, Q1). */
@@ -220,6 +224,11 @@ export interface NodeSurface {
   setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
   /** Re-shapes a node around another chain. `false` means the node is no longer there. */
   setChain(target: NodeTarget, chain: ChainSummary, value?: string, on?: DrawingView): Promise<boolean>
+  /**
+   * Cuts every resized node's lines to its new width. `false` when there was
+   * nothing to do, which is every drawing the reader has not just dragged one on.
+   */
+  reflow(on?: DrawingView): Promise<boolean>
   /** What a node is bound to and where it sits; `undefined` when it is gone. */
   read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
   /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
@@ -315,6 +324,14 @@ export function createNodeSurface(app: App): NodeSurface {
       const { ea } = bind(on)
       const reshape = chainEdits(ea.getViewElements(), target, chain, value)
       return write(ea, reshape.edits, reshape.removals, reshape.additions)
+    },
+
+    reflow: async on => {
+      const { ea } = bind(on)
+      const scene = ea.getViewElements()
+      // Every node is asked; only one the reader dragged answers with anything.
+      const edits = nodeTargets(scene).flatMap(target => reflowEdits(scene, target))
+      return write(ea, edits)
     },
 
     setRunStatus: async (target, status, on) => {
@@ -532,8 +549,11 @@ async function write(
     const element = ea.getElement(edit.element.id)
     if (!element) continue
     element.customData = { chainRunner: edit.data }
+    if (edit.x !== undefined) element.x = edit.x
     if (edit.y !== undefined) element.y = edit.y
     if (edit.height !== undefined) element.height = edit.height
+    if (edit.fontSize !== undefined) element.fontSize = edit.fontSize
+    if (edit.width !== undefined) element.width = edit.width
     if (edit.text === undefined) continue
     const wasWide = element.width ?? 0
     // A text element holds its words in three places, and Excalidraw re-derives

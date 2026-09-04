@@ -137,6 +137,18 @@ is **not** bound into a container, and their own docs pair `autoResize: false`
 with a width. A chain node's lines are standalone text drawn at a known width,
 so they pass `autoResize: false` (ADR-0010).
 
+**A group resize scales `fontSize`.** `autoResize` governs a text element's own
+width, not what happens when the reader drags a handle on the group around it.
+Anything that lays a node out from its box width has to put the type size back,
+or it computes a layout for one size and draws at another — which is the defect
+#20 shipped from the other direction (ADR-0011).
+
+**Every write is a save, so a scene hook is the wrong trigger for a drag.**
+`trackElements: true` fires per frame. Act on the pointer coming up, and keep a
+record on the element of what it was last laid out for, so a release that changed
+nothing writes nothing — that record is also what stops the write looping back
+through the hook.
+
 ## What a block on the scene actually is
 
 The type you get is not the type you expect. This has bitten twice.
