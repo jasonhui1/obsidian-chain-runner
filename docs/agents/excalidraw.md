@@ -58,7 +58,12 @@ wrongly written here as a fact about clicks. Read out of `main.js` at 2.26.4:
   takes `(elements, appState, files, view, ea)`. Filtering on
   `selectedElementIds` makes an unmodified click on an element actionable —
   `registerSelectionHook` is that, and `src/ui/selectionClick.ts` is the policy
-  saying which of those changes is a click (ADR-0010).
+  saying which of those changes is a click (ADR-0010). **Attested on 2.26.4**
+  that the hook is reached and the modal it opens can be positioned; see below
+  for the ordering that bit.
+- `evaluateSceneChangeHook` early-returns when the hook server has a
+  `sidepanelTab` that is not visible, unless `triggerWhenInvisible`. The shared
+  `plugin.ea` has none, so an ordinary drawing is not gated by it.
 - The view calls `getHookServer()`, which is `this.hookServer ?? this.plugin.ea`
   — so setting the hook on the shared `ea` reaches an ordinary drawing.
 
@@ -74,11 +79,14 @@ change:
 - the selection may not have changed — compare against the last one seen;
 - the selection may not be one element — a rubber-band or Select All must not
   pop a modal;
-- **it fires on pointer-*down***, before the reader has finished doing anything.
-  A drag of the element reports exactly the same selection change as a click, so
-  a hook that acts immediately pops a modal in the middle of a drag. Wait for the
-  pointer to come back up near where it went down
-  (`src/ui/pointerClicks.ts`);
+- **it is raised through React's `onChange`, not from the pointer event**, so it
+  arrives while the pointer is still down *or* after it is already back up — and
+  a vault found the second to be the usual order. Anything that waits for the
+  press to settle must also accept a press that has *already* settled, or it
+  sees every click as "no press in flight" and does nothing
+  (`src/ui/pointerClicks.ts`). This one cost a whole vault run;
+- a drag of the element reports exactly the same selection change as a click, so
+  a hook that acts on the report alone pops a modal in the middle of a drag;
 - selection is not only clicking — a keyboard selection has no press behind it at
   all, and the same wait is what catches that.
 

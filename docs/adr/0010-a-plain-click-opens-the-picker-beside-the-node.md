@@ -29,11 +29,19 @@ seam.
 reports the selection the moment the pointer goes down, which is too early to
 know what the reader is doing — a **drag** of the node begins with exactly the
 same event, and a **keyboard** selection has no press behind it at all. So
-`src/ui/pointerClicks.ts` holds the press and answers the waiting picker only
-once it settles: the press's own position when the pointer comes up near where
-it went down and soon enough, and nothing when it travelled, was held, was
-cancelled, or never existed. One mechanism is both the gate and the anchor —
-a picker opens exactly when there is a place to open it.
+`src/ui/pointerClicks.ts` decides whether the press behind a selection was a
+click: the press's own position when the pointer comes up near where it went
+down and soon enough, and nothing when it travelled, was held, was cancelled, or
+never existed. One mechanism is both the gate and the anchor — a picker opens
+exactly when there is a place to open it.
+
+**Both orders are answered, because the report is not synchronous.** Excalidraw
+raises the selection through React's `onChange`, so it may arrive while the
+pointer is still down *or* after it is back up. A first vault run found the
+second order to be the usual one, and a gate that only queued waiters saw every
+click as "no press in flight" and opened nothing. So a finished click is held,
+unclaimed, for half a second; the first selection to ask for it takes it, and a
+drag leaves nothing behind to take.
 
 **The click reaches the two lines that open a picker, and not `▶ Run`.**
 Selecting a node is not asking to run it, and a run cannot be taken back — where
@@ -84,6 +92,9 @@ by the palette.
 releases — the window taking the pointer away without a `pointercancel`, say —
 leaves the picker unopened rather than opening it late. Both routes back to the
 line still work.
+
+**A click is spent once.** Two selections reported for one click open one
+picker; the second finds the click already claimed.
 
 **The hook is shared, and the last installer wins.** As with `onLinkClickHook`,
 the previous hook is chained and put back on unload, and its `appStateKeys` are

@@ -124,7 +124,7 @@ export default class ChainRunnerPlugin extends Plugin {
 
     // A selection hook carries no event, so the press behind it is read from
     // here; capture, because Excalidraw's canvas stops its own (ADR-0010).
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => Date.now())
     const spot = (event: PointerEvent): { x: number; y: number } => ({ x: event.clientX, y: event.clientY })
     this.registerDomEvent(document, 'pointerdown', event => clicks.press(spot(event), Date.now()), { capture: true })
     this.registerDomEvent(document, 'pointerup', event => clicks.release(spot(event), Date.now()), { capture: true })

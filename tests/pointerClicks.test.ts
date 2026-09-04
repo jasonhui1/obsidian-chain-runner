@@ -22,7 +22,7 @@ interface Point {
 
 describe('PointerClicks', () => {
   it('settles on the press once the pointer comes up where it went down', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.release({ x: 40, y: 90 }, 1080)
@@ -30,7 +30,7 @@ describe('PointerClicks', () => {
   })
 
   it('forgives the wobble of a real click', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.release({ x: 42, y: 88 }, 1080)
@@ -38,7 +38,7 @@ describe('PointerClicks', () => {
   })
 
   it('is not a click when the pointer travelled: that was a drag', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.release({ x: 300, y: 90 }, 1200)
@@ -46,7 +46,7 @@ describe('PointerClicks', () => {
   })
 
   it('is not a click when the pointer was held down', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.release({ x: 40, y: 90 }, 3000)
@@ -54,18 +54,49 @@ describe('PointerClicks', () => {
   })
 
   it('settles at once, with nothing, when no press is in flight', () => {
-    expect(watch(new PointerClicks())).toEqual([undefined])
+    expect(watch(new PointerClicks(() => 1000))).toEqual([undefined])
   })
 
-  it('settles at once when the press already ended', () => {
-    const clicks = new PointerClicks()
+  it('answers a click that has only just finished', () => {
+    // The drawing reports a selection after the pointer is already back up.
+    let now = 1000
+    const clicks = new PointerClicks(() => now)
     clicks.press({ x: 40, y: 90 }, 1000)
     clicks.release({ x: 40, y: 90 }, 1080)
+    now = 1120
+    expect(watch(clicks)).toEqual([{ x: 40, y: 90 }])
+  })
+
+  it('answers a finished click once, so one click opens one thing', () => {
+    let now = 1000
+    const clicks = new PointerClicks(() => now)
+    clicks.press({ x: 40, y: 90 }, 1000)
+    clicks.release({ x: 40, y: 90 }, 1080)
+    now = 1120
+    watch(clicks)
+    expect(watch(clicks)).toEqual([undefined])
+  })
+
+  it('forgets a finished click too old to be what the drawing is reporting', () => {
+    let now = 1000
+    const clicks = new PointerClicks(() => now)
+    clicks.press({ x: 40, y: 90 }, 1000)
+    clicks.release({ x: 40, y: 90 }, 1080)
+    now = 5000
+    expect(watch(clicks)).toEqual([undefined])
+  })
+
+  it('leaves nothing behind after a drag, however late the drawing reports it', () => {
+    let now = 1000
+    const clicks = new PointerClicks(() => now)
+    clicks.press({ x: 40, y: 90 }, 1000)
+    clicks.release({ x: 300, y: 90 }, 1200)
+    now = 1240
     expect(watch(clicks)).toEqual([undefined])
   })
 
   it('tells everyone waiting on the same press', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const first = watch(clicks)
     const second = watch(clicks)
@@ -75,7 +106,7 @@ describe('PointerClicks', () => {
   })
 
   it('tells a caller only once, however the press ends', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.release({ x: 40, y: 90 }, 1080)
@@ -84,7 +115,7 @@ describe('PointerClicks', () => {
   })
 
   it('abandons a press that a new one interrupts', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.press({ x: 10, y: 10 }, 1100)
@@ -92,7 +123,7 @@ describe('PointerClicks', () => {
   })
 
   it('abandons a press the window took away', () => {
-    const clicks = new PointerClicks()
+    const clicks = new PointerClicks(() => 0)
     clicks.press({ x: 40, y: 90 }, 1000)
     const seen = watch(clicks)
     clicks.cancel()
