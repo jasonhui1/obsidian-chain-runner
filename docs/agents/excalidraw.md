@@ -24,6 +24,8 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | `getViewSelectedElements` | #12 |
 | `getViewFileForImageElement` | #12 |
 | `isDeleted = true` on a copied element | #12 — this is how a scripted element is removed |
+| `rawText` on an edited text element | #20 — a rewrite without it does not survive the save |
+| `style.fontSize` before `addText` | #20 — unset, every line draws at EA's default and the layout collapses |
 | `settings.scriptFolderPath`, the script engine's file shapes | #20 — read out of their `main.js` |
 | `groupIds` copied onto a scripted element | #20 — how a new line joins a node already on the scene |
 
@@ -74,9 +76,14 @@ An `image` may equally be a picture. Take the note only when its extension is
 
 - `copyViewElementsToEAforEditing` keeps ids, so writing them back edits in
   place rather than adding a second copy.
-- Changing a text element means setting **both** `text` and `originalText`;
-  Excalidraw re-wraps from `originalText`, so setting only `text` snaps back.
-  Then `refreshTextElementSize`.
+- Changing a text element means setting **all three** of `text`, `originalText`
+  and **`rawText`**, then `refreshTextElementSize`. `rawText` is the one that
+  matters: Excalidraw keeps a `textElements` map of its own keyed by element id,
+  writes *that* into the `## Text Elements` markdown on save, and re-parses from
+  it on load — so a text element edited without it snaps back to its old words
+  the moment the drawing is saved. Their own code does
+  `el.text = el.originalText = el.rawText = …`; ours must too. #20 lost every
+  text rewrite to this, having set only the first two.
 - A scripted element has to claim its `frameId`. Only a *drop* is worked out for
   you.
 - Removal is `isDeleted = true` on the copy, then write back.

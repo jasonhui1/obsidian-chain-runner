@@ -8,7 +8,6 @@ import {
   type ChainNodeElement,
   type MaybeNodeElement,
   type NodeEdit,
-  type NodeReshape,
   type NodeRunStatus,
   type NodeTarget,
 } from './chainNode'
@@ -123,6 +122,8 @@ interface SceneElement extends SceneShape {
   strokeStyle?: StrokeStyle
   /** Excalidraw's own tombstone; setting it is how a scripted element is removed. */
   isDeleted?: boolean
+  /** The words as Excalidraw saves and re-parses them; the third place a text element holds them. */
+  rawText?: string
 }
 
 /** EA's link-click hook; returning `false` stops the link opening (`docs/spike-ea.md`, Q1). */
@@ -284,7 +285,8 @@ export function createNodeSurface(app: App): NodeSurface {
 
     setChain: async (target, chain, value, on) => {
       const { ea } = bind(on)
-      return write(ea, chainEdits(ea.getViewElements(), target, chain, value))
+      const reshape = chainEdits(ea.getViewElements(), target, chain, value)
+      return write(ea, reshape.edits, reshape.removals, reshape.additions)
     },
 
     setRunStatus: async (target, status, on) => {
@@ -482,11 +484,10 @@ function withoutProposal(custom: unknown): unknown {
  */
 async function write(
   ea: ExcalidrawAutomate,
-  change: NodeEdit<SceneElement>[] | NodeReshape<SceneElement>,
+  edits: NodeEdit<SceneElement>[],
+  removals: readonly SceneElement[] = [],
+  additions: readonly ChainNodeElement[] = [],
 ): Promise<boolean> {
-  const { edits, additions, removals } = Array.isArray(change)
-    ? { edits: change, additions: [], removals: [] }
-    : change
   if (edits.length === 0) return false
 
   // The copies keep their ids, so writing them back updates the node in place.
@@ -499,9 +500,11 @@ async function write(
     if (edit.height !== undefined) element.height = edit.height
     if (edit.text === undefined) continue
     const wasWide = element.width ?? 0
+    // A text element holds its words in three places, and Excalidraw re-derives
+    // from `rawText` when it saves and when it renders; set fewer and they snap back.
     element.text = edit.text
-    // Excalidraw re-wraps from `originalText`; setting only `text` snaps back.
     element.originalText = edit.text
+    element.rawText = edit.text
     ea.refreshTextElementSize?.(element.id)
     if (edit.keepRightEdge) element.x = (element.x ?? 0) + wasWide - (element.width ?? 0)
   }
@@ -517,7 +520,6 @@ async function write(
     if (box?.groupIds) made.groupIds = [...box.groupIds]
     if (box?.frameId) made.frameId = box.frameId
   }
-
   await ea.addElementsToView(false, true)
   return true
 }
@@ -537,6 +539,9 @@ function unavailableReason(app: App): string | undefined {
 /** Adds one of the node's elements, and stamps it with what the node stores. */
 function draw(ea: ExcalidrawAutomate, element: ChainNodeElement): string {
   ea.style.strokeColor = element.strokeColor
+  // Set per element, not left to EA's default: the node's line heights are
+  // computed from these sizes, so a line drawn at another one lands on its neighbour.
+  if (element.fontSize) ea.style.fontSize = element.fontSize
   const id =
     element.shape === 'rect'
       ? drawRect(ea, element)
