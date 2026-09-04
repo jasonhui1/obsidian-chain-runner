@@ -4,13 +4,14 @@ import type { DrawingView, NodeReading, NodeSurface, PlacedOutput } from './exca
 import type { Box } from './nodeScene'
 import type { OutputNotes } from './outputNotes'
 import { CHAIN_GONE, NODE_GONE } from './chainNodes'
-import { fillLiveOutputs, openLiveOutputs, type LiveOutput } from '../run/liveOutputs'
-import { buildRunPanels, type RunLayout } from '../run/panels'
+import { runIntoNotes, type ChainRunOutcome } from './chainRun'
+import { openLiveOutputs, type LiveOutput } from './liveOutputs'
+import type { RunLayout } from '../run/panels'
 import { buildRunFrame, type FramedPanel, type RunFrame } from '../run/runFrame'
 import { seedFromInputs } from './inputSeed'
 import { onDrawing, UNREACHABLE_DRAWING } from './onDrawing'
-import { runFailure, settleRun, type RunState } from '../run/session'
-import { streamRun, streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
+import { runFailure } from '../run/session'
+import { streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
 import type { EngineClient } from '../engine/client'
 import type { ChainSummary, LayoutModel } from '../engine/types'
 
@@ -169,43 +170,28 @@ export class NodeRun {
 
     await say({ kind: 'running', done: 0 })
 
-    let live: LiveOutputs | undefined
-
-    const outcome = await streamRun({
+    const outcome = await runIntoNotes({
       engine: this.deps.engine,
+      chain,
       request: {
         chainName: chain.name,
         seedPrompt: seed,
         ...(parameterValue ? { paramValue: parameterValue } : {}),
       },
       signal: controller.signal,
-      onState: async state => {
-        await say(progress(state.layout))
-        const layout = buildRunPanels(chain, state.layout, state.nodes)
-        live ??= await this.open(state.runId, layout, plan)
-        if (live) await fillLiveOutputs(live.outputs, layout, false)
-      },
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
+      onProgress: model => say(progress(model)),
+      place: (runId, layout) => this.open(runId, layout, plan),
     })
     // Dropped by an unload: the notes stay as a record of a real run.
     if (outcome.aborted) return
 
-    await this.finish(settleRun(outcome.state, outcome.failure), plan, outcome.failure, live)
+    await this.finish(outcome, plan)
   }
 
-  /**
-   * One empty note per declared output, placed in the frame. Once, on the first
-   * frame that names the panels: placement is initial only, so an output the
-   * reader drags somewhere better stays there.
-   */
-  private async open(
-    runId: string | undefined,
-    layout: RunLayout,
-    plan: NodeRunPlan,
-  ): Promise<LiveOutputs | undefined> {
-    if (!runId || layout.panels.length === 0) return undefined
-
+  /** One empty note per declared output, placed in the frame. */
+  private async open(runId: string, layout: RunLayout, plan: NodeRunPlan): Promise<LiveOutput<FramedPanel>[]> {
     const frame = buildRunFrame({ layout, chainName: plan.chain.name, runId, node: plan.node })
     // A refused note has said so already; the rest of the run still lands.
     const outputs = await openLiveOutputs({
@@ -216,28 +202,24 @@ export class NodeRun {
 
     const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, note: one.note.file }))
     await this.place(frame, placed, plan.view)
-    return { frame, outputs }
+    return outputs
   }
 
   /**
    * The outputs take their final text and the node says how it went. A run that
    * produced no panels is done, not failed — an empty answer is still an answer.
    */
-  private async finish(
-    state: RunState,
-    plan: NodeRunPlan,
-    /** Already said on the way out, so a failure is not said twice. */
-    said: string | undefined,
-    live: LiveOutputs | undefined,
-  ): Promise<void> {
-    const { chain, target, view } = plan
-    const error = runFailure(state)
-    if (error && error !== said) this.deps.notify(error)
+  private async finish(run: ChainRunOutcome<FramedPanel>, plan: NodeRunPlan): Promise<void> {
+    const { target, view } = plan
+    const error = runFailure(run.state)
+    if (error && error !== run.failure) this.deps.notify(error)
     // The reason goes onto the node too: a notice is gone when the reader looks back.
-    const outcome: NodeRunStatus = error ? { kind: 'failed', error } : { kind: 'done' }
+    const settled: NodeRunStatus = error ? { kind: 'failed', error } : { kind: 'done' }
 
-    if (!live) {
-      if (!state.runId) {
+    // Nothing was placed: a run that never named itself failed, and one that named
+    // itself and declared no panels gave an empty answer.
+    if (!run.live) {
+      if (!run.state.runId) {
         if (!error) this.deps.notify(NOTHING_WRITTEN)
         await this.onDrawing(() =>
           this.deps.surface.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }, view),
@@ -245,13 +227,8 @@ export class NodeRun {
         return
       }
       this.deps.notify(NO_OUTPUTS)
-      await this.onDrawing(() => this.deps.surface.setRunStatus(target, outcome, view))
-      return
     }
-
-    // A failed run's last frame carries the outcome, so nothing is settled here (ADR-0003).
-    await fillLiveOutputs(live.outputs, buildRunPanels(chain, state.layout, state.nodes), true)
-    await this.onDrawing(() => this.deps.surface.setRunStatus(target, outcome, view))
+    await this.onDrawing(() => this.deps.surface.setRunStatus(target, settled, view))
   }
 
   /** Puts the frame on the drawing, saying so when it could not be a real frame. */
@@ -266,12 +243,6 @@ export class NodeRun {
   private async onDrawing(action: () => Promise<boolean>): Promise<void> {
     if ((await onDrawing(action, this.deps.notify)) === false) this.deps.notify(NODE_GONE)
   }
-}
-
-interface LiveOutputs {
-  frame: RunFrame
-  /** Only the outputs that got a note. */
-  outputs: LiveOutput<FramedPanel>[]
 }
 
 /** Panels landed, out of panels declared; the total arrives with the first frame. */

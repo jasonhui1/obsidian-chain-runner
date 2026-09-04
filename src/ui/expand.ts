@@ -6,11 +6,12 @@ import { seedFromInputs } from './inputSeed'
 import type { OutputNotes } from './outputNotes'
 import { onDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { proposalData, type MaybeProposalElement } from './proposal'
-import { fillLiveOutputs, openLiveOutputs, type LiveOutput } from '../run/liveOutputs'
-import { buildRunPanels, type RunLayout } from '../run/panels'
+import { runIntoNotes } from './chainRun'
+import { openLiveOutputs, type LiveOutput } from './liveOutputs'
+import type { RunLayout } from '../run/panels'
 import { buildProposalFan, type ProposedPanel } from '../run/proposalFan'
-import { runFailure, settleRun } from '../run/session'
-import { streamRun, streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
+import { runFailure } from '../run/session'
+import { streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
 import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
 
@@ -196,51 +197,35 @@ export class Expand {
     parameterValue: string | undefined,
     controller: AbortController,
   ): Promise<void> {
-    let live: LiveOutput<ProposedPanel>[] | undefined
-
-    const outcome = await streamRun({
+    const outcome = await runIntoNotes({
       engine: this.deps.engine,
+      chain,
       request: {
         chainName: chain.name,
         seedPrompt: seed,
         ...(parameterValue ? { paramValue: parameterValue } : {}),
       },
       signal: controller.signal,
-      onState: async state => {
-        const layout = buildRunPanels(chain, state.layout, state.nodes)
-        live ??= await this.propose(state.runId, layout, chain, block)
-        if (live) await fillLiveOutputs(live, layout, false)
-      },
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
+      place: (runId, layout) => this.propose(runId, layout, chain, block),
     })
     // Dropped by an unload: the cards stay as a record of a real run.
     if (outcome.aborted) return
 
-    const state = settleRun(outcome.state, outcome.failure)
-    const error = runFailure(state)
+    const error = runFailure(outcome.state)
     if (error && error !== outcome.failure) this.deps.notify(error)
-    if (!live) {
-      if (!error) this.deps.notify(NO_PROPOSALS)
-      return
-    }
-    // A failed run's last frame carries the outcome, so nothing is settled here (ADR-0003).
-    await fillLiveOutputs(live, buildRunPanels(chain, state.layout, state.nodes), true)
+    // An expansion has no line of its own to report on, so an empty one is a notice.
+    if (!outcome.live?.length && !error) this.deps.notify(NO_PROPOSALS)
   }
 
-  /**
-   * One empty note per proposal, placed as a greyed card. Once, on the first
-   * frame that names the panels: placement is initial only, so a card the reader
-   * drags somewhere better stays there.
-   */
+  /** One empty note per proposal, placed as a greyed card. */
   private async propose(
-    runId: string | undefined,
+    runId: string,
     layout: RunLayout,
     chain: ChainSummary,
     block: BlockReading,
-  ): Promise<LiveOutput<ProposedPanel>[] | undefined> {
-    if (!runId || layout.panels.length === 0) return undefined
-
+  ): Promise<LiveOutput<ProposedPanel>[]> {
     const fan = buildProposalFan({ layout, source: block.box })
     // A refused note has said so already; the rest of the run still lands.
     const outputs = await openLiveOutputs({
@@ -248,7 +233,7 @@ export class Expand {
       notes: this.deps.notes,
       run: { runId, chainName: chain.name },
     })
-    if (outputs.length === 0) return undefined
+    if (outputs.length === 0) return outputs
 
     const proposals: PlacedProposal[] = outputs.map(one => ({
       box: one.place.box,

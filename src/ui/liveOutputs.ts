@@ -1,5 +1,5 @@
-import type { RunLayout, RunPanel } from './panels'
-import type { OpenOutputNote, OutputNotes, RunProvenance } from '../ui/outputNotes'
+import type { OpenOutputNote, OutputNotes, RunProvenance } from './outputNotes'
+import type { RunLayout, RunPanel } from '../run/panels'
 import type { PanelState } from '../engine/types'
 
 /**
