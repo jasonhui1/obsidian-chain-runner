@@ -559,3 +559,16 @@
     animation: none !important;
   }
 }
+
+/* A picker opened from a click on the drawing sits beside what it changes,
+   rather than centre-screen, and lets the drawing show through (ADR-0010).
+   `anchorModal` sets the spot; these undo Obsidian's own centring. */
+.chain-runner-anchored .modal-bg {
+  opacity: 0;
+}
+
+.chain-runner-anchored .modal,
+.chain-runner-anchored .prompt {
+  position: absolute;
+  margin: 0;
+}

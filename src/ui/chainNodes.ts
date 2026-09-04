@@ -9,6 +9,7 @@ import {
   type NodeTarget,
 } from './chainNode'
 import type { DrawingView, NodeSurface } from './excalidraw'
+import type { Point } from './panelSpot'
 import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
 
@@ -52,6 +53,14 @@ export interface ChainNodesDeps {
   run: (data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView) => void
   /** Whether that node is running right now, which is when its chain is not changed. */
   isRunning: (nodeId: string) => boolean
+  /**
+   * Answered once the press behind a selection ends: where it was if it was a
+   * click, `undefined` if it was a drag, a keyboard selection or no press at
+   * all. Both the gate on opening a picker and where it opens (ADR-0010).
+   */
+  clickSpot: (settled: (at: Point | undefined) => void) => void
+  /** Where the reader last pressed, for the routes that already know a click happened. */
+  pressSpot: () => Point | undefined
 }
 
 export class ChainNodes {
@@ -87,34 +96,73 @@ export class ChainNodes {
     const data = chainNodeData(element)
     // Not ours: a wiki link the reader drew themselves, and theirs to follow.
     if (!data) return true
-    const role = chainNodeRole(data.role)
-    if (role === 'run') this.deps.run(data, element, view)
-    if (role === 'chain') void this.editChain(data, element, view)
-    if (role === 'parameter') void this.editParameter(data, element, view)
+    if (chainNodeRole(data.role) === 'run') this.deps.run(data, element, view)
+    // Following a link is already a click; only where it was is in question.
+    else this.openDecision(data, element, this.deps.pressSpot(), view)
     return false
   }
 
+  /**
+   * A plain click, which Excalidraw reports as a change of selection
+   * (ADR-0010). It reaches the two lines that open a picker; a run is not one,
+   * because selecting a node is not asking to run it and a run is not undone.
+   */
+  handleSelection(element: MaybeNodeElement, view?: DrawingView): void {
+    const data = chainNodeData(element)
+    if (!data) return
+    // Nothing opens until the press ends, because a drag starts the same way.
+    this.deps.clickSpot(at => {
+      if (at) this.openDecision(data, element, at, view)
+    })
+  }
+
+  /** The picker a line opens, if it opens one. `▶ Run` is not one of them. */
+  private openDecision(
+    data: ChainNodeData,
+    element: MaybeNodeElement,
+    at: Point | undefined,
+    view?: DrawingView,
+  ): void {
+    const role = chainNodeRole(data.role)
+    if (role === 'chain') void this.editChain(data, element, at, view)
+    if (role === 'parameter') void this.editParameter(data, element, at, view)
+  }
+
   /** The chain line: the same picker the command opens, and the node re-shaped around the pick (ADR-0009). */
-  private async editChain(data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView): Promise<void> {
+  private async editChain(
+    data: ChainNodeData,
+    element: MaybeNodeElement,
+    at: Point | undefined,
+    view?: DrawingView,
+  ): Promise<void> {
     if (this.deps.isRunning(data.nodeId)) {
       this.deps.notify(RUNNING_NOW)
       return
     }
     if (!this.usable()) return
     const target = this.targetOf(data, element)
-    await this.pickChain('Which chain should this node run?', chain =>
-      this.withParameter(
-        chain,
-        value =>
-          void this.onDrawing(async () => {
-            if (!(await this.deps.surface.setChain(target, chain, value, view))) this.deps.notify(NODE_GONE)
-          }),
-      ),
+    await this.pickChain(
+      'Which chain should this node run?',
+      chain =>
+        this.withParameter(
+          chain,
+          value =>
+            void this.onDrawing(async () => {
+              if (!(await this.deps.surface.setChain(target, chain, value, view))) this.deps.notify(NODE_GONE)
+            }),
+          at,
+        ),
+      at,
     )
   }
 
   /** The dropdown line: the chain's own options, and the pick written back in place. */
-  private async editParameter(data: ChainNodeData, element: MaybeNodeElement, view?: DrawingView): Promise<void> {
+  private async editParameter(
+    data: ChainNodeData,
+    element: MaybeNodeElement,
+    at: Point | undefined,
+    view?: DrawingView,
+  ): Promise<void> {
     if (!this.usable()) return
     const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
     if (!chains) return
@@ -129,11 +177,17 @@ export class ChainNodes {
       return
     }
     const target = this.targetOf(data, element)
-    new ParameterPicker(this.deps.app, parameter.name, parameter.options, value => {
-      void this.onDrawing(async () => {
-        if (!(await this.deps.surface.setParameter(target, value, view))) this.deps.notify(NODE_GONE)
-      })
-    }).open()
+    new ParameterPicker(
+      this.deps.app,
+      parameter.name,
+      parameter.options,
+      value => {
+        void this.onDrawing(async () => {
+          if (!(await this.deps.surface.setParameter(target, value, view))) this.deps.notify(NODE_GONE)
+        })
+      },
+      at,
+    ).open()
   }
 
   private async put(chain: ChainSummary, parameterValue: string | undefined): Promise<void> {
@@ -148,7 +202,11 @@ export class ChainNodes {
    * stop the action is checked before the picker opens, so a reader who gets as
    * far as choosing a chain gets what they chose.
    */
-  private async pickChain(placeholder: string, onPick: (chain: ChainSummary) => void): Promise<void> {
+  private async pickChain(
+    placeholder: string,
+    onPick: (chain: ChainSummary) => void,
+    at?: Point,
+  ): Promise<void> {
     const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
     if (!chains) return
     if (chains.length === 0) {
@@ -159,6 +217,7 @@ export class ChainNodes {
       placeholder,
       // A node's inputs are the arrows bound into it (#9), not the note.
       unseeded: 'reads its own files — bound inputs are not used',
+      anchor: at,
     }).open()
   }
 
@@ -166,13 +225,13 @@ export class ChainNodes {
    * The chain's dropdown asked for before anything is written: a chain reads its
    * parameter as an input, so a node that arrives unset says something else.
    */
-  private withParameter(chain: ChainSummary, write: (value?: string) => void): void {
+  private withParameter(chain: ChainSummary, write: (value?: string) => void, at?: Point): void {
     const parameter = parameterToAsk(chain)
     if (!parameter) {
       write(undefined)
       return
     }
-    new ParameterPicker(this.deps.app, parameter.name, parameter.options, value => write(value)).open()
+    new ParameterPicker(this.deps.app, parameter.name, parameter.options, value => write(value), at).open()
   }
 
   /** Checked on every entry point: a drawing can be opened on an Excalidraw too old to edit it. */

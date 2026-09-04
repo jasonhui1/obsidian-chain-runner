@@ -35,6 +35,7 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
+import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary } from '../engine/types'
 import type { FramedPanel, RunFrame } from '../run/runFrame'
@@ -89,6 +90,7 @@ interface ExcalidrawAutomate {
   refreshTextElementSize?(id: string): void
   addElementsToView(repositionToCursor?: boolean, save?: boolean): Promise<boolean>
   onLinkClickHook?: LinkClickHook
+  onSceneChangeHook?: SceneChangeHook | null
 }
 
 /** EA's element defaults, set before each `add*` call rather than passed to it. */
@@ -112,6 +114,8 @@ interface ArrowFormatting {
 interface TextFormatting {
   width?: number
   textAlign?: string
+  /** Off with a width given, a text element wraps on resize instead of scaling (ADR-0010). */
+  autoResize?: boolean
 }
 
 /** An element on the scene, narrowed to the fields a chain node reads or writes. */
@@ -134,6 +138,28 @@ type LinkClickHook = (
   view: unknown,
   ea: unknown,
 ) => boolean
+
+/**
+ * EA's scene-change hook. An object, not a function, and it only fires for the
+ * `appStateKeys` it names — without one it is never called at all.
+ */
+interface SceneChangeHook {
+  appStateKeys?: string[]
+  trackElements?: boolean
+  triggerWhenInvisible?: boolean
+  callback: (
+    elements: SceneElement[],
+    appState: SceneAppState | undefined,
+    files: unknown,
+    view: unknown,
+    ea: unknown,
+  ) => void
+}
+
+/** The slice of Excalidraw's app state the selection hook reads. */
+interface SceneAppState {
+  selectedElementIds?: SelectedIds
+}
 
 /** What the "send to drawing" action needs a drawing surface to do. */
 export interface DrawingSurface {
@@ -548,6 +574,8 @@ function draw(ea: ExcalidrawAutomate, element: ChainNodeElement): string {
       : ea.addText(element.x, element.y, element.text ?? '', {
           width: element.width,
           textAlign: element.textAlign ?? 'left',
+          // Dragging a node's handles must not rewrite its type size (ADR-0010).
+          autoResize: false,
         })
   const made = ea.getElement(id)
   if (made) {
@@ -583,6 +611,36 @@ export function registerLinkHook(
   }
   return () => {
     ea.onLinkClickHook = previous
+  }
+}
+
+/**
+ * Intercepts a plain click, which Excalidraw reports only as a change of
+ * selection. `SelectionClicks` decides which of those changes is a click
+ * (ADR-0010); this only reaches the hook and hands over the element.
+ */
+export function registerSelectionHook(
+  app: App,
+  handler: (element: MaybeNodeElement, view: DrawingView) => void,
+): () => void {
+  const ea = automate(app)
+  if (!ea) return () => {}
+  const previous = ea.onSceneChangeHook ?? undefined
+  const clicks = new SelectionClicks()
+  ea.onSceneChangeHook = {
+    // Ours on top of what the previous hook asked for, so chaining never narrows it.
+    appStateKeys: [...new Set([...(previous?.appStateKeys ?? []), 'selectedElementIds'])],
+    ...(previous?.trackElements ? { trackElements: true } : {}),
+    ...(previous?.triggerWhenInvisible ? { triggerWhenInvisible: true } : {}),
+    callback: (elements, appState, files, view, self) => {
+      const id = clicks.clicked(appState?.selectedElementIds)
+      const clicked = id === undefined ? undefined : elements.find(element => element.id === id)
+      if (clicked) handler(clicked, view)
+      previous?.callback(elements, appState, files, view, self)
+    },
+  }
+  return () => {
+    ea.onSceneChangeHook = previous ?? null
   }
 }
 

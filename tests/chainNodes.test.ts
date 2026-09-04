@@ -35,12 +35,17 @@ let runs: { nodeId: string; groupIds?: readonly string[]; view?: unknown }[]
 let chainSet: { nodeId: string; chain: string; value?: string; on?: unknown }[]
 /** The nodes with a run going, which is when a chain is not changed underneath one. */
 let running: string[]
+/**
+ * How the press behind a selection settles: a point when it was a click, and
+ * `undefined` for a drag, a keyboard selection or no press at all.
+ */
+let clickSpot: { x: number; y: number } | undefined
 
 /** Lets the writes a picked row sets off finish before the assertions. */
 const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 
-function makeNodes(): ChainNodes {
-  const surface: NodeSurface = {
+function makeSurface(): NodeSurface {
+  return {
     selection: () => undefined,
     selectedProposal: () => undefined,
     placeProposals: async () => {},
@@ -67,16 +72,20 @@ function makeNodes(): ChainNodes {
       return Promise.resolve(true)
     },
   }
+}
 
+function makeNodes(): ChainNodes {
   return new ChainNodes({
     app: {} as unknown as App,
     engine: { listChains: () => Promise.resolve(chains) } as unknown as EngineClient,
     withEngine: async action => (online ? action() : undefined),
     notify: message => notices.push(message),
-    surface,
+    surface: makeSurface(),
     newNodeId: () => 'n-new',
     run: (data, element, view) => runs.push({ nodeId: data.nodeId, groupIds: element.groupIds, view }),
     isRunning: nodeId => running.includes(nodeId),
+    clickSpot: settled => settled(clickSpot),
+    pressSpot: () => clickSpot,
   })
 }
 
@@ -108,6 +117,7 @@ beforeEach(() => {
   unavailable = undefined
   drawingOpen = true
   runs = []
+  clickSpot = { x: 0, y: 0 }
   resetModals()
 })
 
@@ -369,6 +379,145 @@ describe('clicking the chain line', () => {
 
   it('answers a click on a node drawn before the chain line was clickable', async () => {
     makeNodes().handleLinkClick(chainLine({ role: 'title' }))
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
+  })
+})
+
+describe('clicking a node without a modifier', () => {
+  const line = (role: string): { customData?: unknown } => element({ role })
+
+  it('opens the chain picker on the chain line', async () => {
+    makeNodes().handleSelection(line('chain'))
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
+  })
+
+  it('opens the dropdown on the parameter line', async () => {
+    makeNodes().handleSelection(line('parameter'))
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Choose audience')
+  })
+
+  it('writes the pick through, on the drawing the click came from', async () => {
+    const view = { drawing: true }
+    makeNodes().handleSelection(line('chain'), view)
+    await flush()
+    lastModal()?.choose(1)
+    await flush()
+    expect(chainSet).toEqual([{ nodeId: 'n-1', chain: 'relay', value: undefined, on: view }])
+  })
+
+  it('does not start a run: selecting is not asking for one, and a run is not undone', async () => {
+    makeNodes().handleSelection(line('run'))
+    await flush()
+    expect(runs).toEqual([])
+    expect(openedModals).toEqual([])
+  })
+
+  it('does nothing on the parts of the node that are not a decision', async () => {
+    const nodes = makeNodes()
+    nodes.handleSelection(line('box'))
+    nodes.handleSelection(line('moment'))
+    await flush()
+    expect(openedModals).toEqual([])
+  })
+
+  it('ignores anything on the drawing that is not a chain node', async () => {
+    makeNodes().handleSelection({ customData: undefined })
+    await flush()
+    expect(openedModals).toEqual([])
+    expect(notices).toEqual([])
+  })
+
+  it('still refuses to change the chain of a node that is running', async () => {
+    running = ['n-1']
+    makeNodes().handleSelection(line('chain'))
+    await flush()
+    expect(notices).toEqual([RUNNING_NOW])
+  })
+})
+
+describe('where the picker opens', () => {
+  it('opens beside the press that selected the node', async () => {
+    clickSpot = { x: 220, y: 340 }
+    makeNodes().handleSelection(element({ role: 'chain' }))
+    await flush()
+    expect(lastModal()?.anchor).toEqual({ x: 220, y: 340 })
+  })
+
+  it('anchors the dropdown too, so both decisions land in the same place', async () => {
+    clickSpot = { x: 12, y: 24 }
+    makeNodes().handleSelection(element({ role: 'parameter' }))
+    await flush()
+    expect(lastModal()?.anchor).toEqual({ x: 12, y: 24 })
+  })
+
+  it('anchors the dropdown that follows a chain pick to the same press', async () => {
+    clickSpot = { x: 50, y: 60 }
+    makeNodes().handleSelection(element({ role: 'chain' }))
+    await flush()
+    lastModal()?.choose(0)
+    expect(lastModal()?.placeholder).toBe('Choose audience')
+    expect(lastModal()?.anchor).toEqual({ x: 50, y: 60 })
+  })
+
+  it('leaves the palette’s own picker centre-screen: that click was on the palette', async () => {
+    clickSpot = { x: 5, y: 5 }
+    await makeNodes().add()
+    expect(lastModal()?.anchor).toBeUndefined()
+  })
+})
+
+describe('what a selection has to be before anything opens', () => {
+  const chainLine = (): { customData?: unknown } => element({ role: 'chain' })
+
+  it('opens nothing for a selection no press caused, which is the keyboard', async () => {
+    clickSpot = undefined
+    makeNodes().handleSelection(chainLine())
+    await flush()
+    expect(openedModals).toEqual([])
+    expect(notices).toEqual([])
+  })
+
+  it('opens nothing when the press turned out to be a drag', async () => {
+    // The drawing reports the selection on pointer-down; a drag settles as nothing.
+    clickSpot = undefined
+    makeNodes().handleSelection(chainLine())
+    await flush()
+    expect(openedModals).toEqual([])
+  })
+
+  it('waits for the press to settle before opening anything', async () => {
+    let settle: ((at: { x: number; y: number } | undefined) => void) | undefined
+    const nodes = new ChainNodes({
+      app: {} as unknown as App,
+      engine: { listChains: () => Promise.resolve(chains) } as unknown as EngineClient,
+      withEngine: async action => action(),
+      notify: message => notices.push(message),
+      surface: makeSurface(),
+      newNodeId: () => 'n-new',
+      run: () => {},
+      isRunning: () => false,
+      clickSpot: settled => {
+        settle = settled
+      },
+      pressSpot: () => undefined,
+    })
+
+    nodes.handleSelection(chainLine())
+    await flush()
+    expect(openedModals).toEqual([])
+
+    settle?.({ x: 7, y: 9 })
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
+    expect(lastModal()?.anchor).toEqual({ x: 7, y: 9 })
+  })
+
+  it('still follows a link, since Ctrl/Cmd+click is already a click', async () => {
+    clickSpot = undefined
+    makeNodes().handleLinkClick(chainLine())
     await flush()
     expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
   })

@@ -6,8 +6,16 @@ import { EngineStatus } from './engine/status'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
-import { createDrawingSurface, createNodeSurface, createScriptVault, registerLinkHook, scriptFolder } from './ui/excalidraw'
+import {
+  createDrawingSurface,
+  createNodeSurface,
+  createScriptVault,
+  registerLinkHook,
+  registerSelectionHook,
+  scriptFolder,
+} from './ui/excalidraw'
 import { Expand, newProposalId } from './ui/expand'
+import { PointerClicks } from './ui/pointerClicks'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
@@ -114,6 +122,14 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the click that started it; unloading the plugin ends it.
     this.register(() => nodeRun.stop())
 
+    // A selection hook carries no event, so the press behind it is read from
+    // here; capture, because Excalidraw's canvas stops its own (ADR-0010).
+    const clicks = new PointerClicks()
+    const spot = (event: PointerEvent): { x: number; y: number } => ({ x: event.clientX, y: event.clientY })
+    this.registerDomEvent(document, 'pointerdown', event => clicks.press(spot(event), Date.now()), { capture: true })
+    this.registerDomEvent(document, 'pointerup', event => clicks.release(spot(event), Date.now()), { capture: true })
+    this.registerDomEvent(document, 'pointercancel', () => clicks.cancel(), { capture: true })
+
     const nodes = (this.nodes = new ChainNodes({
       app: this.app,
       engine: this.engine,
@@ -123,6 +139,8 @@ export default class ChainRunnerPlugin extends Plugin {
       newNodeId,
       run: (data, element, view) => void nodeRun.run(data, element, view),
       isRunning: nodeId => nodeRun.isRunning(nodeId),
+      clickSpot: settled => clicks.onSettled(settled),
+      pressSpot: () => clicks.pressed(),
     }))
     const expand = new Expand({
       app: this.app,
@@ -140,10 +158,12 @@ export default class ChainRunnerPlugin extends Plugin {
     // The hook lives on Excalidraw's plugin instance, which may not be loaded
     // yet; the disposer is registered now so an unload before layout-ready wins.
     let removeLinkHook: (() => void) | undefined
+    let removeSelectionHook: (() => void) | undefined
     let unloaded = false
     this.register(() => {
       unloaded = true
       removeLinkHook?.()
+      removeSelectionHook?.()
     })
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return
@@ -152,6 +172,9 @@ export default class ChainRunnerPlugin extends Plugin {
       removeLinkHook = registerLinkHook(this.app, (element, view) =>
         [expand, nodes].every(handler => handler.handleLinkClick(element, view)),
       )
+      // A plain click reaches only the node; a proposal's decisions stay on the
+      // link hook, where nothing is written without the reader saying so.
+      removeSelectionHook = registerSelectionHook(this.app, (element, view) => nodes.handleSelection(element, view))
       // The toolbar button is a file in the vault, and Excalidraw names the folder.
       const folder = scriptFolder(this.app)
       if (folder) {

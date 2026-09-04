@@ -28,6 +28,7 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | `style.fontSize` before `addText` | #20 — unset, every line draws at EA's default and the layout collapses |
 | `settings.scriptFolderPath`, the script engine's file shapes | #20 — read out of their `main.js` |
 | `groupIds` copied onto a scripted element | #20 — how a new line joins a node already on the scene |
+| the hook list, `onSceneChangeHook`'s shape and `appStateKeys` filter, `ea.FloatingModal`, `addText`'s `autoResize` | #21 — read out of their `main.js` at 2.26.4, **read, not run** |
 
 `addFrame`, `addArrow`, `getViewSelectedElements` and
 `getViewFileForImageElement` are feature-detected rather than assumed. A build
@@ -45,18 +46,83 @@ tab.
 
 ## Clicks
 
-A plain click selects; **only a link fires the hook**, and following one needs
-Ctrl/Cmd+click. Two consequences the UI has to swallow:
+**A plain click is reachable — through selection, not through links.** The
+spike's "only a link fires the hook" is true of `onLinkClickHook` alone, and was
+wrongly written here as a fact about clicks. Read out of `main.js` at 2.26.4:
 
-- An affordance needs its own element carrying a `link`. Use a `chain-runner://`
-  scheme, so a click that escapes the hook fails as an unopenable link rather
-  than creating a note.
-- Ctrl/Cmd+click is not one click. Anything the spec calls one-click needs a
-  **command** acting on the selection as well as the label. Both routes, not one
-  — the label is where the decision is, the command is the one-action path.
+- `onLinkClickHook` fires only on an element carrying a `link`, and following
+  one needs Ctrl/Cmd+click.
+- `onSceneChangeHook` is an **object**, not a function:
+  `{ appStateKeys?, trackElements?, triggerWhenInvisible?, callback }`. Without
+  `appStateKeys` or `trackElements` it is **never called at all**. The callback
+  takes `(elements, appState, files, view, ea)`. Filtering on
+  `selectedElementIds` makes an unmodified click on an element actionable —
+  `registerSelectionHook` is that, and `src/ui/selectionClick.ts` is the policy
+  saying which of those changes is a click (ADR-0010).
+- The view calls `getHookServer()`, which is `this.hookServer ?? this.plugin.ea`
+  — so setting the hook on the shared `ea` reaches an ordinary drawing.
 
-EA holds one hook, so the last installer wins; chain the previous one and put it
-back on unload. Handlers claim their own links and pass on what is not theirs.
+An affordance built on links still needs its own element carrying one. Use a
+`chain-runner://` scheme, so a click that escapes the hook fails as an
+unopenable link rather than creating a note. And Ctrl/Cmd+click is not one
+click: anything the spec calls one-click needs a **command** acting on the
+selection as well as the label.
+
+What a selection hook has to guard against, since it fires on *every* scene
+change:
+
+- the selection may not have changed — compare against the last one seen;
+- the selection may not be one element — a rubber-band or Select All must not
+  pop a modal;
+- **it fires on pointer-*down***, before the reader has finished doing anything.
+  A drag of the element reports exactly the same selection change as a click, so
+  a hook that acts immediately pops a modal in the middle of a drag. Wait for the
+  pointer to come back up near where it went down
+  (`src/ui/pointerClicks.ts`);
+- selection is not only clicking — a keyboard selection has no press behind it at
+  all, and the same wait is what catches that.
+
+EA holds one of each hook, so the last installer wins; chain the previous one
+and put it back on unload, as `registerLinkHook` already does. Handlers claim
+their own elements and pass on what is not theirs.
+
+The full hook list at 2.26.4: `onCanvasColorChangeHook`, `onDropHook`,
+`onFileCreateHook`, `onFileOpenHook`, `onImageExportPathHook`,
+`onImageFilePathHook`, `onLinkClickHook`, `onLinkHoverHook`, `onPasteHook`,
+`onSceneChangeHook`, `onTriggerAutoexportHook`,
+`onUpdateElementLinkForExportHook`, `onViewModeChangeHook`, `onViewUnloadHook`.
+
+## Putting a panel near a node
+
+**A true in-canvas dropdown is not available.** The canvas is their React
+component; drawing the options as elements would dirty the file, because every
+write to a drawing is a save.
+
+`ea.FloatingModal` is a getter returning a subclass of Obsidian's `Modal` —
+draggable, and it does not dim the background. It is a `Modal`, though, not a
+`SuggestModal`, so a picker built on it would be a fuzzy search written again
+from scratch. This repo went the other way (ADR-0010): keep the `SuggestModal`
+and move it, with `position: absolute` and an inline spot. **A suggest modal's
+`modalEl` is the `.prompt` element**, not `.modal`, so the CSS has to name both.
+
+**Nothing here converts scene coordinates to the screen.**
+`sceneCoordsToViewportCoords` lives in `excalidrawLib`, which is not on
+`ExcalidrawAutomate`. Anchoring to the last `pointerdown` avoids the whole
+question, and survives zoom, scroll and a drawing embedded in a note.
+
+**Deselecting is not available.** `selectElementsInView` returns early on an
+empty list, so a plugin cannot clear the selection — which is why clicking an
+already-selected element can never be seen.
+
+## Resizing a text element
+
+Dragging a text element's handles **scales the font** rather than revealing more
+text. That is Excalidraw's `autoResize` behaviour, not a bug on our side.
+`addText` takes `autoResize` in its formatting, and computes it as
+`!!box || (autoResize ?? true)` — so it only takes effect on a text element that
+is **not** bound into a container, and their own docs pair `autoResize: false`
+with a width. A chain node's lines are standalone text drawn at a known width,
+so they pass `autoResize: false` (ADR-0010).
 
 ## What a block on the scene actually is
 
