@@ -39,7 +39,8 @@ precisely because it loops.
 **Hover and focus transition**, since those are the only state changes that
 happen to an element that survives them.
 
-**No one-shot motion ships until the view stops rebuilding** (#16).
+**No one-shot motion ships until the view stops rebuilding** (#16) — the hold
+ADR-0007 lifts.
 
 The pulse's own 1.6s period is a literal: Obsidian's `--anim-duration-*` scale
 tops out well below a breath, and stretching one of those variables to fit would

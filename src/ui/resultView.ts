@@ -1,47 +1,28 @@
 import { Component, ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
-import { arrangeRun, type Arrangement, type RoundEntry } from './arrangement'
-import { emptyStateFor, type EmptyState, type EngineReading } from './emptyState'
-import { noticeFor } from './panelCopy'
+import type { EngineReading } from './emptyState'
+import { ResultBoard, type PanelActions } from './resultBoard'
 import { createThrottle } from './throttle'
-import type { RunPanel } from '../run/panels'
-import { seedLine, type RunResult, type RunStatus } from '../run/session'
+import type { RunResult } from '../run/session'
 
 export const RESULT_VIEW_TYPE = 'chain-runner-result'
 
-/** What a reader can do with one panel. Both write to the vault, so neither is the view's. */
-export interface PanelActions {
-  saveAsNote: (panel: RunPanel, run: RunResult) => void
-  sendToDrawing: (panel: RunPanel, run: RunResult) => void
-  /** Marks lines of the panel to keep, and asks at the end where they go. */
-  keepLines: (panel: RunPanel, run: RunResult) => void
-}
-
-
-const STATUS_LABEL: Record<RunStatus, string> = {
-  running: 'running',
-  done: 'done',
-  failed: 'failed',
-}
+export type { PanelActions }
 
 /**
  * Where the quick path reads: one panel per declared output, streaming as the
  * run happens. The view decides nothing — what the panels are comes from
- * `src/run/` and where they land from `./arrangement`. Only markdown, redraw
- * rate and clicks are here.
+ * `src/run/`, where they land from `./arrangement`, and the elements they get
+ * from `./resultBoard`. Only Obsidian's markdown, redraw rate and the open
+ * round are here.
  */
 export class RunResultView extends ItemView {
   private result: RunResult | undefined
   /** The note the run was seeded from; markdown links resolve relative to it. */
   private sourcePath = ''
   private readonly throttle = createThrottle()
-  /**
-   * Owns the render children of the draw on screen. `MarkdownRenderer.render`
-   * registers a child on the component it is handed, so each draw gets its own
-   * host and the previous one is unloaded rather than accumulating.
-   */
-  private renderHost: Component | undefined
   /** The round clicked in a sidebar layout; unset means the detail follows the run. */
   private pickedRound: number | undefined
+  private board: ResultBoard | undefined
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -71,6 +52,7 @@ export class RunResultView extends ItemView {
 
   override async onClose(): Promise<void> {
     this.throttle.cancel()
+    this.board?.release()
   }
 
   /** Redraws for the engine coming or going, which only the no-run state reads. */
@@ -97,163 +79,29 @@ export class RunResultView extends ItemView {
   }
 
   private draw(): void {
-    const { contentEl } = this
-    if (this.renderHost) this.removeChild(this.renderHost)
-    this.renderHost = this.addChild(new Component())
-    contentEl.empty()
-    contentEl.addClass('chain-runner-result')
-
-    if (!this.result) {
-      this.drawEmpty(contentEl, undefined)
-      return
-    }
-
-    this.drawHeader(contentEl, this.result)
-    if (this.result.layout.panels.length === 0) {
-      this.drawEmpty(contentEl, this.result.status)
-      return
-    }
-    this.drawArrangement(contentEl, arrangeRun(this.result.layout, this.pickedRound), this.result.status)
-  }
-
-  /** A view with no panels, said as the designed state that fits. */
-  private drawEmpty(parent: HTMLElement, status: RunStatus | undefined): void {
-    const empty: EmptyState = emptyStateFor({ run: status ? { status } : undefined, engine: this.engine() })
-    const el = parent.createDiv({ cls: `chain-runner-empty chain-runner-empty--${empty.tone}` })
-    el.createDiv({ cls: 'chain-runner-empty-title', text: empty.title })
-    el.createDiv({ cls: 'chain-runner-empty-hint', text: empty.hint })
-  }
-
-  /** The arrangement as elements; `arrangeRun` has already decided what goes where. */
-  private drawArrangement(parent: HTMLElement, arrangement: Arrangement, status: RunStatus): void {
-    if (arrangement.kind === 'columns') {
-      const columns = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--columns' })
-      for (const column of arrangement.columns) {
-        const el = columns.createDiv({ cls: 'chain-runner-column' })
-        if (column.converging) el.addClass('chain-runner-column--wide')
-        this.drawPanel(el, column.panel, status)
-      }
-      return
-    }
-
-    if (arrangement.kind === 'sidebar') {
-      const split = parent.createDiv({ cls: 'chain-runner-panels chain-runner-panels--sidebar' })
-      const list = split.createDiv({ cls: 'chain-runner-rounds' })
-      list.setAttribute('role', 'listbox')
-      for (const entry of arrangement.rounds) this.drawRound(list, entry)
-      const detail = split.createDiv({ cls: 'chain-runner-detail' })
-      if (arrangement.detail) this.drawPanel(detail, arrangement.detail, status)
-      return
-    }
-
-    const panels = parent.createDiv({ cls: 'chain-runner-panels' })
-    for (const panel of arrangement.panels) this.drawPanel(panels, panel, status)
-  }
-
-  /** One row of the round list: which round it is, how much it holds, and how it went. */
-  private drawRound(parent: HTMLElement, entry: RoundEntry): void {
-    const { panel } = entry
-    const el = parent.createDiv({ cls: `chain-runner-round chain-runner-round--${panel.state}` })
-    if (entry.selected) el.addClass('chain-runner-round--selected')
-    // Rounds of a loop share a name, so the iteration is what tells rows apart.
-    // 0-based on the wire, 1-based to read.
-    if (entry.round !== undefined) {
-      el.createSpan({ cls: 'chain-runner-round-number', text: String(entry.round + 1) })
-    }
-    el.createSpan({ cls: 'chain-runner-round-name', text: panel.name })
-    this.drawLines(el, 'chain-runner-round-lines', panel)
-    // A row is a control, so it answers the keyboard as well as the mouse.
-    el.tabIndex = 0
-    el.setAttribute('role', 'option')
-    el.setAttribute('aria-selected', String(entry.selected))
-    // Redraw at once, not through the throttle, so the click feels like a click.
-    const open = (): void => {
-      this.pickedRound = entry.index
-      this.throttle.cancel()
-      this.draw()
-    }
-    el.onclick = open
-    el.onkeydown = (event): void => {
-      if (event.key !== 'Enter' && event.key !== ' ') return
-      event.preventDefault()
-      open()
-    }
-  }
-
-  private drawHeader(parent: HTMLElement, result: RunResult): void {
-    const header = parent.createDiv({ cls: 'chain-runner-run-header' })
-
-    const title = header.createDiv({ cls: 'chain-runner-run-title' })
-    title.createSpan({ cls: 'chain-runner-run-name', text: result.chainName })
-    title.createSpan({
-      cls: `chain-runner-run-status chain-runner-run-status--${result.status}`,
-      text: STATUS_LABEL[result.status],
-    })
-
-    if (result.moment) header.createDiv({ cls: 'chain-runner-run-moment', text: result.moment })
-
-    const meta = header.createDiv({ cls: 'chain-runner-run-meta' })
-    meta.createSpan({ text: seedLine(result.seed) })
-    if (result.parameter) meta.createSpan({ text: `${result.parameter.name}: ${result.parameter.value}` })
-    if (result.runId) meta.createSpan({ text: result.runId })
-
-    if (result.error) header.createDiv({ cls: 'chain-runner-run-error', text: result.error })
-
-    // A chain that declared no layout is not a broken one; say which is being shown.
-    if (result.layout.kind === 'undeclared' && result.layout.panels.length > 0) {
-      header.createDiv({
-        cls: 'chain-runner-run-note',
-        text: 'This chain declares no result view — showing the run trace.',
-      })
-    }
-  }
-
-  /** How much a panel holds, in the one wording both the panel head and a round row use. */
-  private drawLines(parent: HTMLElement, cls: string, panel: RunPanel): void {
-    parent.createSpan({ cls, text: panel.lines ? `${panel.lines} ln` : '—' })
+    this.drawing().draw({ result: this.result, pickedRound: this.pickedRound })
   }
 
   /**
-   * The two things a reader can do with a panel worth keeping. Offered only on a
-   * filled panel of a run with an id, since an output note is stamped with it.
+   * The board, made on the first draw. `MarkdownRenderer.render` registers a
+   * child on the component it is handed, so each panel's render gets its own and
+   * releasing the panel unloads it.
    */
-  private drawActions(parent: HTMLElement, panel: RunPanel): void {
-    const run = this.result
-    if (!this.actions || !run?.runId || panel.state !== 'filled') return
-    const actions = parent.createDiv({ cls: 'chain-runner-panel-actions' })
-    this.drawAction(actions, 'Save as note', () => this.actions?.saveAsNote(panel, run))
-    this.drawAction(actions, 'Keep lines', () => this.actions?.keepLines(panel, run))
-    this.drawAction(actions, 'Send to drawing', () => this.actions?.sendToDrawing(panel, run))
-  }
-
-  private drawAction(parent: HTMLElement, label: string, onClick: () => void): void {
-    const el = parent.createEl('button', { cls: 'chain-runner-panel-action', text: label })
-    el.onclick = (event): void => {
-      // A round row above the panel is clickable; this click is not for it.
-      event.stopPropagation()
-      onClick()
-    }
-  }
-
-  private drawPanel(parent: HTMLElement, panel: RunPanel, status: RunStatus): void {
-    const el = parent.createDiv({ cls: `chain-runner-panel chain-runner-panel--${panel.state}` })
-    if (panel.emphasis) el.addClass(`chain-runner-panel--${panel.emphasis}`)
-
-    const head = el.createDiv({ cls: 'chain-runner-panel-head' })
-    head.createSpan({ cls: 'chain-runner-panel-name', text: panel.name })
-    this.drawLines(head, 'chain-runner-panel-lines', panel)
-    this.drawActions(head, panel)
-
-    const notice = noticeFor(panel, status)
-    if (notice) {
-      el.createDiv({ cls: `chain-runner-panel-notice chain-runner-panel-notice--${notice.tone}`, text: notice.text })
-    }
-
-    const text = panel.state === 'filled' ? panel.text : (panel.streaming ?? '')
-    if (text === '') return
-    const body = el.createDiv({ cls: 'chain-runner-panel-body' })
-    // Each draw builds its own body, so a late render writes into an element
-    // already off the page rather than over the new one.
-    void MarkdownRenderer.render(this.app, text, body, this.sourcePath, this.renderHost ?? this)
+  private drawing(): ResultBoard {
+    return (this.board ??= new ResultBoard(this.contentEl, {
+      engine: this.engine,
+      actions: this.actions,
+      renderMarkdown: (text, into) => {
+        const host = this.addChild(new Component())
+        void MarkdownRenderer.render(this.app, text, into, this.sourcePath, host)
+        return () => this.removeChild(host)
+      },
+      onPickRound: index => {
+        this.pickedRound = index
+        // Redraw at once, not through the throttle, so the click feels like a click.
+        this.throttle.cancel()
+        this.draw()
+      },
+    }))
   }
 }

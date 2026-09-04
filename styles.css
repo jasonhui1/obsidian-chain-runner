@@ -158,6 +158,13 @@
   font-size: var(--font-ui-smaller);
 }
 
+/* The header's lines are drawn once and filled by each draw (ADR-0007), so a
+   line with nothing to say this time is hidden rather than removed. */
+.chain-runner-run-header :empty,
+.chain-runner-round-number:empty {
+  display: none;
+}
+
 /* One panel per declared output, stacked: the sidebar is a column, so the
    timeline reads top to bottom rather than left to right. */
 .chain-runner-panel {
@@ -486,10 +493,10 @@
 }
 
 /* ── Motion ──────────────────────────────────────────────────────────────────
-   Motion marks what is still in flight, and nothing else — no one-shot cues
-   until the result view stops rebuilding itself (ADR-0006). Hover and focus
+   An infinite pulse marks what is still in flight, and a one-shot cue marks a
+   change that lands (ADR-0006, ADR-0007). Hover, focus and the run's status word
    transition on Obsidian's own `--anim-*`; the pulse's period is its own, for
-   the reason the ADR gives. */
+   the reason ADR-0006 gives. */
 
 @keyframes chain-runner-breathe {
   0%,
@@ -502,6 +509,7 @@
 }
 
 .chain-runner-round,
+.chain-runner-run-status,
 .chain-runner-panel-action,
 .chain-runner-mark-line,
 .chain-runner-source-run a,
@@ -518,6 +526,23 @@
 .chain-runner-engine-pill--unknown,
 .chain-runner-empty--waiting .chain-runner-empty-title {
   animation: chain-runner-breathe 1.6s ease-in-out infinite;
+}
+
+/* A panel landing filled, cued once. The view draws by key (ADR-0007), so the
+   keyframe runs on the element that changed rather than on a rebuilt one. */
+@keyframes chain-runner-arrive {
+  from {
+    opacity: 0.35;
+    transform: translateY(var(--size-2-2));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chain-runner-panel--arrived {
+  animation: chain-runner-arrive var(--anim-duration-moderate, 200ms) var(--anim-motion-smooth, ease-in-out);
 }
 
 /* One rule rather than a list to keep in sync: the policy above is what makes
