@@ -1,6 +1,7 @@
 import { arrangeRun, type Arrangement, type RoundEntry } from './arrangement'
 import { emptyStateFor, type EmptyState, type EngineReading } from './emptyState'
 import { KeyedChildren } from './keyed'
+import { PanelBody } from './panelBody'
 import { noticeFor } from './panelCopy'
 import { panelKeys } from './panelKeys'
 import type { LayoutPanel, PanelState } from '../engine/types'
@@ -70,11 +71,9 @@ interface PanelParts {
   actions: HTMLElement
   notice: HTMLElement
   body: HTMLElement
+  content: PanelBody
   /** The panel drawn now; the action buttons outlive any one draw and read it. */
   panel: RunPanel
-  /** What the body holds, so a panel that did not grow is not rendered again. */
-  rendered: string
-  release?: () => void
 }
 
 interface RoundParts {
@@ -117,7 +116,7 @@ export class ResultBoard {
     this.panels = new KeyedChildren({
       make: key => this.buildPanel(key),
       onRemove: key => {
-        this.panelParts.get(key)?.release?.()
+        this.panelParts.get(key)?.content.release()
         this.panelParts.delete(key)
       },
     })
@@ -334,14 +333,10 @@ export class ResultBoard {
       parts.notice.textContent = notice.text
     }
 
-    const text = panel.state === 'filled' ? panel.text : (panel.streaming ?? '')
-    if (text !== parts.rendered) {
-      parts.release?.()
-      parts.release = undefined
-      parts.body.replaceChildren()
-      parts.rendered = text
-      if (text !== '') parts.release = this.deps.renderMarkdown(text, parts.body)
-    }
+    const settled = panel.state === 'filled'
+    const text = settled ? panel.text : (panel.streaming ?? '')
+    if (settled) parts.content.settle(text)
+    else parts.content.stream(text)
 
     children(el, [parts.head, ...(notice ? [parts.notice] : []), ...(text === '' ? [] : [parts.body])])
   }
@@ -349,15 +344,16 @@ export class ResultBoard {
   private buildPanel(key: string): HTMLElement {
     const el = this.detached('div', 'chain-runner-panel')
     const head = div('chain-runner-panel-head', el)
+    const body = div('chain-runner-panel-body', el)
     const parts: PanelParts = {
       head,
       name: span('chain-runner-panel-name', head),
       lines: span('chain-runner-panel-lines', head),
       actions: div('chain-runner-panel-actions', head),
       notice: div('chain-runner-panel-notice', el),
-      body: div('chain-runner-panel-body', el),
+      body,
+      content: new PanelBody(body, this.deps.renderMarkdown),
       panel: { name: '', node: '', text: '', lines: 0, state: 'pending' },
-      rendered: '',
     }
     this.action(parts, 'Save as note', run => this.deps.actions?.saveAsNote(parts.panel, run))
     this.action(parts, 'Keep lines', run => this.deps.actions?.keepLines(parts.panel, run))

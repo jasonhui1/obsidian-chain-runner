@@ -273,11 +273,18 @@
   font-size: var(--font-ui-small);
 }
 
-.chain-runner-panel-body > :first-child {
+/* A streaming answer is rendered block by block (ADR-0008). The wrappers must
+   not become boxes, or the rendered blocks would stop collapsing margins with
+   each other and the panel would space out while it is written. */
+.chain-runner-panel-block {
+  display: contents;
+}
+
+.chain-runner-panel-body > :first-child > :first-child {
   margin-top: 0;
 }
 
-.chain-runner-panel-body > :last-child {
+.chain-runner-panel-body > :last-child > :last-child {
   margin-bottom: 0;
 }
 

@@ -137,6 +137,22 @@ describe('the board re-renders only what grew', () => {
     expect(bodyText(panelEls()[0]!)).toBe('half a sen')
   })
 
+  it('re-renders only the block a streaming panel is still writing', () => {
+    const view = board()
+    view.draw({ result: run([panel({ streaming: 'settled\n\nhalf a sen' })]) })
+    const before = renders.length
+    view.draw({ result: run([panel({ streaming: 'settled\n\nhalf a sentence' })]) })
+    expect(renders.slice(before).map(render => render.text)).toEqual(['half a sentence'])
+  })
+
+  it('renders the whole answer in one pass when the panel lands', () => {
+    const view = board()
+    view.draw({ result: run([panel({ streaming: 'one\n\ntwo' })]) })
+    const before = renders.length
+    view.draw({ result: run([filled({ text: 'one\n\ntwo' })]) })
+    expect(renders.slice(before).map(render => render.text)).toEqual(['one\n\ntwo'])
+  })
+
   it('renders a panel once when it is drawn twice unchanged', () => {
     const view = board()
     const result = run([filled()])
