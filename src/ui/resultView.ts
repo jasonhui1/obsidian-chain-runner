@@ -6,8 +6,6 @@ import type { RunResult } from '../run/session'
 
 export const RESULT_VIEW_TYPE = 'chain-runner-result'
 
-export type { PanelActions }
-
 /**
  * Where the quick path reads: one panel per declared output, streaming as the
  * run happens. The view decides nothing — what the panels are comes from

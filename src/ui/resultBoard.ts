@@ -3,7 +3,7 @@ import { emptyStateFor, type EmptyState, type EngineReading } from './emptyState
 import { KeyedChildren } from './keyed'
 import { noticeFor } from './panelCopy'
 import { panelKeys } from './panelKeys'
-import type { PanelState } from '../engine/types'
+import type { LayoutPanel, PanelState } from '../engine/types'
 import type { RunPanel } from '../run/panels'
 import { seedLine, type RunResult, type RunStatus } from '../run/session'
 
@@ -47,9 +47,9 @@ const STATUS_LABEL: Record<RunStatus, string> = {
   failed: 'failed',
 }
 
-const STATUSES: RunStatus[] = ['running', 'done', 'failed']
+const STATUSES = Object.keys(STATUS_LABEL) as RunStatus[]
 const PANEL_STATES: PanelState[] = ['pending', 'filled', 'empty', 'errored', 'skipped']
-const EMPHASES = ['last', 'join']
+const EMPHASES: NonNullable<LayoutPanel['emphasis']>[] = ['last', 'join']
 
 interface HeaderParts {
   el: HTMLElement
@@ -85,6 +85,12 @@ interface RoundParts {
   index: number
 }
 
+interface EmptyParts {
+  el: HTMLElement
+  title: HTMLElement
+  hint: HTMLElement
+}
+
 interface Sidebar {
   list: HTMLElement
   detail: HTMLElement
@@ -97,7 +103,7 @@ export class ResultBoard {
   private readonly columns: KeyedChildren
   private readonly rounds: KeyedChildren
   private header: HeaderParts | undefined
-  private empty: HTMLElement | undefined
+  private empty: EmptyParts | undefined
   private host: HTMLElement | undefined
   private hostKind: Arrangement['kind'] | undefined
   private sidebar: Sidebar | undefined
@@ -115,7 +121,7 @@ export class ResultBoard {
         this.panelParts.delete(key)
       },
     })
-    this.columns = new KeyedChildren({ make: () => this.make('div', 'chain-runner-column') })
+    this.columns = new KeyedChildren({ make: () => this.detached('div', 'chain-runner-column') })
     this.rounds = new KeyedChildren({
       make: key => this.buildRound(key),
       onRemove: key => void this.roundParts.delete(key),
@@ -147,8 +153,8 @@ export class ResultBoard {
     this.panels.clear()
   }
 
-  /** An element the keyed children own, made outside the tree until one places it. */
-  private make(tag: 'div' | 'span', cls: string): HTMLElement {
+  /** An element the keyed children own, left out of the tree until one places it. */
+  private detached(tag: 'div' | 'span', cls: string): HTMLElement {
     const el = this.root.ownerDocument.createElement(tag)
     el.className = cls
     return el
@@ -157,21 +163,20 @@ export class ResultBoard {
   /** A view with no panels, said as the designed state that fits. */
   private drawEmpty(status: RunStatus | undefined): void {
     const empty: EmptyState = emptyStateFor({ run: status ? { status } : undefined, engine: this.deps.engine() })
-    if (!this.empty) {
-      const el = div('chain-runner-empty', this.root)
-      div('chain-runner-empty-title', el)
-      div('chain-runner-empty-hint', el)
-      this.empty = el
-    }
-    const [title, hint] = Array.from(this.empty.children) as HTMLElement[]
-    this.empty.className = `chain-runner-empty chain-runner-empty--${empty.tone}`
-    title!.textContent = empty.title
-    hint!.textContent = empty.hint
-    if (this.empty.parentElement !== this.root) this.root.append(this.empty)
+    const parts = (this.empty ??= this.buildEmpty())
+    parts.el.className = `chain-runner-empty chain-runner-empty--${empty.tone}`
+    parts.title.textContent = empty.title
+    parts.hint.textContent = empty.hint
+    if (parts.el.parentElement !== this.root) this.root.append(parts.el)
+  }
+
+  private buildEmpty(): EmptyParts {
+    const el = div('chain-runner-empty', this.root)
+    return { el, title: div('chain-runner-empty-title', el), hint: div('chain-runner-empty-hint', el) }
   }
 
   private dropEmpty(): void {
-    this.empty?.remove()
+    this.empty?.el.remove()
     this.empty = undefined
   }
 
@@ -287,7 +292,7 @@ export class ResultBoard {
   }
 
   private buildRound(key: string): HTMLElement {
-    const el = this.make('div', 'chain-runner-round')
+    const el = this.detached('div', 'chain-runner-round')
     const parts: RoundParts = {
       number: span('chain-runner-round-number', el),
       name: span('chain-runner-round-name', el),
@@ -310,12 +315,12 @@ export class ResultBoard {
   private drawPanel(key: string, panel: RunPanel, status: RunStatus, parent: HTMLElement): void {
     const { el, fresh } = this.panels.use(key, parent)
     const parts = this.panelParts.get(key)!
-    const landed = !fresh && parts.panel.state !== 'filled' && panel.state === 'filled'
+    const landed = !fresh && parts.panel.state === 'pending' && panel.state === 'filled'
     parts.panel = panel
 
     modifiers(el, 'chain-runner-panel', PANEL_STATES, panel.state)
     modifiers(el, 'chain-runner-panel', EMPHASES, panel.emphasis)
-    if (landed) el.classList.add(ARRIVED_CLASS)
+    if (landed) restart(el)
 
     parts.name.textContent = panel.name
     parts.lines.textContent = lineLabel(panel)
@@ -342,7 +347,7 @@ export class ResultBoard {
   }
 
   private buildPanel(key: string): HTMLElement {
-    const el = this.make('div', 'chain-runner-panel')
+    const el = this.detached('div', 'chain-runner-panel')
     const head = div('chain-runner-panel-head', el)
     const parts: PanelParts = {
       head,
@@ -376,6 +381,15 @@ export class ResultBoard {
     }
     parts.actions.append(el)
   }
+}
+
+/** Runs the arrival cue, from the start when one is somehow still going. */
+function restart(el: HTMLElement): void {
+  el.classList.remove(ARRIVED_CLASS)
+  // Reading the layout is what starts the keyframe again; re-adding a class the
+  // element still has would not.
+  void el.offsetWidth
+  el.classList.add(ARRIVED_CLASS)
 }
 
 /** How much a panel holds, in the one wording both the panel head and a round row use. */

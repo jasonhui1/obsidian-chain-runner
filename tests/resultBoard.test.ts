@@ -160,6 +160,13 @@ describe('the arrival cue', () => {
     expect(panelEls()[0]!.classList.contains(ARRIVED_CLASS)).toBe(false)
   })
 
+  it('leaves a panel that recovered from a failed hop uncued — it did not land, it changed', () => {
+    const view = board()
+    view.draw({ result: run([panel({ state: 'errored', error: 'this hop failed' })]) })
+    view.draw({ result: run([filled()]) })
+    expect(panelEls()[0]!.classList.contains(ARRIVED_CLASS)).toBe(false)
+  })
+
   it('clears when the animation ends, so a later draw does not read as an arrival', () => {
     const view = board()
     view.draw({ result: run([panel()]) })
