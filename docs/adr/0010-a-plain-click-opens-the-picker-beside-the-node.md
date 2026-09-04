@@ -63,7 +63,13 @@ second click of a double changes no selection, so the scene hook never sees it.
 - Excalidraw **opens its text editor** on a double-clicked text element, and
   `appState.editingTextElement` names it. The scene hook watches that key.
 
-Three vault runs shaped this, and each killed an assumption:
+**The line a double landed on is only known after it.** A node is one group, so
+the first click of a double selects *all five elements* and names no line; the
+double then drills into one, and Excalidraw reports that a moment later. So a
+double arms a short window, and the next single-element report is what it acts
+on. This is the same asynchrony as the plain click, one step further out.
+
+Four vault runs shaped this, and each killed an assumption:
 
 1. Asking the drawing what is selected returned nothing, because opening the
    editor clears the selection first. Hence the editor route.
@@ -75,6 +81,10 @@ Three vault runs shaped this, and each killed an assumption:
    go with it. `pointerdown` and `pointerup` do arrive — the plain click and the
    re-cut on release both ride on them — so the two clicks are counted from
    those.
+4. It *still* took three, and a screenshot showed why: **a node is a group**.
+   Click one selects the whole node, which names no line, so there was nothing
+   for a double to act on until a third click had drilled in. Waiting for the
+   report that follows the double is what finally made it two.
 
 Both remaining routes are kept: they fail in different places, and a run already
 going is not restarted, so one gesture reported twice starts one run.
@@ -130,7 +140,14 @@ leaves the picker unopened rather than opening it late. Both routes back to the
 line still work.
 
 **A click is spent once.** Two selections reported for one click open one
-picker; the second finds the click already claimed.
+picker; the second finds the click already claimed. A double is spent once for
+the same reason: the drill-in it acts on must not also run the next click.
+
+**Selecting a whole node names no line.** Every gesture that has to know *which*
+line was hit needs a single-element report, which on a grouped node only a
+double-click produces. A single click on a node that is not yet selected
+therefore selects the node; the picker opens on the click after that, once
+Excalidraw has drilled in.
 
 **The hook is shared, and the last installer wins.** As with `onLinkClickHook`,
 the previous hook is chained and put back on unload, and its `appStateKeys` are

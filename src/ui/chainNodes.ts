@@ -73,6 +73,8 @@ export class ChainNodes {
   private lastView: DrawingView | undefined
   /** What the first click of a double-click selected, before the second arrives. */
   private lastClick: { element: MaybeNodeElement; at: number } | undefined
+  /** When a double-click landed, until the drawing says which line it drilled into. */
+  private doubleAt: number | undefined
 
   constructor(private readonly deps: ChainNodesDeps) {}
 
@@ -122,6 +124,12 @@ export class ChainNodes {
     if (!data) return
     this.lastView = view
     this.lastClick = { element, at: this.deps.now() }
+    // A node is one group, so the first click of a double names no line at all;
+    // this report is the drill-in that does (ADR-0010).
+    if (this.tookDouble()) {
+      this.runFromGesture(element, view)
+      return
+    }
     // Nothing opens until the press ends, because a drag starts the same way.
     this.deps.clickSpot(at => {
       if (at) this.openDecision(data, element, at, view)
@@ -134,8 +142,21 @@ export class ChainNodes {
    * the drawing is asked what is selected instead (ADR-0010).
    */
   handleDoubleClick(): void {
+    // Armed either way: on a grouped node the line is not known until the
+    // drawing reports what the double drilled into.
+    this.doubleAt = this.deps.now()
     const element = this.justClicked() ?? this.stillSelected()
-    if (element) this.runFromGesture(element, this.lastView)
+    if (element) {
+      this.doubleAt = undefined
+      this.runFromGesture(element, this.lastView)
+    }
+  }
+
+  /** Whether a double-click is still waiting for the line it landed on. Spent once. */
+  private tookDouble(): boolean {
+    const at = this.doubleAt
+    this.doubleAt = undefined
+    return at !== undefined && this.deps.now() - at <= DOUBLE_CLICK_MS
   }
 
   /**

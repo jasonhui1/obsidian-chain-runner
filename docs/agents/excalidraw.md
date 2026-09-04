@@ -89,6 +89,12 @@ change:
   a hook that acts on the report alone pops a modal in the middle of a drag;
 - selection is not only clicking — a keyboard selection has no press behind it at
   all, and the same wait is what catches that;
+- **a node placed as a group selects as a group.** A click on any element of it
+  puts *every* member in `selectedElementIds`, so nothing that reads the
+  selection can tell which line was hit. Excalidraw drills into the single
+  element only on a **double-click**, and reports that a beat later. Anything
+  that must know the line has to wait for a one-element report rather than act
+  on the click;
 - **a second click on an already-selected element changes nothing**, so the hook
   never fires for it. A double-click has to be found some other way, and the
   obvious one does not work: letting the browser count the clicks and then asking

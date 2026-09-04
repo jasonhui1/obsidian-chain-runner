@@ -599,6 +599,45 @@ describe('double-clicking a node', () => {
     expect(runs).toEqual([{ nodeId: 'n-1', groupIds: undefined, view: undefined }])
   })
 
+  it('runs on the line a double drilled into, which the drawing reports after it', () => {
+    // A node is a group: the first click selects all of it and names no line,
+    // and only the double picks out ▶ Run — reported once the double is over.
+    const view = { embedded: true }
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    expect(runs).toEqual([])
+    nodes.handleSelection(line('run'), view)
+    expect(runs).toEqual([{ nodeId: 'n-1', groupIds: undefined, view }])
+  })
+
+  it('does not run on a selection that arrives long after the double', () => {
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    clock = 9000
+    nodes.handleSelection(line('run'))
+    expect(runs).toEqual([])
+  })
+
+  it('opens the picker, and runs nothing, when the double drilled into another line', () => {
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    nodes.handleSelection(line('chain'))
+    expect(runs).toEqual([])
+  })
+
+  it('spends the double once, so the next click on ▶ Run does not run it', () => {
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    nodes.handleSelection(line('run'))
+    nodes.handleSelection(line('run'))
+    expect(runs).toHaveLength(1)
+  })
+
+  it('does not run on an ordinary click, with no double before it', () => {
+    makeNodes().handleSelection(line('run'))
+    expect(runs).toEqual([])
+  })
+
   it('runs the node still selected, when the first click changed nothing', () => {
     selected = line('run')
     makeNodes().handleDoubleClick()
