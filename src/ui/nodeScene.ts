@@ -23,6 +23,12 @@ export interface SceneShape extends MaybeNodeElement {
   endBinding?: { elementId?: string } | null
 }
 
+/**
+ * The vault path of the markdown note an `image` element draws, or `undefined`
+ * for a picture. Only the surface can answer, so the reading is given it.
+ */
+export type ImageNoteLookup = (element: SceneShape) => string | undefined
+
 /** An embeddable carries a note only the vault can read, so the link is passed on. */
 export type NodeInput = { kind: 'text'; text: string } | { kind: 'note'; linkpath: string }
 
@@ -60,7 +66,11 @@ export function nodeBox(scene: readonly SceneShape[], target: NodeTarget): Box |
  * other way points at something the node feeds. Ordered by where each source
  * sits, so inputs reorder by being dragged rather than redrawn.
  */
-export function resolveInputs(scene: readonly SceneShape[], target: NodeTarget): NodeInputs {
+export function resolveInputs(
+  scene: readonly SceneShape[],
+  target: NodeTarget,
+  imageNote: ImageNoteLookup,
+): NodeInputs {
   const byId = new Map(scene.map(element => [element.id, element]))
   const ours = new Set(scene.filter(element => nodeElementData(element, target)).map(element => element.id))
 
@@ -80,7 +90,7 @@ export function resolveInputs(scene: readonly SceneShape[], target: NodeTarget):
 
   const inputs: NodeInput[] = []
   for (const source of sources.sort(topToBottom)) {
-    const input = blockInput(source, scene)
+    const input = blockInput(source, scene, imageNote)
     if (input) inputs.push(input)
     else unbound++
   }
@@ -97,13 +107,19 @@ function topToBottom(left: SceneShape, right: SceneShape): number {
  * inside it, or the note it embeds. A labelled shape contributes its bound text,
  * as a bare text element does.
  */
-export function blockInput(source: SceneShape, scene: readonly SceneShape[]): NodeInput | undefined {
-  if (source.type === 'embeddable' || source.type === 'iframe') {
-    const linkpath = linkpathOf(source.link)
-    return linkpath ? { kind: 'note', linkpath } : undefined
-  }
+export function blockInput(
+  source: SceneShape,
+  scene: readonly SceneShape[],
+  imageNote: ImageNoteLookup,
+): NodeInput | undefined {
+  if (source.type === 'embeddable' || source.type === 'iframe') return noteInput(linkpathOf(source.link))
+  if (source.type === 'image') return noteInput(imageNote(source))
   const text = textOf(source) ?? boundText(source, scene)
   return text ? { kind: 'text', text } : undefined
+}
+
+function noteInput(linkpath: string | undefined): NodeInput | undefined {
+  return linkpath ? { kind: 'note', linkpath } : undefined
 }
 
 function textOf(element: SceneShape): string | undefined {

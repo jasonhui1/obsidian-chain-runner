@@ -10,7 +10,16 @@ import {
   type NodeRunStatus,
   type NodeTarget,
 } from './chainNode'
-import { blockInput, nodeBox, resolveInputs, type Box, type NodeInput, type NodeInputs, type SceneShape } from './nodeScene'
+import {
+  blockInput,
+  nodeBox,
+  resolveInputs,
+  type Box,
+  type ImageNoteLookup,
+  type NodeInput,
+  type NodeInputs,
+  type SceneShape,
+} from './nodeScene'
 import {
   ACCEPTED_STROKE,
   ACCEPTED_STROKE_STYLE,
@@ -277,7 +286,7 @@ export function createNodeSurface(app: App): NodeSurface {
       const scene = ea.getViewElements()
       const box = nodeBox(scene, target)
       if (!box) return undefined
-      return { box, inputs: resolveInputs(scene, target), drawing: drawingPath(view) }
+      return { box, inputs: resolveInputs(scene, target, imageNoteLookup(ea)), drawing: drawingPath(view) }
     },
 
     selection: on => {
@@ -287,7 +296,7 @@ export function createNodeSurface(app: App): NodeSurface {
       const element = selected[0]
       // Our own furniture is not material to expand: a node, or another proposal.
       if (!element || chainNodeData(element) || proposalData(element)) return undefined
-      const input = imageNote(ea, element) ?? blockInput(element, ea.getViewElements())
+      const input = blockInput(element, ea.getViewElements(), imageNoteLookup(ea))
       if (!input) return undefined
       return {
         id: element.id,
@@ -432,10 +441,13 @@ const PLAIN_STROKE = 1
  * image whose file is Excalidraw's own bookkeeping, not a link we can read; only
  * a markdown note has a body to read, so a picture is not one.
  */
-function imageNote(ea: ExcalidrawAutomate, element: SceneElement): NodeInput | undefined {
-  if (element.type !== 'image') return undefined
-  const note = ea.getViewFileForImageElement?.(element)
-  return note && note.extension === 'md' ? { kind: 'note', linkpath: note.path } : undefined
+function imageNoteLookup(ea: ExcalidrawAutomate): ImageNoteLookup {
+  return element => {
+    // An Excalidraw that cannot say is too old to read an image at all.
+    if (!ea.getViewFileForImageElement) throw new Error(OLD_EXCALIDRAW)
+    const note = ea.getViewFileForImageElement(element)
+    return note && note.extension === 'md' ? note.path : undefined
+  }
 }
 
 /** What the reader has selected; an Excalidraw that cannot say is too old to expand on. */

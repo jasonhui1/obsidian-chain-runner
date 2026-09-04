@@ -47,6 +47,15 @@ const embeddable = (id: string, link: string, y: number): SceneShape => ({
   link,
 })
 
+/** What `Insert file from vault` draws: the file is nowhere on the element. */
+const image = (id: string, y: number): SceneShape => ({ id, type: 'image', x: 0, y })
+
+/** Stands in for the vault: an image element's markdown note, by element id. */
+const notes =
+  (byId: Record<string, string>) =>
+  (element: SceneShape): string | undefined =>
+    byId[element.id]
+
 /** The node's box, which is what an arrow the reader drew lands on. */
 const BOX = 'node-0'
 
@@ -67,12 +76,12 @@ describe('nodeBox', () => {
 describe('resolveInputs', () => {
   it('reads a text element bound in as its words', () => {
     const scene = [...nodeElements(), text('t1', 'a premise', 100), arrow('a1', 't1', BOX)]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [{ kind: 'text', text: 'a premise' }], unbound: 0 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [{ kind: 'text', text: 'a premise' }], unbound: 0 })
   })
 
   it('reads an output of an earlier run as the note it is', () => {
     const output = embeddable('e1', '[[chains/runs/2026-09-02-ab12c/Survivor.md]]', 100)
-    expect(resolveInputs([...nodeElements(), output, arrow('a1', 'e1', BOX)], target)).toEqual({
+    expect(resolveInputs([...nodeElements(), output, arrow('a1', 'e1', BOX)], target, notes({}))).toEqual({
       inputs: [{ kind: 'note', linkpath: 'chains/runs/2026-09-02-ab12c/Survivor.md' }],
       unbound: 0,
     })
@@ -80,15 +89,42 @@ describe('resolveInputs', () => {
 
   it('reads an embeddable bound in as the note it shows', () => {
     const scene = [...nodeElements(), embeddable('e1', '[[notes/premise.md]]', 100), arrow('a1', 'e1', BOX)]
-    expect(resolveInputs(scene, target)).toEqual({
+    expect(resolveInputs(scene, target, notes({}))).toEqual({
       inputs: [{ kind: 'note', linkpath: 'notes/premise.md' }],
       unbound: 0,
     })
   })
 
+  it('reads a note inserted from the vault as the note it draws', () => {
+    const scene = [...nodeElements(), image('i1', 100), arrow('a1', 'i1', BOX)]
+    expect(resolveInputs(scene, target, notes({ i1: 'notes/premise.md' }))).toEqual({
+      inputs: [{ kind: 'note', linkpath: 'notes/premise.md' }],
+      unbound: 0,
+    })
+  })
+
+  it('orders a note inserted from the vault with the rest, top to bottom', () => {
+    const scene = [
+      ...nodeElements(),
+      image('i1', 300),
+      text('t1', 'first', 100),
+      arrow('a1', 'i1', BOX),
+      arrow('a2', 't1', BOX),
+    ]
+    expect(resolveInputs(scene, target, notes({ i1: 'notes/premise.md' })).inputs).toEqual([
+      { kind: 'text', text: 'first' },
+      { kind: 'note', linkpath: 'notes/premise.md' },
+    ])
+  })
+
+  it('counts a picture as unbound, since it has no body to read', () => {
+    const scene = [...nodeElements(), image('i1', 100), arrow('a1', 'i1', BOX)]
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [], unbound: 1 })
+  })
+
   it('takes the note out of an aliased link to a heading', () => {
     const scene = [...nodeElements(), embeddable('e1', '[[premise#Middle|the middle]]', 100), arrow('a1', 'e1', BOX)]
-    expect(resolveInputs(scene, target).inputs).toEqual([{ kind: 'note', linkpath: 'premise' }])
+    expect(resolveInputs(scene, target, notes({})).inputs).toEqual([{ kind: 'note', linkpath: 'premise' }])
   })
 
   it('orders inputs top to bottom, not by the order the arrows were drawn', () => {
@@ -99,7 +135,7 @@ describe('resolveInputs', () => {
       arrow('a1', 'lower', BOX),
       arrow('a2', 'upper', BOX),
     ]
-    expect(resolveInputs(scene, target).inputs).toEqual([
+    expect(resolveInputs(scene, target, notes({})).inputs).toEqual([
       { kind: 'text', text: 'first' },
       { kind: 'text', text: 'second' },
     ])
@@ -113,7 +149,7 @@ describe('resolveInputs', () => {
       arrow('a1', 'e1', BOX),
       arrow('a2', 't1', BOX),
     ]
-    expect(resolveInputs(scene, target).inputs).toEqual([
+    expect(resolveInputs(scene, target, notes({})).inputs).toEqual([
       { kind: 'text', text: 'and also' },
       { kind: 'note', linkpath: 'premise' },
     ])
@@ -126,17 +162,17 @@ describe('resolveInputs', () => {
       { id: 'r1-text', type: 'text', containerId: 'r1', originalText: 'in a box' },
       arrow('a1', 'r1', BOX),
     ]
-    expect(resolveInputs(scene, target).inputs).toEqual([{ kind: 'text', text: 'in a box' }])
+    expect(resolveInputs(scene, target, notes({})).inputs).toEqual([{ kind: 'text', text: 'in a box' }])
   })
 
   it('counts an arrow bound to nothing as unbound', () => {
     const scene = [...nodeElements(), arrow('a1', undefined, BOX)]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [], unbound: 1 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [], unbound: 1 })
   })
 
   it('counts an arrow from something deleted as unbound', () => {
     const scene = [...nodeElements(), arrow('a1', 'gone', BOX)]
-    expect(resolveInputs(scene, target).unbound).toBe(1)
+    expect(resolveInputs(scene, target, notes({})).unbound).toBe(1)
   })
 
   it('counts an empty shape and a web page as unbound', () => {
@@ -147,33 +183,33 @@ describe('resolveInputs', () => {
       arrow('a1', 'r1', BOX),
       arrow('a2', 'e1', BOX),
     ]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [], unbound: 2 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [], unbound: 2 })
   })
 
   it('keeps what it could read alongside what it could not', () => {
     const scene = [...nodeElements(), text('t1', 'a premise', 100), arrow('a1', 't1', BOX), arrow('a2', undefined, BOX)]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [{ kind: 'text', text: 'a premise' }], unbound: 1 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [{ kind: 'text', text: 'a premise' }], unbound: 1 })
   })
 
   it('ignores an arrow pointing out of the node', () => {
     const scene = [...nodeElements(), text('t1', 'downstream', 100), arrow('a1', BOX, 't1')]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [], unbound: 0 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [], unbound: 0 })
   })
 
   it('ignores arrows into another copy of the node', () => {
     const other = nodeElements().map(element => ({ ...element, id: `${element.id}-copy`, groupIds: ['g-2'] }))
     const scene = [...nodeElements(), ...other, text('t1', 'theirs', 100), arrow('a1', 't1', 'node-0-copy')]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [], unbound: 0 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [], unbound: 0 })
   })
 
   it('counts an arrow from one chain node into another as unbound', () => {
     const other = nodeElements().map(element => ({ ...element, id: `${element.id}-copy`, groupIds: ['g-2'] }))
     const scene = [...nodeElements(), ...other, arrow('a1', 'node-0-copy', BOX)]
-    expect(resolveInputs(scene, target)).toEqual({ inputs: [], unbound: 1 })
+    expect(resolveInputs(scene, target, notes({}))).toEqual({ inputs: [], unbound: 1 })
   })
 
   it('reads an arrow bound to any line of the node, not only its box', () => {
     const scene = [...nodeElements(), text('t1', 'a premise', 100), arrow('a1', 't1', 'node-1')]
-    expect(resolveInputs(scene, target).inputs).toEqual([{ kind: 'text', text: 'a premise' }])
+    expect(resolveInputs(scene, target, notes({})).inputs).toEqual([{ kind: 'text', text: 'a premise' }])
   })
 })
