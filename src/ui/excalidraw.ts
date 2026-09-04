@@ -163,6 +163,16 @@ interface SceneChangeHook {
 /** The slice of Excalidraw's app state the selection hook reads. */
 interface SceneAppState {
   selectedElementIds?: SelectedIds
+  /** The text element being typed into. Excalidraw opens its editor on a double-click. */
+  editingTextElement?: { id?: string } | null
+}
+
+/** What a reader's gesture on a node turns into. */
+export interface NodeGestures {
+  /** One element newly selected — a plain click, once the press behind it settles. */
+  clicked: (element: MaybeNodeElement, view: DrawingView) => void
+  /** A text element opened for typing, which is Excalidraw's own answer to a double-click. */
+  editing: (element: MaybeNodeElement, view: DrawingView) => void
 }
 
 /** What the "send to drawing" action needs a drawing surface to do. */
@@ -649,23 +659,30 @@ export function registerLinkHook(
  * selection. `SelectionClicks` decides which of those changes is a click
  * (ADR-0010); this only reaches the hook and hands over the element.
  */
-export function registerSelectionHook(
-  app: App,
-  handler: (element: MaybeNodeElement, view: DrawingView) => void,
-): () => void {
+export function registerSelectionHook(app: App, gestures: NodeGestures): () => void {
   const ea = automate(app)
   if (!ea) return () => {}
   const previous = ea.onSceneChangeHook ?? undefined
   const clicks = new SelectionClicks()
+  let editing: string | undefined
   ea.onSceneChangeHook = {
     // Ours on top of what the previous hook asked for, so chaining never narrows it.
-    appStateKeys: [...new Set([...(previous?.appStateKeys ?? []), 'selectedElementIds'])],
+    appStateKeys: [
+      ...new Set([...(previous?.appStateKeys ?? []), 'selectedElementIds', 'editingTextElement']),
+    ],
     ...(previous?.trackElements ? { trackElements: true } : {}),
     ...(previous?.triggerWhenInvisible ? { triggerWhenInvisible: true } : {}),
     callback: (elements, appState, files, view, self) => {
+      const opened = appState?.editingTextElement?.id
+      if (opened !== undefined && opened !== editing) {
+        const element = elements.find(one => one.id === opened)
+        if (element) gestures.editing(element, view)
+      }
+      editing = opened ?? undefined
+
       const id = clicks.clicked(appState?.selectedElementIds)
       const clicked = id === undefined ? undefined : elements.find(element => element.id === id)
-      if (clicked) handler(clicked, view)
+      if (clicked) gestures.clicked(clicked, view)
       previous?.callback(elements, appState, files, view, self)
     },
   }

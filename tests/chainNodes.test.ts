@@ -544,6 +544,48 @@ describe('what a selection has to be before anything opens', () => {
 describe('double-clicking a node', () => {
   const line = (role: string): { customData?: unknown } => element({ role })
 
+  it('runs when Excalidraw opens its text editor on ▶ Run, which is its own double-click', () => {
+    makeNodes().handleTextEdit(line('run'))
+    expect(runs).toEqual([{ nodeId: 'n-1', groupIds: undefined, view: undefined }])
+  })
+
+  it('runs on the drawing the editor opened in', () => {
+    const view = { embedded: true }
+    makeNodes().handleTextEdit(line('run'), view)
+    expect(runs[0]?.view).toBe(view)
+  })
+
+  it('does not run when the reader opened another line to type in it', () => {
+    const nodes = makeNodes()
+    nodes.handleTextEdit(line('chain'))
+    nodes.handleTextEdit(line('moment'))
+    expect(runs).toEqual([])
+  })
+
+  it('ignores a text element that is not part of a node', () => {
+    makeNodes().handleTextEdit({ customData: undefined })
+    expect(runs).toEqual([])
+  })
+
+  it('does not restart a run already going, however the double-click is reported', () => {
+    running = ['n-1']
+    selected = line('run')
+    const nodes = makeNodes()
+    nodes.handleTextEdit(line('run'))
+    nodes.handleDoubleClick()
+    expect(runs).toEqual([])
+  })
+
+  it('starts one run when both routes report the same double-click', () => {
+    // The editor opening and the browser's own dblclick are one gesture.
+    selected = line('run')
+    const nodes = makeNodes()
+    nodes.handleTextEdit(line('run'))
+    running = ['n-1']
+    nodes.handleDoubleClick()
+    expect(runs).toHaveLength(1)
+  })
+
   it('runs the node when ▶ Run is what is selected', () => {
     selected = line('run')
     makeNodes().handleDoubleClick()

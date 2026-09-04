@@ -187,7 +187,10 @@ export default class ChainRunnerPlugin extends Plugin {
       )
       // A plain click reaches only the node; a proposal's decisions stay on the
       // link hook, where nothing is written without the reader saying so.
-      removeSelectionHook = registerSelectionHook(this.app, (element, view) => nodes.handleSelection(element, view))
+      removeSelectionHook = registerSelectionHook(this.app, {
+        clicked: (element, view) => nodes.handleSelection(element, view),
+        editing: (element, view) => nodes.handleTextEdit(element, view),
+      })
       // The toolbar button is a file in the vault, and Excalidraw names the folder.
       const folder = scriptFolder(this.app)
       if (folder) {

@@ -90,10 +90,15 @@ change:
 - selection is not only clicking — a keyboard selection has no press behind it at
   all, and the same wait is what catches that;
 - **a second click on an already-selected element changes nothing**, so the hook
-  never fires for it. A double-click is therefore unreachable from the hook: let
-  the browser count the clicks and ask the drawing what is selected
-  (`getViewSelectedElements`). Note that Excalidraw opens its **own text editor**
-  on a double-clicked text element, so the gesture is never yours alone.
+  never fires for it. A double-click has to be found some other way, and the
+  obvious one does not work: letting the browser count the clicks and then asking
+  `getViewSelectedElements` returns nothing, because Excalidraw has opened its
+  **own text editor** on the element and that appears to clear the selection.
+  What does work is watching `appState.editingTextElement` — an element object
+  with an `id`, set when the editor opens, and reachable through the same
+  `appStateKeys` filter. It names the element instead of asking what is
+  selected. Keep both routes: they fail in different places, and a double-click
+  on a shape that is not text opens no editor at all.
 
 EA holds one of each hook, so the last installer wins; chain the previous one
 and put it back on unload, as `registerLinkHook` already does. Handlers claim

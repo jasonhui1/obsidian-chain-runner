@@ -133,10 +133,27 @@ export class ChainNodes {
       // Every double-click in the workspace arrives here; only a drawing answers.
       return
     }
-    const data = element && chainNodeData(element)
-    if (!element || !data || chainNodeRole(data.role) !== 'run') return
+    if (element) this.runFromGesture(element, this.lastView)
+  }
+
+  /**
+   * A text element opened for typing. Excalidraw does that on a double-click,
+   * which is the one report of one that survives it clearing the selection
+   * (ADR-0010).
+   */
+  handleTextEdit(element: MaybeNodeElement, view?: DrawingView): void {
+    this.lastView = view
+    this.runFromGesture(element, view)
+  }
+
+  /** Runs the node, if `▶ Run` is what the gesture landed on and it is not going already. */
+  private runFromGesture(element: MaybeNodeElement, view?: DrawingView): void {
+    const data = chainNodeData(element)
+    if (!data || chainNodeRole(data.role) !== 'run') return
+    // Two routes report one double-click, and a run already going is not restarted.
+    if (this.deps.isRunning(data.nodeId)) return
     if (!this.usable()) return
-    this.deps.run(data, element, this.lastView)
+    this.deps.run(data, element, view)
   }
 
   /**

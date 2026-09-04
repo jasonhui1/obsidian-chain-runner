@@ -49,12 +49,26 @@ a picker can be dismissed.
 
 **`▶ Run` answers a double-click instead.** Two clicks are a deliberate gesture
 in a way one selection is not, so the reason to keep a run off the single click
-does not apply to them. The second click of a double changes no selection, so
-the scene hook never sees it: the browser counts the clicks, and the drawing is
-asked what is selected (`selectedNode` on the surface, one element only, so a
-double-click on a rubber-banded group runs nothing). Every double-click in the
-workspace reaches the handler, so anything that is not a drawing is answered
-with silence rather than a notice.
+does not apply to them.
+
+**A double-click is reported two ways, because neither is reliable alone.** The
+second click of a double changes no selection, so the scene hook never sees it.
+
+- The **browser** counts the clicks, and the drawing is asked what is selected
+  (`selectedNode`, one element only, so a double-click on a rubber-banded group
+  runs nothing).
+- Excalidraw **opens its text editor** on a double-clicked text element, and
+  `appState.editingTextElement` names it. The scene hook watches that key.
+
+A first vault run found the browser route alone did nothing: opening the editor
+appears to clear the selection, so by the time `dblclick` arrives there is
+nothing selected to ask about. The editor route survives that, because it names
+the element rather than asking what is selected. Both are kept — they fail in
+different places — and a run already going is not restarted, so one gesture
+reported twice starts one run.
+
+Every double-click in the workspace reaches the handler, so anything that is not
+a drawing is answered with silence rather than a notice.
 
 Ctrl/Cmd+click and the palette still start a run, so all three routes stand.
 
@@ -117,9 +131,9 @@ lookup, on a hook Excalidraw already fires for anything holding one.
 vault, and this ADR's reasoning about a single click applies to them the same
 way.
 
-**Excalidraw opens its own text editor on a double-click.** Double-clicking a
-text element is how a reader edits it, so running a node this way puts the `▶
-Run` line into edit mode at the same time. Pressing Escape leaves it untouched —
-the words are rewritten from the node's own state on the next status write — but
-it is a gesture doing two things, and a vault should say whether that reads as
-broken.
+**Running a node opens Excalidraw's text editor on the `▶ Run` line**, since
+that is the very thing being detected. Pressing Escape leaves the words
+untouched — they are rewritten from the node's own state on the next status
+write — but it is one gesture doing two things, and a vault should say whether
+that reads as broken. If it does, the answer is to close the editor from the
+handler rather than to give up the route.
