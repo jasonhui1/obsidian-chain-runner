@@ -462,10 +462,10 @@
   background-color: var(--background-modifier-hover);
 }
 
-/* A marked line is one you are keeping: the theme's highlight, and its words at
-   full strength. */
+/* A marked line is one you are keeping: the theme's selection colour, paired
+   with full-strength text — a contrast Obsidian guarantees, unlike the highlight. */
 .chain-runner-mark-line--marked {
-  background-color: var(--text-highlight-bg);
+  background-color: var(--text-selection);
   color: var(--text-normal);
 }
 
