@@ -99,11 +99,16 @@ change:
   `appStateKeys` filter. It names the element instead of asking what is
   selected. But the editor only opens on an element that was **already
   selected**, so from an empty canvas that route costs three clicks: one to
-  select, then the double. Cheapest and most reliable is neither — the first
-  click of a double is an ordinary click, so the hook has already reported the
-  element; hold it briefly and let the browser's `dblclick` spend it. Keep all
-  three: they fail in different places, and a double-click on a shape that is
-  not text opens no editor at all.
+  select, then the double.
+
+  And **the browser's own `dblclick` never fires over the canvas at all** — it
+  captures the pointer, and the compatibility mouse events go with it. Do not
+  build on `dblclick` here. `pointerdown` and `pointerup` *do* arrive on
+  `document` in capture, so count the two clicks yourself and pair them with the
+  element the hook reported for the first
+  (`src/ui/pointerClicks.ts`, `src/ui/chainNodes.ts`). Keep the
+  `editingTextElement` route as well: the two fail in different places, and a
+  double-click on a shape that is not text opens no editor at all.
 
 EA holds one of each hook, so the last installer wins; chain the previous one
 and put it back on unload, as `registerLinkHook` already does. Handlers claim

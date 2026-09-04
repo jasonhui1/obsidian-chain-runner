@@ -17,6 +17,10 @@ const HELD_MS = 700
 /** How long a finished click stays available to a selection still being reported. */
 const REPORTED_WITHIN_MS = 500
 
+/** How close together two clicks have to be to be one double. */
+const DOUBLE_MS = 450
+const DOUBLE_SLOP_PX = 6
+
 /** Told where the click was, or `undefined` when the press was not one. */
 type Settle = (spot: Point | undefined) => void
 
@@ -30,8 +34,20 @@ export class PointerClicks {
   /** The last click nothing has claimed yet, kept for a selection reported late. */
   private unclaimed: (Point & { when: number }) | undefined
   private last: Point | undefined
+  /** The click before this one, for counting a double the canvas swallows. */
+  private earlier: (Point & { when: number }) | undefined
+  private doubles: (() => void)[] = []
 
   constructor(private readonly now: () => number) {}
+
+  /**
+   * Told when two clicks add up to a double. Excalidraw's canvas captures the
+   * pointer, so the browser's own `dblclick` never arrives — these are counted
+   * from the presses, which do (ADR-0010).
+   */
+  onDouble(handler: () => void): void {
+    this.doubles.push(handler)
+  }
 
   press(point: Point, when: number): void {
     // A press arriving with one still in flight means the last one was lost.
@@ -47,6 +63,22 @@ export class PointerClicks {
     // Anyone already waiting claims it; otherwise it is held for a late report.
     if (press.waiting.length > 0) settle(press, spot)
     else this.unclaimed = spot ? { ...spot, when } : undefined
+    this.count(spot, when)
+  }
+
+  /** Whether this click closes a double, and tells anyone watching for one. */
+  private count(spot: Point | undefined, when: number): void {
+    if (!spot) {
+      // A drag is not half of anything.
+      this.earlier = undefined
+      return
+    }
+    const earlier = this.earlier
+    this.earlier = { ...spot, when }
+    if (!earlier || when - earlier.when > DOUBLE_MS || !near(earlier, spot)) return
+    // Spent, so a third click starts the next double rather than closing this one.
+    this.earlier = undefined
+    for (const handler of this.doubles) handler()
   }
 
   /** The window took the pointer away, so nothing more is coming. */
@@ -81,6 +113,10 @@ export class PointerClicks {
     this.press_ = undefined
     return press
   }
+}
+
+function near(one: Point, other: Point): boolean {
+  return Math.abs(one.x - other.x) <= DOUBLE_SLOP_PX && Math.abs(one.y - other.y) <= DOUBLE_SLOP_PX
 }
 
 function isClick(press: Press, at: Point, when: number): boolean {

@@ -130,3 +130,70 @@ describe('PointerClicks', () => {
     expect(seen).toEqual([undefined])
   })
 })
+
+describe('PointerClicks, counting a double', () => {
+  /** Collects each double the presses add up to. */
+  function doubles(clicks: PointerClicks): number[] {
+    const seen: number[] = []
+    clicks.onDouble(() => seen.push(seen.length))
+    return seen
+  }
+
+  /** One click, pressed and released on the spot. */
+  function click(clicks: PointerClicks, at: Point, when: number): void {
+    clicks.press(at, when)
+    clicks.release(at, when + 40)
+  }
+
+  it('reads two clicks in the same place, in quick succession, as a double', () => {
+    const clicks = new PointerClicks(() => 0)
+    const seen = doubles(clicks)
+    click(clicks, { x: 40, y: 90 }, 1000)
+    expect(seen).toEqual([])
+    click(clicks, { x: 40, y: 90 }, 1150)
+    expect(seen).toEqual([0])
+  })
+
+  it('forgives the wobble between the two', () => {
+    const clicks = new PointerClicks(() => 0)
+    const seen = doubles(clicks)
+    click(clicks, { x: 40, y: 90 }, 1000)
+    click(clicks, { x: 43, y: 92 }, 1150)
+    expect(seen).toEqual([0])
+  })
+
+  it('is two separate clicks when they are too far apart in time', () => {
+    const clicks = new PointerClicks(() => 0)
+    const seen = doubles(clicks)
+    click(clicks, { x: 40, y: 90 }, 1000)
+    click(clicks, { x: 40, y: 90 }, 3000)
+    expect(seen).toEqual([])
+  })
+
+  it('is two separate clicks when they are too far apart on the screen', () => {
+    const clicks = new PointerClicks(() => 0)
+    const seen = doubles(clicks)
+    click(clicks, { x: 40, y: 90 }, 1000)
+    click(clicks, { x: 400, y: 90 }, 1150)
+    expect(seen).toEqual([])
+  })
+
+  it('does not count a drag as half of a double', () => {
+    const clicks = new PointerClicks(() => 0)
+    const seen = doubles(clicks)
+    click(clicks, { x: 40, y: 90 }, 1000)
+    clicks.press({ x: 40, y: 90 }, 1100)
+    clicks.release({ x: 300, y: 90 }, 1200)
+    click(clicks, { x: 40, y: 90 }, 1250)
+    expect(seen).toEqual([])
+  })
+
+  it('reads a third click as the start of the next double, not a second one', () => {
+    const clicks = new PointerClicks(() => 0)
+    const seen = doubles(clicks)
+    click(clicks, { x: 40, y: 90 }, 1000)
+    click(clicks, { x: 40, y: 90 }, 1150)
+    click(clicks, { x: 40, y: 90 }, 1300)
+    expect(seen).toEqual([0])
+  })
+})

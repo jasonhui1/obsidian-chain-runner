@@ -139,9 +139,10 @@ export default class ChainRunnerPlugin extends Plugin {
       { capture: true },
     )
     this.registerDomEvent(document, 'pointercancel', () => clicks.cancel(), { capture: true })
-    // `▶ Run` without a modifier. The browser counts the two clicks; the second
-    // changes no selection, so the scene hook never sees it (ADR-0010).
-    this.registerDomEvent(document, 'dblclick', () => nodes.handleDoubleClick(), { capture: true })
+    // `▶ Run` without a modifier. Excalidraw's canvas captures the pointer, so
+    // the browser's own `dblclick` never arrives; the presses are counted
+    // instead (ADR-0010).
+    clicks.onDouble(() => nodes.handleDoubleClick())
 
     const nodes = (this.nodes = new ChainNodes({
       app: this.app,
