@@ -1,12 +1,14 @@
-import { TFile, type App, type WorkspaceLeaf } from 'obsidian'
+import { TFile, normalizePath, type App, type WorkspaceLeaf } from 'obsidian'
 import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoices'
 import {
+  chainEdits,
   chainNodeData,
   parameterEdits,
   runEdits,
   type ChainNodeElement,
   type MaybeNodeElement,
   type NodeEdit,
+  type NodeReshape,
   type NodeRunStatus,
   type NodeTarget,
 } from './chainNode'
@@ -34,6 +36,8 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
+import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
+import type { ChainSummary } from '../engine/types'
 import type { FramedPanel, RunFrame } from '../run/runFrame'
 
 /**
@@ -184,9 +188,11 @@ export interface NodeSurface {
   /** Whether the tab in front of the reader is a drawing to put a node on. */
   hasActiveDrawing(): boolean
   /** Puts a built node on that drawing, at the cursor, and saves. */
-  place(elements: ChainNodeElement[]): Promise<void>
+  place(elements: ChainNodeElement[], on?: DrawingView): Promise<void>
   /** Rewrites a node's parameter in place. `false` means the node is no longer there. */
   setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
+  /** Re-shapes a node around another chain. `false` means the node is no longer there. */
+  setChain(target: NodeTarget, chain: ChainSummary, value?: string, on?: DrawingView): Promise<boolean>
   /** What a node is bound to and where it sits; `undefined` when it is gone. */
   read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
   /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
@@ -262,8 +268,8 @@ export function createNodeSurface(app: App): NodeSurface {
 
     hasActiveDrawing: () => activeDrawing(app) !== undefined,
 
-    place: async elements => {
-      const { ea } = bind()
+    place: async (elements, on) => {
+      const { ea } = bind(on)
       const ids = elements.map(element => draw(ea, element))
       // One group, so the node's elements move, copy and delete together.
       if (ids.length > 1) ea.addToGroup(ids)
@@ -274,6 +280,11 @@ export function createNodeSurface(app: App): NodeSurface {
     setParameter: async (target, value, on) => {
       const { ea } = bind(on)
       return write(ea, parameterEdits(ea.getViewElements(), target, value))
+    },
+
+    setChain: async (target, chain, value, on) => {
+      const { ea } = bind(on)
+      return write(ea, chainEdits(ea.getViewElements(), target, chain, value))
     },
 
     setRunStatus: async (target, status, on) => {
@@ -464,15 +475,28 @@ function withoutProposal(custom: unknown): unknown {
   return Object.keys(rest).length === 0 ? undefined : rest
 }
 
-/** `false` means the node was deleted between the click and the write. */
-async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): Promise<boolean> {
+/**
+ * One change to a node on the scene, saved once. `false` means the node was
+ * deleted between the click and the write. Not repositioned to the cursor: the
+ * coordinates are the node's own.
+ */
+async function write(
+  ea: ExcalidrawAutomate,
+  change: NodeEdit<SceneElement>[] | NodeReshape<SceneElement>,
+): Promise<boolean> {
+  const { edits, additions, removals } = Array.isArray(change)
+    ? { edits: change, additions: [], removals: [] }
+    : change
   if (edits.length === 0) return false
+
   // The copies keep their ids, so writing them back updates the node in place.
-  ea.copyViewElementsToEAforEditing(edits.map(edit => edit.element))
+  ea.copyViewElementsToEAforEditing([...edits.map(edit => edit.element), ...removals])
   for (const edit of edits) {
     const element = ea.getElement(edit.element.id)
     if (!element) continue
     element.customData = { chainRunner: edit.data }
+    if (edit.y !== undefined) element.y = edit.y
+    if (edit.height !== undefined) element.height = edit.height
     if (edit.text === undefined) continue
     const wasWide = element.width ?? 0
     element.text = edit.text
@@ -481,6 +505,19 @@ async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): P
     ea.refreshTextElementSize?.(element.id)
     if (edit.keepRightEdge) element.x = (element.x ?? 0) + wasWide - (element.width ?? 0)
   }
+  for (const element of removals) {
+    const live = ea.getElement(element.id)
+    if (live) live.isDeleted = true
+  }
+  // A line drawn now claims the node's group and frame; only a drop is worked out.
+  const box = edits.find(edit => edit.data.role === 'box')?.element
+  for (const element of additions) {
+    const made = ea.getElement(draw(ea, element))
+    if (!made) continue
+    if (box?.groupIds) made.groupIds = [...box.groupIds]
+    if (box?.frameId) made.frameId = box.frameId
+  }
+
   await ea.addElementsToView(false, true)
   return true
 }
@@ -550,11 +587,46 @@ function activeDrawing(app: App): unknown | undefined {
   return leaf?.view.getViewType() === EXCALIDRAW_VIEW ? leaf.view : undefined
 }
 
-function automate(app: App): ExcalidrawAutomate | undefined {
+/** Excalidraw's own plugin instance, or `undefined` when it is not loaded. */
+function excalidrawPlugin(app: App): ExcalidrawPluginInstance | undefined {
   // Through the plugin instance, not the window global, to keep the dependency
   // explicit (`docs/spike-ea.md`).
-  const plugins = (app as unknown as { plugins?: { plugins?: Record<string, { ea?: ExcalidrawAutomate }> } }).plugins
-  return plugins?.plugins?.[PLUGIN_ID]?.ea
+  const plugins = (app as unknown as { plugins?: { plugins?: Record<string, ExcalidrawPluginInstance> } }).plugins
+  return plugins?.plugins?.[PLUGIN_ID]
+}
+
+/** The slice of Excalidraw's plugin object this plugin reads. */
+interface ExcalidrawPluginInstance {
+  ea?: ExcalidrawAutomate
+  settings?: { scriptFolderPath?: string }
+}
+
+function automate(app: App): ExcalidrawAutomate | undefined {
+  return excalidrawPlugin(app)?.ea
+}
+
+/**
+ * The folder Excalidraw loads its scripts from; its own setting, and its own
+ * default. `undefined` when Excalidraw is not there — a vault without it has no
+ * use for a script folder, and nothing should make one.
+ */
+export function scriptFolder(app: App): string | undefined {
+  const plugin = excalidrawPlugin(app)
+  if (!plugin) return undefined
+  return normalizePath(plugin.settings?.scriptFolderPath?.trim() || DEFAULT_SCRIPT_FOLDER)
+}
+
+/** The vault as the toolbar script is written to it, folders made on the way. */
+export function createScriptVault(app: App): ScriptVault {
+  const adapter = app.vault.adapter
+  return {
+    read: async path => ((await adapter.exists(path)) ? adapter.read(path) : undefined),
+    write: async (path, content) => {
+      const folder = path.slice(0, path.lastIndexOf('/'))
+      if (folder && !(await adapter.exists(folder))) await adapter.mkdir(folder)
+      await adapter.write(path, content)
+    },
+  }
 }
 
 /**

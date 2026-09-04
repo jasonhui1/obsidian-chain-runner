@@ -119,6 +119,7 @@ function makeExpand(): Expand {
     hasActiveDrawing: () => true,
     place: () => Promise.resolve(),
     setParameter: () => Promise.resolve(true),
+    setChain: () => Promise.resolve(true),
     read: () => undefined,
     setRunStatus: () => Promise.resolve(true),
     placeRun: () => Promise.resolve(true),

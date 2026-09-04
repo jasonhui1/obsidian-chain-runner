@@ -6,7 +6,7 @@ import { EngineStatus } from './engine/status'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
-import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
+import { createDrawingSurface, createNodeSurface, createScriptVault, registerLinkHook, scriptFolder } from './ui/excalidraw'
 import { Expand, newProposalId } from './ui/expand'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
@@ -18,6 +18,7 @@ import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
+import { installScript } from './ui/toolScript'
 
 export default class ChainRunnerPlugin extends Plugin {
   // Obsidian declares `settings?: unknown` on Plugin for subclasses to narrow.
@@ -29,6 +30,7 @@ export default class ChainRunnerPlugin extends Plugin {
 
   private pill: HTMLElement | undefined
   private quickRun!: QuickRunner
+  private nodes!: ChainNodes
 
   override async onload(): Promise<void> {
     this.settings = withDefaults(await this.loadData())
@@ -112,7 +114,7 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the click that started it; unloading the plugin ends it.
     this.register(() => nodeRun.stop())
 
-    const nodes = new ChainNodes({
+    const nodes = (this.nodes = new ChainNodes({
       app: this.app,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
@@ -120,7 +122,8 @@ export default class ChainRunnerPlugin extends Plugin {
       surface,
       newNodeId,
       run: (data, element, view) => void nodeRun.run(data, element, view),
-    })
+      isRunning: nodeId => nodeRun.isRunning(nodeId),
+    }))
     const expand = new Expand({
       app: this.app,
       engine: this.engine,
@@ -149,6 +152,13 @@ export default class ChainRunnerPlugin extends Plugin {
       removeLinkHook = registerLinkHook(this.app, (element, view) =>
         [expand, nodes].every(handler => handler.handleLinkClick(element, view)),
       )
+      // The toolbar button is a file in the vault, and Excalidraw names the folder.
+      const folder = scriptFolder(this.app)
+      if (folder) {
+        void installScript(createScriptVault(this.app), folder).catch(() => {
+          new Notice('Chain Runner could not write its Excalidraw toolbar script.')
+        })
+      }
     })
 
     this.addSettingTab(new ChainRunnerSettingTab(this.app, this))
@@ -203,6 +213,14 @@ export default class ChainRunnerPlugin extends Plugin {
         })
       },
     })
+  }
+
+  /**
+   * What the Excalidraw toolbar script calls — this plugin's one caller from
+   * outside it. The view is the drawing the button was pressed on.
+   */
+  addChainNode(view?: unknown): Promise<void> {
+    return this.nodes.placeUnset(view)
   }
 
   /**

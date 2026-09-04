@@ -8,8 +8,11 @@ import { momentOf, parameterToAsk, type ChainSummary } from '../engine/types'
  * link needs its own element. `src/ui/excalidraw.ts` puts them on a scene.
  */
 
-/** Which part of the node an element is. Stored on it, so a click knows what was clicked. */
-export type ChainNodeRole = 'box' | 'title' | 'moment' | 'parameter' | 'run'
+/**
+ * Which part of the node an element is. Stored on it, so a click knows what was
+ * clicked. `title` is a legacy alias for `chain` (ADR-0009).
+ */
+export type ChainNodeRole = 'box' | 'chain' | 'moment' | 'parameter' | 'run' | 'title'
 
 /**
  * The node's identity, in each element's `customData`. Stamped on all five so a
@@ -49,17 +52,23 @@ export interface MaybeNodeElement {
   customData?: unknown
   /** Excalidraw's own grouping. Re-made on copy, which is what separates two copies. */
   groupIds?: readonly string[]
+  x?: number
+  y?: number
 }
 
 /**
  * The links the two clickable lines carry. A scheme of our own, so a click that
  * escapes the hook fails as an unopenable link rather than creating a note.
  */
+export const CHAIN_LINK = 'chain-runner://chain'
 export const PARAMETER_LINK = 'chain-runner://parameter'
 export const RUN_LINK = 'chain-runner://run'
 
 /** Said in the dropdown line before anything has been picked. */
 export const UNSET_PARAMETER = 'unset'
+
+/** Said on the chain line of a node placed before any chain was picked. */
+export const UNSET_CHAIN = 'pick a chain'
 
 /** The key the node's identity lives under, inside Excalidraw's `customData`. */
 const DATA_KEY = 'chainRunner'
@@ -87,6 +96,11 @@ export interface ChainNodeOptions {
   parameterValue?: string
 }
 
+/** The chain line: the mark, the chain's name, and the marker saying it can be changed. */
+export function chainLabel(name: string | undefined): string {
+  return `${TITLE_MARK} ${name || UNSET_CHAIN} ${DROPDOWN_MARK}`
+}
+
 /** The dropdown line: the parameter's name, the marker, and what it is set to. */
 export function parameterLabel(name: string, value: string | undefined): string {
   return `${name} ${DROPDOWN_MARK} ${value || UNSET_PARAMETER}`
@@ -96,14 +110,14 @@ export function parameterLabel(name: string, value: string | undefined): string 
  * The node's elements, top-left at the origin — the caller moves the set to the
  * cursor. The box comes first so every line sits on top of it.
  */
-export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): ChainNodeElement[] {
-  const parameter = parameterToAsk(chain)
+export function buildChainNode(chain: ChainSummary | undefined, options: ChainNodeOptions): ChainNodeElement[] {
+  const parameter = chain ? parameterToAsk(chain) : undefined
   const data = (role: ChainNodeRole): { chainRunner: ChainNodeData } => ({
     chainRunner: {
       nodeId: options.nodeId,
       role,
-      chain: chain.slug,
-      chainName: chain.name,
+      chain: chain?.slug ?? '',
+      chainName: chain?.name ?? '',
       ...(parameter ? { parameterName: parameter.name } : {}),
       ...(options.parameterValue ? { parameterValue: options.parameterValue } : {}),
     },
@@ -132,8 +146,8 @@ export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): 
     y += height + LINE_GAP
   }
 
-  line('title', `${TITLE_MARK} ${chain.name}`, TITLE_SIZE, INK)
-  const moment = momentOf(chain)
+  line('chain', chainLabel(chain?.name), TITLE_SIZE, LINK_BLUE, CHAIN_LINK)
+  const moment = chain ? momentOf(chain) : ''
   if (moment) line('moment', `“${moment}”`, LINE_SIZE, GREY)
   if (parameter) {
     line('parameter', parameterLabel(parameter.name, options.parameterValue), LINE_SIZE, LINK_BLUE, PARAMETER_LINK)
@@ -210,7 +224,19 @@ export function chainNodeData(element: MaybeNodeElement): ChainNodeData | undefi
 }
 
 function isRole(role: unknown): role is ChainNodeRole {
-  return role === 'box' || role === 'title' || role === 'moment' || role === 'parameter' || role === 'run'
+  return ROLES.includes(role as ChainNodeRole)
+}
+
+const ROLES: ChainNodeRole[] = ['box', 'chain', 'moment', 'parameter', 'run', 'title']
+
+/** The role a stored one means now, so a node drawn before the chain line was clickable still reads. */
+export function chainNodeRole(role: ChainNodeRole): Exclude<ChainNodeRole, 'title'> {
+  return role === 'title' ? 'chain' : role
+}
+
+/** A node placed by the toolbar button, before its chain was picked. */
+export function chainIsUnset(data: ChainNodeData): boolean {
+  return data.chain === ''
 }
 
 /**
@@ -230,6 +256,10 @@ export interface NodeEdit<E> {
   text?: string
   /** The `run` line sits against the box's right edge; a grown label moves left. */
   keepRightEdge?: boolean
+  /** Where the line sits now, when a re-shaped node moved it. */
+  y?: number
+  /** The box's own height, when the lines inside it changed. */
+  height?: number
   data: ChainNodeData
 }
 
@@ -257,6 +287,62 @@ export function parameterEdits<E extends MaybeNodeElement>(
     })
   }
   return edits
+}
+
+/** What the node becomes when its chain is changed (ADR-0009). */
+export interface NodeReshape<E> {
+  /** Elements already on the drawing, with their new words and place. */
+  edits: NodeEdit<E>[]
+  /** Lines the new chain has and the old did not, at their place on the drawing. */
+  additions: ChainNodeElement[]
+  /** Lines the new chain does not have. */
+  removals: E[]
+}
+
+/** An empty reshape: the node is no longer on the drawing. */
+const NOTHING: NodeReshape<never> = { edits: [], additions: [], removals: [] }
+
+/** Only `y` moves: every line but `run` is left-aligned, and `run`'s words do not change (ADR-0009). */
+export function chainEdits<E extends MaybeNodeElement>(
+  scene: readonly E[],
+  target: NodeTarget,
+  chain: ChainSummary,
+  parameterValue?: string,
+): NodeReshape<E> {
+  const mine = scene.flatMap(element => {
+    const data = nodeElementData(element, target)
+    return data ? [{ element, role: chainNodeRole(data.role) }] : []
+  })
+  const box = mine.find(one => one.role === 'box')
+  if (!box) return NOTHING
+
+  const x = box.element.x ?? 0
+  const y = box.element.y ?? 0
+  const wanted = buildChainNode(chain, {
+    nodeId: target.nodeId,
+    ...(parameterValue ? { parameterValue } : {}),
+  })
+
+  const edits: NodeEdit<E>[] = []
+  const additions: ChainNodeElement[] = []
+  for (const shape of wanted) {
+    const found = mine.find(one => one.role === shape.role)
+    if (!found) {
+      additions.push({ ...shape, x: x + shape.x, y: y + shape.y })
+      continue
+    }
+    edits.push({
+      element: found.element,
+      y: y + shape.y,
+      // The `run` line's words are its run's, not its chain's.
+      ...(shape.role === 'run' || shape.role === 'box' ? {} : { text: shape.text ?? '' }),
+      ...(shape.role === 'box' ? { height: shape.height } : {}),
+      data: shape.customData.chainRunner,
+    })
+  }
+
+  const kept = new Set(wanted.map(shape => shape.role))
+  return { edits, additions, removals: mine.filter(one => !kept.has(one.role)).map(one => one.element) }
 }
 
 /** The one test for "is this element part of that node", used reading and writing. */

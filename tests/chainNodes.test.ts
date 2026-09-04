@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { CHAIN_GONE, ChainNodes, NODE_GONE, NO_DRAWING, NO_PARAMETER } from '@/ui/chainNodes'
+import { CHAIN_GONE, ChainNodes, NODE_GONE, NO_CHAINS, NO_DRAWING, NO_PARAMETER, RUNNING_NOW } from '@/ui/chainNodes'
 import { chainNodeData, type ChainNodeElement } from '@/ui/chainNode'
 import type { NodeSurface } from '@/ui/excalidraw'
 import type { EngineClient } from '@/engine/client'
@@ -26,11 +26,15 @@ let chains: ChainSummary[]
 let online: boolean
 let notices: string[]
 let placed: ChainNodeElement[][]
+let placedOn: unknown[]
 let parameterSet: { nodeId: string; value: string; on?: unknown }[]
 let onDrawing: string[]
 let unavailable: string | undefined
 let drawingOpen: boolean
 let runs: { nodeId: string; groupIds?: readonly string[]; view?: unknown }[]
+let chainSet: { nodeId: string; chain: string; value?: string; on?: unknown }[]
+/** The nodes with a run going, which is when a chain is not changed underneath one. */
+let running: string[]
 
 /** Lets the writes a picked row sets off finish before the assertions. */
 const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
@@ -47,9 +51,15 @@ function makeNodes(): ChainNodes {
     read: () => undefined,
     setRunStatus: () => Promise.resolve(true),
     placeRun: () => Promise.resolve(true),
-    place: elements => {
+    place: (elements, on) => {
       placed.push(elements)
+      placedOn.push(on)
       return Promise.resolve()
+    },
+    setChain: (target, chain, value, on) => {
+      if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
+      chainSet.push({ nodeId: target.nodeId, chain: chain.slug, value, on })
+      return Promise.resolve(true)
     },
     setParameter: (target, value, on) => {
       if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
@@ -66,6 +76,7 @@ function makeNodes(): ChainNodes {
     surface,
     newNodeId: () => 'n-new',
     run: (data, element, view) => runs.push({ nodeId: data.nodeId, groupIds: element.groupIds, view }),
+    isRunning: nodeId => running.includes(nodeId),
   })
 }
 
@@ -89,6 +100,9 @@ beforeEach(() => {
   online = true
   notices = []
   placed = []
+  placedOn = []
+  chainSet = []
+  running = []
   parameterSet = []
   onDrawing = ['n-1']
   unavailable = undefined
@@ -124,7 +138,7 @@ describe('adding a chain node', () => {
     await flush()
 
     expect(openedModals).toHaveLength(1)
-    expect(placed[0]?.map(one => chainNodeData(one)?.role)).toEqual(['box', 'title', 'moment', 'run'])
+    expect(placed[0]?.map(one => chainNodeData(one)?.role)).toEqual(['box', 'chain', 'moment', 'run'])
   })
 
   it('says what is missing when Excalidraw is not there, and opens nothing', async () => {
@@ -235,5 +249,127 @@ describe('clicking the node’s links', () => {
     lastModal()?.choose(0)
     await flush()
     expect(notices).toEqual([NODE_GONE])
+  })
+})
+
+describe('dropping a node with no chain yet', () => {
+  it('places one with nothing picked, so the chain is chosen on the node', async () => {
+    await makeNodes().placeUnset()
+    expect(placed).toHaveLength(1)
+    expect(chainNodeData(placed[0]?.[0] as ChainNodeElement)).toMatchObject({ nodeId: 'n-new', chain: '' })
+  })
+
+  it('opens no picker at all — that is the point of the button', async () => {
+    await makeNodes().placeUnset()
+    expect(openedModals).toHaveLength(0)
+  })
+
+  it('places it on the drawing the button was pressed on', async () => {
+    const view = { drawing: true }
+    await makeNodes().placeUnset(view)
+    expect(placedOn).toEqual([view])
+  })
+
+  it('says so when there is no drawing to put one on', async () => {
+    drawingOpen = false
+    await makeNodes().placeUnset()
+    expect(notices).toEqual([NO_DRAWING])
+    expect(placed).toEqual([])
+  })
+
+  it('says why when Excalidraw cannot be used', async () => {
+    unavailable = 'Excalidraw is too old'
+    await makeNodes().placeUnset()
+    expect(notices).toEqual(['Excalidraw is too old'])
+  })
+})
+
+describe('clicking the chain line', () => {
+  const chainLine = (over: Record<string, unknown> = {}): { customData?: unknown } =>
+    element({ role: 'chain', ...over })
+
+  it('swallows the click, so the drawing never opens the link', () => {
+    expect(makeNodes().handleLinkClick(chainLine())).toBe(false)
+  })
+
+  it('offers the workspace chains, then writes the one picked', async () => {
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
+    lastModal()?.choose(1)
+    await flush()
+    expect(chainSet).toEqual([{ nodeId: 'n-1', chain: 'relay', value: undefined, on: undefined }])
+  })
+
+  it('asks for the new chain dropdown when it declares one', async () => {
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    lastModal()?.choose(0)
+    expect(lastModal()?.placeholder).toBe('Choose audience')
+    lastModal()?.choose(1)
+    await flush()
+    expect(chainSet[0]).toMatchObject({ chain: 'five-personas', value: 'founders' })
+  })
+
+  it('writes to the drawing the click came from', async () => {
+    const view = { drawing: true }
+    makeNodes().handleLinkClick(chainLine(), view)
+    await flush()
+    lastModal()?.choose(1)
+    await flush()
+    expect(chainSet[0]?.on).toBe(view)
+  })
+
+  it('rewrites only the copy of the node that was clicked', async () => {
+    makeNodes().handleLinkClick({ ...chainLine(), groupIds: ['g-1'] })
+    await flush()
+    lastModal()?.choose(1)
+    await flush()
+    expect(chainSet).toHaveLength(1)
+  })
+
+  it('says the node is gone when it was deleted between the click and the pick', async () => {
+    onDrawing = []
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    lastModal()?.choose(1)
+    await flush()
+    expect(notices).toEqual([NODE_GONE])
+  })
+
+  it('says why when Excalidraw cannot be used, and opens nothing', async () => {
+    unavailable = 'Excalidraw is too old'
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    expect(notices).toEqual(['Excalidraw is too old'])
+    expect(openedModals).toHaveLength(0)
+  })
+
+  it('opens nothing when the engine cannot be reached', async () => {
+    online = false
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    expect(openedModals).toHaveLength(0)
+  })
+
+  it('says there is nothing to choose from when the workspace has no chains', async () => {
+    chains = []
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    expect(notices).toEqual([NO_CHAINS])
+  })
+
+  it('refuses to change the chain of a node that is running', async () => {
+    running = ['n-1']
+    makeNodes().handleLinkClick(chainLine())
+    await flush()
+    expect(notices).toEqual([RUNNING_NOW])
+    expect(openedModals).toHaveLength(0)
+  })
+
+  it('answers a click on a node drawn before the chain line was clickable', async () => {
+    makeNodes().handleLinkClick(chainLine({ role: 'title' }))
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
   })
 })

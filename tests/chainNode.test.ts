@@ -1,10 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import {
+  CHAIN_LINK,
   PARAMETER_LINK,
   RUN_LINK,
   UNSET_PARAMETER,
+  UNSET_CHAIN,
   buildChainNode,
+  chainEdits,
+  chainIsUnset,
   chainNodeData,
+  chainNodeRole,
   parameterEdits,
   parameterLabel,
 } from '@/ui/chainNode'
@@ -38,7 +43,7 @@ function byRole(elements: ChainNodeElement[], role: string): ChainNodeElement {
 
 describe('building a chain node', () => {
   it('holds a box, the title, the moment, the parameter and Run', () => {
-    expect(roles(build())).toEqual(['box', 'title', 'moment', 'parameter', 'run'])
+    expect(roles(build())).toEqual(['box', 'chain', 'moment', 'parameter', 'run'])
   })
 
   it('draws the box first, so every line sits on top of it', () => {
@@ -47,7 +52,7 @@ describe('building a chain node', () => {
 
   it('shows the chain name and its moment', () => {
     const elements = build()
-    expect(byRole(elements, 'title').text).toContain('Five Personas')
+    expect(byRole(elements, 'chain').text).toContain('Five Personas')
     expect(byRole(elements, 'moment').text).toBe('“when a premise feels safe”')
   })
 
@@ -57,15 +62,15 @@ describe('building a chain node', () => {
   })
 
   it('leaves the moment line out when the chain says neither', () => {
-    expect(roles(build({ moment: undefined, description: undefined }))).toEqual(['box', 'title', 'parameter', 'run'])
+    expect(roles(build({ moment: undefined, description: undefined }))).toEqual(['box', 'chain', 'parameter', 'run'])
   })
 
   it('leaves the parameter line out when the chain declares no dropdown', () => {
-    expect(roles(build({ parameter: undefined }))).toEqual(['box', 'title', 'moment', 'run'])
+    expect(roles(build({ parameter: undefined }))).toEqual(['box', 'chain', 'moment', 'run'])
   })
 
   it('leaves it out when the dropdown has no options to choose between', () => {
-    expect(roles(build({ parameter: { name: 'audience', options: [] } }))).toEqual(['box', 'title', 'moment', 'run'])
+    expect(roles(build({ parameter: { name: 'audience', options: [] } }))).toEqual(['box', 'chain', 'moment', 'run'])
   })
 
   it('reads the parameter as name, marker and value', () => {
@@ -79,7 +84,7 @@ describe('building a chain node', () => {
   it('links only the two lines a click means something on', () => {
     expect(build().map(element => [element.role, element.link])).toEqual([
       ['box', undefined],
-      ['title', undefined],
+      ['chain', CHAIN_LINK],
       ['moment', undefined],
       ['parameter', PARAMETER_LINK],
       ['run', RUN_LINK],
@@ -108,29 +113,29 @@ describe('building a chain node', () => {
     const elements = build()
     const box = byRole(elements, 'box')
     const run = byRole(elements, 'run')
-    const leftPadding = byRole(elements, 'title').x - box.x
+    const leftPadding = byRole(elements, 'chain').x - box.x
     expect(run.x).toBeGreaterThan(box.x + box.width / 2)
     expect(box.x + box.width - (run.x + run.width)).toBeCloseTo(leftPadding, 5)
   })
 
   it('trims a line too long to fit, rather than letting it wrap out of the box', () => {
     const elements = build({ name: 'A'.repeat(200), moment: 'B'.repeat(200) })
-    const title = byRole(elements, 'title')
+    const chainLine = byRole(elements, 'chain')
     const moment = byRole(elements, 'moment')
-    expect(title.text?.endsWith('…')).toBe(true)
+    expect(chainLine.text?.endsWith('…')).toBe(true)
     expect(moment.text?.endsWith('…')).toBe(true)
     // Still one line each, so the box is the height the builder said it was.
-    expect(title.text?.length).toBeLessThan(60)
+    expect(chainLine.text?.length).toBeLessThan(60)
     expect(moment.text?.length).toBeLessThan(60)
   })
 
   it('leaves a line that already fits exactly as it is', () => {
-    expect(byRole(build(), 'title').text).toBe('⛓ Five Personas')
+    expect(byRole(build(), 'chain').text).toBe('⛓ Five Personas ▾')
   })
 
-  it('draws the moment greyer than the title', () => {
+  it('draws the moment greyer than the chain line', () => {
     const elements = build()
-    expect(byRole(elements, 'moment').strokeColor).not.toBe(byRole(elements, 'title').strokeColor)
+    expect(byRole(elements, 'moment').strokeColor).not.toBe(byRole(elements, 'chain').strokeColor)
   })
 
   it('places the node at the origin, so the drawing decides where it lands', () => {
@@ -226,5 +231,124 @@ describe('the parameter label', () => {
 
   it('says unset rather than trailing off', () => {
     expect(parameterLabel('audience', undefined)).toBe(`audience ▾ ${UNSET_PARAMETER}`)
+  })
+})
+
+describe('a node placed before its chain is picked', () => {
+  const blank = (): ChainNodeElement[] => buildChainNode(undefined, { nodeId: 'n-blank' })
+
+  it('holds only the box, the chain line and Run', () => {
+    expect(roles(blank())).toEqual(['box', 'chain', 'run'])
+  })
+
+  it('says on the chain line that there is a chain to pick', () => {
+    expect(byRole(blank(), 'chain').text).toBe(`⛓ ${UNSET_CHAIN} ▾`)
+  })
+
+  it('leaves that line clickable, which is the whole point of it', () => {
+    expect(byRole(blank(), 'chain').link).toBe(CHAIN_LINK)
+  })
+
+  it('reads back as a node with no chain, so a run says so instead of failing', () => {
+    const data = chainNodeData(blank()[0])
+    expect(data && chainIsUnset(data)).toBe(true)
+  })
+
+  it('does not call a node with a chain unset', () => {
+    const data = chainNodeData(build()[0])
+    expect(data && chainIsUnset(data)).toBe(false)
+  })
+})
+
+describe('a node drawn before the chain line was clickable', () => {
+  it('reads its title line as the chain line', () => {
+    expect(chainNodeRole('title')).toBe('chain')
+  })
+
+  it('still reads back, so an old node keeps working', () => {
+    const stamp = { nodeId: 'n-1', role: 'title', chain: 'five-personas', chainName: 'Five Personas' }
+    expect(chainNodeData({ customData: { chainRunner: stamp } })?.role).toBe('title')
+  })
+})
+
+describe('changing which chain a node runs', () => {
+  const relay: ChainSummary = { slug: 'relay', name: 'Relay', moment: 'when an idea is handed on' }
+  const bare: ChainSummary = { slug: 'bare', name: 'Bare' }
+
+  /** The node as it sits on a drawing: built at the origin, then moved. */
+  const placed = (over: Partial<ChainSummary> = {}, value?: string): ChainNodeElement[] =>
+    buildChainNode(chain(over), { nodeId: 'n-1', ...(value ? { parameterValue: value } : {}) }).map(
+      (element, index) => ({ ...element, id: `e-${index}`, x: element.x + 100, y: element.y + 40 }),
+    )
+
+  const scene = (over: Partial<ChainSummary> = {}, value?: string): ChainNodeElement[] => [
+    ...placed(over, value),
+    ...buildChainNode(chain({ slug: 'other' }), { nodeId: 'n-2' }),
+  ]
+
+  const editText = (reshape: ReturnType<typeof chainEdits<ChainNodeElement>>, role: string): string | undefined =>
+    reshape.edits.find(edit => edit.data.role === role)?.text
+
+  it('rewrites the chain line, the moment and the parameter together', () => {
+    const reshape = chainEdits(scene({}, 'engineers'), { nodeId: 'n-1' }, relay)
+    expect(editText(reshape, 'chain')).toBe('⛓ Relay ▾')
+    expect(editText(reshape, 'moment')).toBe('“when an idea is handed on”')
+    expect(reshape.removals).toHaveLength(1)
+  })
+
+  it('re-stamps every element with the new chain, so a copy of any line runs it', () => {
+    const reshape = chainEdits(scene(), { nodeId: 'n-1' }, relay)
+    for (const edit of reshape.edits) expect(edit.data).toMatchObject({ chain: 'relay', chainName: 'Relay' })
+  })
+
+  it('drops the parameter line when the new chain declares no dropdown', () => {
+    const reshape = chainEdits(scene({}, 'engineers'), { nodeId: 'n-1' }, relay)
+    const dropped = reshape.removals.map(element => chainNodeData(element)?.role)
+    expect(dropped).toEqual(['parameter'])
+  })
+
+  it('carries the value the reader picked for the new chain', () => {
+    const reshape = chainEdits(scene(), { nodeId: 'n-1' }, chain({ slug: 'again' }), 'founders')
+    expect(editText(reshape, 'parameter')).toBe('audience ▾ founders')
+  })
+
+  it('draws a line the old chain did not have, at its place on the drawing', () => {
+    const reshape = chainEdits(scene({ moment: undefined, description: undefined }), { nodeId: 'n-1' }, relay)
+    expect(reshape.additions.map(one => one.role)).toEqual(['moment'])
+    const box = reshape.edits.find(edit => edit.data.role === 'box')
+    expect(box?.element.x).toBe(100)
+    expect(reshape.additions[0]?.x).toBeGreaterThan(100)
+    expect(reshape.additions[0]?.y).toBeGreaterThan(40)
+  })
+
+  it('keeps the box, so the arrows bound into the node survive the change', () => {
+    const reshape = chainEdits(scene(), { nodeId: 'n-1' }, bare)
+    expect(reshape.removals.map(element => chainNodeData(element)?.role).sort()).toEqual(['moment', 'parameter'])
+    expect(reshape.edits.some(edit => edit.data.role === 'box')).toBe(true)
+  })
+
+  it('closes the box up when the node lost lines', () => {
+    const tall = chainEdits(scene(), { nodeId: 'n-1' }, chain({ slug: 'again' }))
+    const short = chainEdits(scene(), { nodeId: 'n-1' }, bare)
+    const height = (reshape: typeof tall): number | undefined =>
+      reshape.edits.find(edit => edit.data.role === 'box')?.height
+    expect(height(short)).toBeLessThan(height(tall) ?? 0)
+  })
+
+  it('moves Run up with the lines above it, and leaves its words to its run', () => {
+    const reshape = chainEdits(scene(), { nodeId: 'n-1' }, bare)
+    const run = reshape.edits.find(edit => edit.data.role === 'run')
+    expect(run?.text).toBeUndefined()
+    expect(run?.y).toBeLessThan(placed().find(one => one.role === 'run')?.y ?? 0)
+  })
+
+  it('leaves every other node alone', () => {
+    const reshape = chainEdits(scene(), { nodeId: 'n-1' }, relay)
+    for (const edit of reshape.edits) expect(edit.data.nodeId).toBe('n-1')
+    expect(reshape.removals.every(element => chainNodeData(element)?.nodeId === 'n-1')).toBe(true)
+  })
+
+  it('touches nothing when the node is no longer on the drawing', () => {
+    expect(chainEdits(scene(), { nodeId: 'n-gone' }, relay)).toEqual({ edits: [], additions: [], removals: [] })
   })
 })

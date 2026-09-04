@@ -24,6 +24,8 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | `getViewSelectedElements` | #12 |
 | `getViewFileForImageElement` | #12 |
 | `isDeleted = true` on a copied element | #12 — this is how a scripted element is removed |
+| `settings.scriptFolderPath`, the script engine's file shapes | #20 — read out of their `main.js` |
+| `groupIds` copied onto a scripted element | #20 — how a new line joins a node already on the scene |
 
 `addFrame`, `addArrow`, `getViewSelectedElements` and
 `getViewFileForImageElement` are feature-detected rather than assumed. A build
@@ -92,6 +94,44 @@ Excalidraw re-makes the **group** on copy: that is what distinguishes them.
 Give each feature its own `customData` key, and clear only your own key when you
 un-stamp an element — another plugin's stamp on the same element is not yours to
 drop.
+
+## The script engine, and the toolbar
+
+A plugin cannot add a tool to Excalidraw's shape strip — that strip is their own
+React component. Their **script engine** is the way onto the canvas, and it was
+read out of `main.js` at 2.26.4:
+
+- Scripts are files under `plugin.settings.scriptFolderPath` (default
+  `Excalidraw/Scripts`). Excalidraw watches the folder and loads on change.
+- A script is an **`.md` file that is JavaScript**. Excalidraw strips a YAML
+  frontmatter block and hands the rest to `new AsyncFunction("ea","utils", body)`.
+  A code fence would be a syntax error, not a code block.
+- The button's icon is an **`.svg` file beside the script with the same
+  basename** (`getIMGFilename(path, "svg")`). Without it the button is a cog.
+- Each script also becomes a command, named `(Script) <name>`.
+- Scripts render as icon buttons in the **Obsidian Tools Panel**, reached by the
+  gem in the canvas's top-right. A tap runs one; a **1.5-second press** pins it
+  (toast `Pinned: <name>`). Pinned scripts render as buttons beside the gem.
+
+Only `ea` and `utils` are in scope — no `Notice`, no `app` of its own. `ea.plugin.app`
+is the way to Obsidian and `ea.targetView` is the drawing the button was pressed
+on. `throw` is all a script has for saying something went wrong.
+
+So the button ships as two files this plugin writes into that folder on load
+(`src/ui/toolScript.ts`), and the reader pins it once. Only changed content is
+written: Excalidraw reloads a script on every file change.
+
+## Re-shaping a node in place
+
+Changing which chain a node runs is not a text rewrite — the moment and the
+dropdown belong to the chain, so lines appear, disappear and move. Two things
+this constrains:
+
+- **Keep the box.** Arrows bind to element ids, so deleting and redrawing the
+  node would drop every input bound into it. `chainEdits` matches a freshly
+  built node against what is there by role, and only adds and removes lines.
+- **A line drawn now claims its own `groupIds` and `frameId`**, copied off the
+  box. As with `frameId`, only a *drop* is worked out for you.
 
 ## Geometry and colour
 
