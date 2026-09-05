@@ -124,9 +124,11 @@ export class ChainNodes {
     if (!data) return
     this.lastView = view
     this.lastClick = { element, at: this.deps.now() }
-    // A node is one group, so the first click of a double names no line at all;
-    // this report is the drill-in that does (ADR-0010).
-    if (this.tookDouble()) {
+    // A node is one group, so the first click of a double names no line at all
+    // and this report is the drill-in that does (ADR-0010) — which makes a
+    // double the way to *every* line, not only `▶ Run`. Only that one is a run;
+    // the rest go on to open their picker as an ordinary click does.
+    if (this.tookDouble() && chainNodeRole(data.role) === 'run') {
       this.runFromGesture(element, view)
       return
     }

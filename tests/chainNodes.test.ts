@@ -618,11 +618,31 @@ describe('double-clicking a node', () => {
     expect(runs).toEqual([])
   })
 
-  it('opens the picker, and runs nothing, when the double drilled into another line', () => {
+  it('opens the picker, and runs nothing, when the double drilled into another line', async () => {
+    // A node is a group, so the double-click *is* how the chain line is reached.
     const nodes = makeNodes()
     nodes.handleDoubleClick()
     nodes.handleSelection(line('chain'))
+    await flush()
     expect(runs).toEqual([])
+    expect(lastModal()?.placeholder).toBe('Which chain should this node run?')
+  })
+
+  it('opens the dropdown when the double drilled into the parameter line', async () => {
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    nodes.handleSelection(line('parameter'))
+    await flush()
+    expect(lastModal()?.placeholder).toBe('Choose audience')
+  })
+
+  it('does not open a picker on the line it ran', async () => {
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    nodes.handleSelection(line('run'))
+    await flush()
+    expect(runs).toHaveLength(1)
+    expect(openedModals).toEqual([])
   })
 
   it('spends the double once, so the next click on ▶ Run does not run it', () => {

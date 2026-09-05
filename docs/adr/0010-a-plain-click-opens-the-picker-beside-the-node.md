@@ -143,6 +143,11 @@ line still work.
 picker; the second finds the click already claimed. A double is spent once for
 the same reason: the drill-in it acts on must not also run the next click.
 
+**The drill-in report serves every gesture, not just the double.** It is how a
+line is named at all, so the run takes it only when the line is `▶ Run`;
+everything else falls through and opens its picker. Consuming it outright breaks
+the chain picker, which is what shipping this first did.
+
 **Selecting a whole node names no line.** Every gesture that has to know *which*
 line was hit needs a single-element report, which on a grouped node only a
 double-click produces. A single click on a node that is not yet selected

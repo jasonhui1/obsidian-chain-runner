@@ -136,6 +136,13 @@ waits (ADR-0010).
 in different places, and a double-click on a shape that is not text opens no
 editor at all. Guard against both firing for one gesture.
 
+**The drill-in report is not the double-click's to keep.** Because a grouped
+node names no line until it is drilled into, that same report is how *every*
+gesture on a line is reached — a picker as much as a run. A double-click handler
+that consumes it, or returns early on it, silently breaks everything else on the
+node. Act on it only for what the double actually meant, and let the rest fall
+through to the ordinary click path.
+
 ## Putting a panel near a node
 
 **A true in-canvas dropdown is not available.** The canvas is their React
