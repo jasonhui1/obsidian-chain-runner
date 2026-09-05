@@ -11,7 +11,7 @@ ours. Add to this log when a vault teaches you something a test could not.
 
 ## Attested against
 
-Excalidraw **2.26.4**, Obsidian on Windows, 2026-09-04. The version floor the
+Excalidraw **2.26.4**, Obsidian on Windows, 2026-09-04 and 2026-09-05. The version floor the
 code enforces is 2.0.0; every call below predates it, but "predates" is not
 "verified" — the table says which have actually run.
 
@@ -28,7 +28,11 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | `style.fontSize` before `addText` | #20 — unset, every line draws at EA's default and the layout collapses |
 | `settings.scriptFolderPath`, the script engine's file shapes | #20 — read out of their `main.js` |
 | `groupIds` copied onto a scripted element | #20 — how a new line joins a node already on the scene |
-| the hook list, `onSceneChangeHook`'s shape and `appStateKeys` filter, `ea.FloatingModal`, `addText`'s `autoResize` | #21 — read out of their `main.js` at 2.26.4, **read, not run** |
+| the hook list, `ea.FloatingModal` | #21 — read out of their `main.js` at 2.26.4, **read, not run** |
+| `onSceneChangeHook` on `selectedElementIds` | #21 — **run**: a plain click reaches it, and a `SuggestModal` moved to the press opens beside the node |
+| `onSceneChangeHook` on `editingTextElement` | #21 — **run**: the editor opening is reported, on an already-selected element |
+| a group selecting as a group, and a double-click drilling in | #21 — **run**, and the reason a double-click took four attempts |
+| `addText`'s `autoResize: false`, and putting `fontSize` back after a group resize | #22 — **run**: a node dragged wider shows more of its words and holds its type size |
 
 `addFrame`, `addArrow`, `getViewSelectedElements` and
 `getViewFileForImageElement` are feature-detected rather than assumed. A build
@@ -96,25 +100,7 @@ change:
   that must know the line has to wait for a one-element report rather than act
   on the click;
 - **a second click on an already-selected element changes nothing**, so the hook
-  never fires for it. A double-click has to be found some other way, and the
-  obvious one does not work: letting the browser count the clicks and then asking
-  `getViewSelectedElements` returns nothing, because Excalidraw has opened its
-  **own text editor** on the element and that appears to clear the selection.
-  What does work is watching `appState.editingTextElement` — an element object
-  with an `id`, set when the editor opens, and reachable through the same
-  `appStateKeys` filter. It names the element instead of asking what is
-  selected. But the editor only opens on an element that was **already
-  selected**, so from an empty canvas that route costs three clicks: one to
-  select, then the double.
-
-  And **the browser's own `dblclick` never fires over the canvas at all** — it
-  captures the pointer, and the compatibility mouse events go with it. Do not
-  build on `dblclick` here. `pointerdown` and `pointerup` *do* arrive on
-  `document` in capture, so count the two clicks yourself and pair them with the
-  element the hook reported for the first
-  (`src/ui/pointerClicks.ts`, `src/ui/chainNodes.ts`). Keep the
-  `editingTextElement` route as well: the two fail in different places, and a
-  double-click on a shape that is not text opens no editor at all.
+  never fires for it.
 
 EA holds one of each hook, so the last installer wins; chain the previous one
 and put it back on unload, as `registerLinkHook` already does. Handlers claim
@@ -125,6 +111,30 @@ The full hook list at 2.26.4: `onCanvasColorChangeHook`, `onDropHook`,
 `onImageFilePathHook`, `onLinkClickHook`, `onLinkHoverHook`, `onPasteHook`,
 `onSceneChangeHook`, `onTriggerAutoexportHook`,
 `onUpdateElementLinkForExportHook`, `onViewModeChangeHook`, `onViewUnloadHook`.
+
+## Catching a double-click
+
+Attested on 2.26.4, and it took four vault runs because every attempt assumed
+something knowable at the moment of the gesture. **Nothing is.**
+
+**What works.** Count the two clicks yourself from `pointerdown`/`pointerup`,
+then *wait* — arm a short window and act on the next **one-element** selection
+the scene hook reports. That report is the drill-in, and it is the first moment
+the line is known. `src/ui/pointerClicks.ts` counts; `src/ui/chainNodes.ts`
+waits (ADR-0010).
+
+**What does not, in the order it was tried:**
+
+| Attempt | Why it fails |
+| --- | --- |
+| Ask `getViewSelectedElements` when the double lands | Returns the whole group, or nothing once the text editor has opened |
+| Watch `appState.editingTextElement` | Real, and it names the element — but the editor only opens on an element **already** selected, so from an empty canvas it costs three clicks |
+| Let the browser's `dblclick` fire | **It never fires over the canvas.** Excalidraw captures the pointer and the compatibility mouse events go with it |
+| Pair the double with the element the hook reported for the *first* click | On a grouped node the first click reports the whole group and names no line |
+
+`editingTextElement` is worth keeping alongside as a second route — the two fail
+in different places, and a double-click on a shape that is not text opens no
+editor at all. Guard against both firing for one gesture.
 
 ## Putting a panel near a node
 
