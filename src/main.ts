@@ -16,6 +16,8 @@ import {
 } from './ui/excalidraw'
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
+import { DirectRun } from './ui/directRun'
+import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
@@ -242,6 +244,21 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void this.markLines(marks),
     })
 
+    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
+    const directRun = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => this.activeResultView()?.currentResult(),
+    })
+
+    this.addCommand({
+      id: 'direct-this-run',
+      name: 'Direct this run',
+      callback: () => void directRun.start(),
+    })
+
     // Proof the client reaches a live engine, and something to exercise the
     // offline path against (#3).
     this.addCommand({
@@ -289,6 +306,12 @@ export default class ChainRunnerPlugin extends Plugin {
     if (open.length === 0) await leaf.setViewState({ type: RESULT_VIEW_TYPE, active: false })
     await this.app.workspace.revealLeaf(leaf)
     return leaf.view instanceof RunResultView ? leaf.view : undefined
+  }
+
+  /** The result view already open, if any — this never opens one of its own. */
+  private activeResultView(): RunResultView | undefined {
+    const leaf = this.app.workspace.getLeavesOfType(RESULT_VIEW_TYPE)[0]
+    return leaf?.view instanceof RunResultView ? leaf.view : undefined
   }
 
   private refreshResultViews(): void {

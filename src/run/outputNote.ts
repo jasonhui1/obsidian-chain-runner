@@ -28,7 +28,7 @@ const UNUSABLE = /[\\/:*?"<>|#^[\]]/g
  * The output's name as a filename — the chain's own word, case and spaces and
  * all, with only what a filename cannot hold replaced.
  */
-function fileName(name: string): string {
+export function fileName(name: string): string {
   // A name of nothing but those characters — `///`, `...` — would file as
   // `---.md` or as a hidden note called `.md`, so it gets a word instead.
   if (name.replace(UNUSABLE, '').replace(/[\s.]/g, '') === '') return 'output'

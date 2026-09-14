@@ -79,6 +79,8 @@ export interface AgentOutput {
   timestamp: string
   /** Loop iteration, 0-based; set only on the outputs of a loop-body node. */
   round?: number
+  /** The node's reasoning, stored but never replayed to a model — read-only in a hold note. */
+  thought?: string
   [key: string]: unknown
 }
 

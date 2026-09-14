@@ -58,6 +58,11 @@ export class RunResultView extends ItemView {
     if (!this.result) this.draw()
   }
 
+  /** The run this view is showing, for a command that acts on "this run". */
+  currentResult(): RunResult | undefined {
+    return this.result
+  }
+
   /**
    * Shows a run, throttled while it streams. A settled one redraws at once and
    * drops the held frame, so the last thing seen is the finished run.
