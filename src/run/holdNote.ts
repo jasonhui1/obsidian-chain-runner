@@ -1,6 +1,6 @@
 import { fileName } from './outputNote'
 import { extractSection } from './section'
-import type { LayoutPanel } from '../engine/types'
+import type { AgentOutput, LayoutPanel } from '../engine/types'
 
 /**
  * The hold-note convention: what a finished run's layout becomes on disk, for a
@@ -19,11 +19,35 @@ export interface HoldNoteInput {
   panels: LayoutPanel[]
   /** A proposer's stored thinking, keyed by the panel's node id. */
   thoughts: Record<string, string>
+  /** Verdicts of the runs this hold was rerun from, already folded, newest first. */
+  previousVerdicts?: string
 }
 
 export function holdNotePath(runId: string): string {
   return `${HOLD_FOLDER}/${fileName(runId)}.md`
 }
+
+/** Each node's stored thought; last write wins, matching how the engine resolves a node's outputs. */
+export function thoughtsByNode(outputs: AgentOutput[]): Record<string, string> {
+  const thoughts: Record<string, string> = {}
+  for (const output of outputs) {
+    if (output.nodeId && output.thought) thoughts[output.nodeId] = output.thought
+  }
+  return thoughts
+}
+
+const HOLD_HEADING = /^# Hold: run (\S+) · (.+?)\s*$/m
+
+/** The run and chain a hold note was written for, from its title; `undefined` for any other note. */
+export function holdHeading(content: string): { runId: string; chainName: string } | undefined {
+  const match = HOLD_HEADING.exec(content)
+  return match ? { runId: match[1], chainName: match[2] } : undefined
+}
+
+const verdictHeading = (chainName: string) => `## Verdict (${chainName})`
+const PREVIOUS_VERDICT = '## Previous verdict'
+const PROPOSALS = '## Proposals'
+const DIRECTION = '## Direction'
 
 /**
  * A fresh hold note for a finished run: the join panel as the verdict (a
@@ -41,10 +65,11 @@ export function holdNoteContent(input: HoldNoteInput): string {
       '',
       'Stopped because: chain ended at its declared outputs.',
       '',
-      ...(verdict ? [`## Verdict (${input.chainName})`, '', verdict.text.trim(), ''] : []),
-      '## Proposals',
+      ...(verdict ? [verdictHeading(input.chainName), '', verdict.text.trim(), ''] : []),
+      ...(input.previousVerdicts ? [PREVIOUS_VERDICT, '', input.previousVerdicts, ''] : []),
+      PROPOSALS,
       ...proposers.flatMap(panel => proposalSection(panel, input.thoughts[panel.node])),
-      '## Direction',
+      DIRECTION,
       ...DIRECTIONS.map(direction => `${direction}:`),
       '',
       ...canonSection(proposers),
@@ -109,6 +134,64 @@ export function mergeHoldNote(fresh: string, previous: string | undefined): stri
  */
 export function directionBlock(content: string): string | undefined {
   return DIRECTION_HEADING.test(content) ? extractSection(content, 'Direction') : undefined
+}
+
+/**
+ * Each proposal whose text, thinking fold aside, no longer matches its panel, keyed by node.
+ * A proposal may hold headings of its own, so it ends only at the next proposer or Direction.
+ */
+export function proposalEdits(content: string, panels: LayoutPanel[]): Record<string, string> {
+  const proposalsAt = lineAt(content, PROPOSALS, 0)
+  if (proposalsAt === -1) return {}
+  const proposers = panels.filter(panel => panel.emphasis !== 'join')
+  const ends = [...proposers.map(panel => `### ${panel.name}`), DIRECTION]
+
+  const edits: Record<string, string> = {}
+  for (const panel of proposers) {
+    const body = bodyUnder(content, `### ${panel.name}`, ends, proposalsAt)
+    if (body === undefined) continue
+    const text = body.replace(THINKING_FOLD, '').trim()
+    if (text !== panel.text.trim()) edits[panel.node] = text
+  }
+  return edits
+}
+
+const THINKING_FOLD = /^\s*<details>\s*<summary>thinking<\/summary>[\s\S]*?<\/details>/
+
+/** The note for the run a rerun landed on, the verdict it replaces folded atop earlier ones, Direction onward kept. */
+export function refreshHoldNote(previous: string, input: HoldNoteInput): string {
+  const heading = holdHeading(previous)
+  const oldVerdict = heading ? bodyUnder(previous, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim() : undefined
+  const earlier = bodyUnder(previous, PREVIOUS_VERDICT, [PROPOSALS], 0)?.trim()
+  const folds = [heading && oldVerdict ? verdictFold(heading.runId, oldVerdict) : '', earlier ?? '']
+    .filter(fold => fold !== '')
+    .join('\n\n')
+  return mergeHoldNote(holdNoteContent({ ...input, ...(folds ? { previousVerdicts: folds } : {}) }), previous)
+}
+
+function verdictFold(runId: string, verdict: string): string {
+  return ['<details>', `<summary>run ${runId}</summary>`, '', verdict, '', '</details>'].join('\n')
+}
+
+/** Where a line reading exactly `line` starts, searching line starts from `from`; -1 when none does. */
+function lineAt(content: string, line: string, from: number): number {
+  for (let at = from; at < content.length; ) {
+    const end = content.indexOf('\n', at)
+    const stop = end === -1 ? content.length : end
+    if (content.slice(at, stop).trimEnd() === line) return at
+    at = stop + 1
+  }
+  return -1
+}
+
+/** The text under the `heading` line, up to the first of `ends` after it; `undefined` without the heading. */
+function bodyUnder(content: string, heading: string, ends: string[], from: number): string | undefined {
+  const start = lineAt(content, heading, from)
+  if (start === -1) return undefined
+  const newline = content.indexOf('\n', start)
+  const bodyStart = newline === -1 ? content.length : newline + 1
+  const endAt = Math.min(content.length, ...ends.map(end => lineAt(content, end, bodyStart)).filter(at => at !== -1))
+  return content.slice(bodyStart, endAt)
 }
 
 const RESUMED_HEADING = /^##\s+Resumed\s*$/m

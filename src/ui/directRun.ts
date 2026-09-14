@@ -1,6 +1,6 @@
 import type { HoldNotes } from './holdNotes'
 import type { EngineClient } from '../engine/client'
-import type { AgentOutput } from '../engine/types'
+import { thoughtsByNode } from '../run/holdNote'
 import type { RunResult } from '../run/session'
 
 /**
@@ -45,13 +45,4 @@ export class DirectRun {
     })
     if (file) this.deps.notify(`Wrote the hold note for run ${runId}`)
   }
-}
-
-/** Last write wins, matching how the engine itself resolves a node's outputs. */
-function thoughtsByNode(outputs: AgentOutput[]): Record<string, string> {
-  const thoughts: Record<string, string> = {}
-  for (const output of outputs) {
-    if (output.nodeId && output.thought) thoughts[output.nodeId] = output.thought
-  }
-  return thoughts
 }

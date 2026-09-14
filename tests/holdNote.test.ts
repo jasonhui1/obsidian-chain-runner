@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { appendResumeLink, directionBlock, holdNoteContent, holdNotePath, mergeHoldNote, type HoldNoteInput } from '@/run/holdNote'
+import {
+  appendResumeLink,
+  directionBlock,
+  holdHeading,
+  holdNoteContent,
+  holdNotePath,
+  mergeHoldNote,
+  proposalEdits,
+  refreshHoldNote,
+  type HoldNoteInput,
+} from '@/run/holdNote'
 import type { LayoutPanel } from '@/engine/types'
 
 /**
@@ -166,6 +176,83 @@ describe('directionBlock', () => {
     expect(directionBlock(holdNoteContent(input()))).toContain('KEEP:')
   })
 })
+
+describe('holdHeading', () => {
+  it('reads the run and chain a hold note was written for', () => {
+    expect(holdHeading(holdNoteContent(input()))).toEqual({ runId: '2026-09-15-Ab3dE1', chainName: 'creative-director' })
+  })
+
+  it('answers undefined for a note that is not a hold', () => {
+    expect(holdHeading('# Something else\n')).toBeUndefined()
+  })
+})
+
+describe('proposalEdits', () => {
+  const gameplay = panel({ name: 'gameplay-director', node: 'gameplay', text: 'Stances mapped to segments.\n\n## Proposed canon\n- stances' })
+  const verdict = panel({ name: 'creative-director', node: 'decider', text: 'Halo = stances.', emphasis: 'join' })
+  const panels = [panel(), gameplay, verdict]
+  const note = () => holdNoteContent(input({ panels, thoughts: { gameplay: 'Thought about stances.' } }))
+
+  it('finds nothing edited in a note as it was written', () => {
+    expect(proposalEdits(note(), panels)).toEqual({})
+  })
+
+  it('reads an edited proposal as its node’s revision, headings in its own text and all', () => {
+    const edited = note().replace('Stances mapped to segments.', 'Halo is a burden.')
+    expect(proposalEdits(edited, panels)).toEqual({ gameplay: 'Halo is a burden.\n\n## Proposed canon\n- stances' })
+  })
+
+  it('leaves the thinking fold out of the revision', () => {
+    const edited = note().replace('Stances mapped to segments.', 'Halo is a burden.')
+    expect(proposalEdits(edited, panels).gameplay).not.toContain('Thought about stances.')
+  })
+
+  it('ignores an edit to the verdict, which is not a proposer', () => {
+    expect(proposalEdits(note().replace('Halo = stances.', 'Something else.'), panels)).toEqual({})
+  })
+
+  it('ignores a proposal whose heading the human removed', () => {
+    expect(proposalEdits(note().replace('### character-director', ''), panels)).toEqual({})
+  })
+})
+
+describe('refreshHoldNote', () => {
+  const verdict = (text: string) => panel({ name: 'creative-director', node: 'decider', text, emphasis: 'join' })
+  const first = holdNoteContent(input({ panels: [panel(), verdict('Stance-switching combat.')] })).replace(
+    'KEEP:\n',
+    'KEEP: fast combat\n',
+  )
+  const refreshed = () => refreshHoldNote(first, input({ runId: '2026-09-16-Zz1', panels: [panel(), verdict('Halo as burden.')] }))
+
+  it('shows the new run’s verdict under its heading', () => {
+    expect(refreshed()).toContain('# Hold: run 2026-09-16-Zz1 · creative-director')
+    expect(extractVerdict(refreshed())).toBe('Halo as burden.')
+  })
+
+  it('folds the old verdict under Previous verdict, named by the run it came from', () => {
+    const content = refreshed()
+    const previous = content.slice(content.indexOf('## Previous verdict'), content.indexOf('## Proposals'))
+    expect(previous).toContain('<summary>run 2026-09-15-Ab3dE1</summary>')
+    expect(previous).toContain('Stance-switching combat.')
+  })
+
+  it('keeps the Direction the human wrote', () => {
+    expect(refreshed()).toContain('KEEP: fast combat')
+  })
+
+  it('stacks every earlier verdict, newest first', () => {
+    const again = refreshHoldNote(refreshed(), input({ runId: '2026-09-17-Yy2', panels: [panel(), verdict('Third verdict.')] }))
+    expect(again.match(/## Previous verdict/g)).toHaveLength(1)
+    expect(again.indexOf('Halo as burden.')).toBeLessThan(again.indexOf('Stance-switching combat.'))
+    expect(extractVerdict(again)).toBe('Third verdict.')
+  })
+})
+
+/** The body under `## Verdict (…)`, up to the next level-two heading. */
+function extractVerdict(content: string): string {
+  const start = content.indexOf('\n', content.indexOf('## Verdict')) + 1
+  return content.slice(start, content.indexOf('\n## ', start)).trim()
+}
 
 describe('appendResumeLink', () => {
   it('adds a Resumed heading with the run linked, when there is no such heading yet', () => {

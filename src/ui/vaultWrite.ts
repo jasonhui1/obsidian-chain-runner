@@ -1,4 +1,10 @@
-import { TFolder, type App } from 'obsidian'
+import { TFile, TFolder, type App } from 'obsidian'
+
+/** A note's text, or `undefined` when there is no note at that path. */
+export async function readIfPresent(app: App, path: string): Promise<string | undefined> {
+  const existing = app.vault.getAbstractFileByPath(path)
+  return existing instanceof TFile ? await app.vault.cachedRead(existing) : undefined
+}
 
 /** Creates a folder and everything above it, a segment at a time. */
 export async function ensureFolder(app: App, folder: string): Promise<void> {

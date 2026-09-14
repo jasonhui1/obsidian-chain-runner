@@ -1,5 +1,5 @@
 import { normalizePath, TFile, type App } from 'obsidian'
-import { ensureFolder, guardWrite } from './vaultWrite'
+import { ensureFolder, guardWrite, readIfPresent } from './vaultWrite'
 import { appendLockedCanon, CANON_PATH, tickedCanonLines } from '../run/canon'
 import { appendResumeLink, directionBlock } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
@@ -40,7 +40,7 @@ export class Resume {
     }
 
     const canonPath = normalizePath(CANON_PATH)
-    const canon = await this.readCanon(canonPath)
+    const canon = await readIfPresent(this.deps.app, canonPath)
 
     const outcome = await this.deps.withEngine(() => runResume(this.deps.engine, direction, canon))
     if (!outcome) return
@@ -58,11 +58,6 @@ export class Resume {
     this.deps.notify(
       outcome.error ? `Resumed as run ${outcome.runId}, but it failed: ${outcome.error}` : `Resumed as run ${outcome.runId}`,
     )
-  }
-
-  private async readCanon(path: string): Promise<string | undefined> {
-    const existing = this.deps.app.vault.getAbstractFileByPath(path)
-    return existing instanceof TFile ? await this.deps.app.vault.cachedRead(existing) : undefined
   }
 
   /** Reads canon again right before writing — not the snapshot sent with the run — so a change made while the run was going is never clobbered. */

@@ -87,6 +87,11 @@ export interface AgentOutput {
 /** Whether the engine still holds a run. `unknown` is an engine that could not be asked. */
 export type RunExistence = 'found' | 'missing' | 'unknown'
 
+/** The chain's graph as the run executed it, narrowed to the edges a walk needs. */
+export interface RunGraph {
+  edges: { fromNode: string; toNode: string }[]
+}
+
 export interface RunMeta {
   runId: string
   chainName: string
@@ -96,6 +101,8 @@ export interface RunMeta {
   completedAt?: string
   status: 'running' | 'complete' | 'error'
   agentOutputs: AgentOutput[]
+  graph?: RunGraph
+  branchedFromRunId?: string
   [key: string]: unknown
 }
 
@@ -142,6 +149,10 @@ export interface RunRequest {
   paramValue?: string
   /** Overrides a `context` node's file, keyed by the node's declared `file`. */
   context?: Record<string, string>
+  /** The run this one branches from, for lineage only. */
+  branchedFromRunId?: string
+  /** Outputs set on their nodes as-is; any node without one executes. */
+  branchOutputs?: AgentOutput[]
 }
 
 export interface AgentStartEvent {
