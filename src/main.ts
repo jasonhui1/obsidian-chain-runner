@@ -25,6 +25,7 @@ import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
+import { Resume } from './ui/resume'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
@@ -257,6 +258,20 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'direct-this-run',
       name: 'Direct this run',
       callback: () => void directRun.start(),
+    })
+
+    const resume = new Resume({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
+
+    this.addCommand({
+      id: 'resume-hold',
+      name: 'Resume this hold',
+      callback: () => void resume.start(),
     })
 
     // Proof the client reaches a live engine, and something to exercise the

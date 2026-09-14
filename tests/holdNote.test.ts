@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { holdNoteContent, holdNotePath, mergeHoldNote, type HoldNoteInput } from '@/run/holdNote'
+import { appendResumeLink, directionBlock, holdNoteContent, holdNotePath, mergeHoldNote, type HoldNoteInput } from '@/run/holdNote'
 import type { LayoutPanel } from '@/engine/types'
 
 /**
@@ -135,5 +135,56 @@ describe('mergeHoldNote', () => {
   it('falls back to the fresh note when the previous one has no Direction heading', () => {
     const fresh = holdNoteContent(input())
     expect(mergeHoldNote(fresh, 'a note that is not a hold at all')).toBe(fresh)
+  })
+})
+
+describe('directionBlock', () => {
+  it('answers undefined for a note with no Direction heading at all', () => {
+    expect(directionBlock('just some words')).toBeUndefined()
+  })
+
+  it('reads the Direction section verbatim, CANON? ticks included', () => {
+    const content = [
+      '## Direction',
+      'KEEP: fast combat',
+      'CHANGE: burden not toolkit',
+      '',
+      'CANON?',
+      '- [x] halo = burden — character-director',
+      '',
+      '## Conversation',
+      '',
+    ].join('\n')
+    const block = directionBlock(content)
+    expect(block).toContain('KEEP: fast combat')
+    expect(block).toContain('CANON?')
+    expect(block).toContain('- [x] halo = burden — character-director')
+    expect(block).not.toContain('## Conversation')
+  })
+
+  it('reads a fresh template’s Direction, all-empty, rather than saying there is none', () => {
+    expect(directionBlock(holdNoteContent(input()))).toContain('KEEP:')
+  })
+})
+
+describe('appendResumeLink', () => {
+  it('adds a Resumed heading with the run linked, when there is no such heading yet', () => {
+    const content = appendResumeLink('# Hold: run x\n\n## Conversation\n', { runId: '2026-09-15-Ab3dE1', url: 'http://x/history/2026-09-15-Ab3dE1' })
+    expect(content).toContain('## Resumed')
+    expect(content).toContain('[develop-direction run 2026-09-15-Ab3dE1](http://x/history/2026-09-15-Ab3dE1)')
+  })
+
+  it('names the run without a link when the engine URL will not resolve one', () => {
+    const content = appendResumeLink('## Conversation\n', { runId: '2026-09-15-Ab3dE1' })
+    expect(content).toContain('develop-direction run 2026-09-15-Ab3dE1')
+    expect(content).not.toContain('[develop-direction')
+  })
+
+  it('adds a second resume under the same heading, rather than a second one', () => {
+    const once = appendResumeLink('## Conversation\n', { runId: 'run-1' })
+    const twice = appendResumeLink(once, { runId: 'run-2' })
+    expect(twice.match(/## Resumed/g)).toHaveLength(1)
+    expect(twice).toContain('run-1')
+    expect(twice).toContain('run-2')
   })
 })

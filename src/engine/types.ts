@@ -140,6 +140,8 @@ export interface RunRequest {
   seedPrompt: string
   /** The pick for the chain's declared dropdown, when it declares one. */
   paramValue?: string
+  /** Overrides a `context` node's file, keyed by the node's declared `file`. */
+  context?: Record<string, string>
 }
 
 export interface AgentStartEvent {

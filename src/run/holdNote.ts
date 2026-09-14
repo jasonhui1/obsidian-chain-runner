@@ -101,3 +101,21 @@ export function mergeHoldNote(fresh: string, previous: string | undefined): stri
   const match = DIRECTION_HEADING.exec(fresh)
   return match ? fresh.slice(0, match.index) + kept : fresh
 }
+
+/**
+ * The Direction section's own body — KEEP/CHANGE/… lines, free text and any
+ * CANON? ticks — up to the next heading. `undefined` when the note has no
+ * Direction heading at all, which is what tells Resume this is not a hold note.
+ */
+export function directionBlock(content: string): string | undefined {
+  return DIRECTION_HEADING.test(content) ? extractSection(content, 'Direction') : undefined
+}
+
+const RESUMED_HEADING = /^##\s+Resumed\s*$/m
+
+/** A link to the run a resume produced, appended under its own heading. */
+export function appendResumeLink(content: string, run: { runId: string; url?: string }): string {
+  const line = run.url ? `- [develop-direction run ${run.runId}](${run.url})` : `- develop-direction run ${run.runId}`
+  const trimmed = content.replace(/\s+$/, '')
+  return RESUMED_HEADING.test(trimmed) ? `${trimmed}\n${line}\n` : `${trimmed}\n\n## Resumed\n${line}\n`
+}
