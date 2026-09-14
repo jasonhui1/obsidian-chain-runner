@@ -5,3 +5,5 @@ main.js
 coverage/
 .env
 .builds/
+shots/
+.agents
