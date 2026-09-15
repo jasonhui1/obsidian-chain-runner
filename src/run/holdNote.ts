@@ -267,10 +267,17 @@ export function refreshHoldNote(previous: string, input: HoldNoteInput): string 
   const heading = holdHeading(previous)
   const oldVerdict = heading ? bodyUnder(previous, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim() : undefined
   const earlier = bodyUnder(previous, PREVIOUS_VERDICT, [PROPOSALS], 0)?.trim()
-  const folds = [heading && oldVerdict ? verdictFold(heading.runId, oldVerdict) : '', earlier ?? '']
+  // Folded even when empty: the fold is what names the run a hold came from.
+  const folds = [heading ? verdictFold(heading.runId, oldVerdict || '*No verdict.*') : '', earlier ?? '']
     .filter(fold => fold !== '')
     .join('\n\n')
   return mergeHoldNote(holdNoteContent({ ...input, ...(folds ? { previousVerdicts: folds } : {}) }), previous)
+}
+
+/** The runs a hold was rerun from, newest first, as its Previous verdict names them. */
+export function reranFrom(content: string): string[] {
+  const earlier = bodyUnder(content, PREVIOUS_VERDICT, [PROPOSALS], 0) ?? ''
+  return [...earlier.matchAll(/^<summary>run (\S+)<\/summary>$/gm)].map(match => match[1])
 }
 
 function verdictFold(runId: string, verdict: string): string {

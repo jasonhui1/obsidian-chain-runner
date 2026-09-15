@@ -59,6 +59,11 @@ export class HoldActions {
     return readHold(content, panels ?? [])
   }
 
+  /** The run `runId`'s hold now lives under, after any reruns. */
+  currentRun(runId: string): Promise<string> {
+    return this.deps.notes.currentRun(runId)
+  }
+
   /** A verb given to a proposal; COMBINE names the second proposal it joins. */
   direct(runId: string, verb: DirectionVerb, proposal: string, other?: string): Promise<boolean> {
     return this.edit(runId, content => appendDirectionLine(content, directionLine(verb, proposal, other)))

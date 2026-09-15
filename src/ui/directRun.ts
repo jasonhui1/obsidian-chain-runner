@@ -61,8 +61,9 @@ export class DirectRun {
 
   /** Opens the run's hold, writing it first only when there is none. */
   async openHold(runId: string): Promise<void> {
-    const held = this.deps.holdNotes.find(runId)
-    if (held) await this.deps.open(held, runId)
+    const current = await this.deps.holdNotes.currentRun(runId)
+    const held = this.deps.holdNotes.find(current)
+    if (held) await this.deps.open(held, current)
     else await this.direct(runId)
   }
 }

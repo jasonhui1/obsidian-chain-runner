@@ -44,9 +44,9 @@ export class DirectingView extends ItemView {
     this.made?.draw({ kind: 'idle' })
   }
 
-  /** Shows a run's hold, on a proposal's tab when one is named. */
+  /** Shows a run's hold, on a proposal's tab when one is named; a hold rerun since is shown as it now is. */
   async show(runId: string, proposal?: string): Promise<void> {
-    const state = await this.moveTo(runId)
+    const state = await this.moveTo(await this.holds.currentRun(runId))
     if (state) this.board().open(state, proposal)
   }
 

@@ -54,6 +54,7 @@ function makeDirectRun(): DirectRun {
         return null
       },
       cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
+      getMarkdownFiles: () => Object.keys(notes).map(file),
       create: (path: string, content: string) => {
         notes[path] = content
         return Promise.resolve(file(path))
@@ -189,6 +190,20 @@ describe('openHold', () => {
     expect(openedRuns).toEqual(['2026-09-15-ubqPU2'])
     expect(requestedRunIds).toEqual([])
     expect(notes[PATH]).toContain('KEEP: character-director')
+  })
+
+  it('opens the hold a rerun moved on to, rather than writing the old run a fresh one', async () => {
+    const moved = 'Maestro/holds/2026-09-15-WKRDJJ.md'
+    notes[moved] = [
+      '# Hold: run 2026-09-15-WKRDJJ · creative-director',
+      '## Previous verdict',
+      '<details>\n<summary>run 2026-09-15-ubqPU2</summary>\n\nOld.\n\n</details>',
+      '## Proposals',
+      '## Direction',
+    ].join('\n\n')
+    await makeDirectRun().openHold('2026-09-15-ubqPU2')
+    expect(openedRuns).toEqual(['2026-09-15-WKRDJJ'])
+    expect(Object.keys(notes)).toEqual([moved])
   })
 
   it('writes the hold first when there is none, then opens it', async () => {
