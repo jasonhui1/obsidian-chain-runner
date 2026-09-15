@@ -165,6 +165,33 @@ question, and survives zoom, scroll and a drawing embedded in a note.
 empty list, so a plugin cannot clear the selection — which is why clicking an
 already-selected element can never be seen.
 
+## Typing in a sidebar beside a drawing
+
+**Key presses into a text box in our own sidebar view arrive already cancelled.**
+Found by #35's directing panel on 2026-09-15 (Excalidraw 2.26.4, Windows), with
+a drawing open in the main pane: the box had focus, every key reached it, and
+every key came back `defaultPrevented`, so no text went in. The console stayed
+silent.
+
+What is and is not known:
+
+- **Who cancels it is not known, nor is it proven to be Excalidraw.** Swapping
+  `Event.prototype.preventDefault` for a recording version never caught the
+  call, so the cancel happens some other way. Candidates: `returnValue = false`,
+  a handler returning `false`, or a listener from another realm. Obsidian's own
+  inputs beside a drawing were not checked.
+- **`stopPropagation` at the view does not help**, so the cancel happens in the
+  capture phase or before it.
+- **What worked:** a `keydown` listener on the view's `contentEl` that sees
+  `defaultPrevented` on an `input`/`textarea` and applies the key by hand with
+  `setRangeText`: characters, Backspace, Delete, arrows, Home/End, and Enter in
+  a textarea. It then dispatches an `input` event so the view's own handlers
+  run. Paste (Ctrl+V) is still lost.
+
+The workaround lives only on the `prototype/35-directing-panel` branch. A real
+panel with text inputs has to find the canceller first. A check with no drawing
+open is the cheapest next step.
+
 ## Resizing a text element
 
 Dragging a text element's handles **scales the font** rather than revealing more
