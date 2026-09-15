@@ -24,7 +24,7 @@ export class AskTheRoom {
   constructor(private readonly deps: AskTheRoomDeps) {}
 
   async start(): Promise<void> {
-    const { app, engine, notify } = this.deps
+    const { app, notify } = this.deps
     const file = app.workspace.getActiveFile()
     const content = file?.extension === 'md' ? await app.vault.cachedRead(file) : ''
     const heading = holdHeading(content)
@@ -39,8 +39,23 @@ export class AskTheRoom {
       return
     }
 
+    const answers = await this.answers(heading.runId, question)
+    if (!answers) return
+
+    const wrote = await guardWrite(notify, 'the hold note', async () => {
+      // Read again: the human may have written in the note while the room went.
+      const current = await this.deps.app.vault.cachedRead(file)
+      await this.deps.app.vault.modify(file, appendRoomAnswers(current, question, answers))
+      return true
+    })
+    if (wrote) notify(`The room answered (${answers.length})`)
+  }
+
+  /** Every proposer's answer to `question`, one at a time; `undefined`, once it has said why, when nobody answered. */
+  async answers(runId: string, question: string): Promise<RoomAnswer[] | undefined> {
+    const { engine, notify } = this.deps
     const answers = await this.deps.withEngine(async () => {
-      const source = await fetchRun(engine, heading.runId)
+      const source = await fetchRun(engine, runId)
       const proposers = source.layout.panels.filter(panel => panel.emphasis !== 'join')
       const gathered: RoomAnswer[] = []
       for (const panel of proposers) {
@@ -52,18 +67,11 @@ export class AskTheRoom {
       }
       return gathered
     })
-    if (!answers) return
+    if (!answers) return undefined
     if (answers.length === 0) {
       notify(NOBODY_ANSWERED)
-      return
+      return undefined
     }
-
-    const wrote = await guardWrite(notify, 'the hold note', async () => {
-      // Read again: the human may have written in the note while the room went.
-      const current = await this.deps.app.vault.cachedRead(file)
-      await this.deps.app.vault.modify(file, appendRoomAnswers(current, question, answers))
-      return true
-    })
-    if (wrote) notify(`The room answered (${answers.length})`)
+    return answers
   }
 }

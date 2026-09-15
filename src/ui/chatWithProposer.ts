@@ -35,8 +35,8 @@ export class ChatWithProposer {
     }
 
     const revise = pendingRevise(content)
-    if (revise) {
-      await this.revise(file, heading, revise)
+    if (revise?.reply !== undefined) {
+      await this.revise(file, heading, { ...revise, reply: revise.reply })
       return
     }
 
@@ -45,34 +45,8 @@ export class ChatWithProposer {
       notify(NOTHING_TO_SEND)
       return
     }
-    await this.chat(file, heading, pending)
-  }
-
-  /** `@name message`: a fresh, standalone call to that proposer's agent, its reply appended. */
-  private async chat(file: TFile, heading: { runId: string; chainName: string }, pending: ChatTurn): Promise<void> {
-    const { engine, notify } = this.deps
-    const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
-    if (!source) return
-
-    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === pending.name)
-    const seed = panel && chatSeed(source.run, panel.node, pending.message)
-    const agentName = panel && latestOutput(source.run.agentOutputs, panel.node)?.agentName
-    if (!panel || seed === undefined || agentName === undefined) {
-      notify(NOT_A_PROPOSER(pending.name))
-      return
-    }
-
-    const outcome = await this.deps.withEngine(() => runAgentOnce(engine, { agentName, seedPrompt: seed }))
-    if (!outcome) return
-    if (outcome.error) {
-      notify(`Chat with ${pending.name} failed: ${outcome.error}`)
-      return
-    }
-    if (!outcome.output) {
-      notify(`Chat with ${pending.name} produced no reply`)
-      return
-    }
-    const reply = outcome.output.output
+    const reply = await this.reply(heading.runId, pending.name, pending.message)
+    if (reply === undefined) return
 
     const wrote = await guardWrite(notify, 'the hold note', async () => {
       // Read again: the human may have written in the note while the chat went.
@@ -83,25 +57,60 @@ export class ChatWithProposer {
     if (wrote) notify(`${pending.name} replied`)
   }
 
-  /** A bare `revise` below a reply: that reply becomes the node's revision, rerun-downstream. */
-  private async revise(file: TFile, heading: { runId: string; chainName: string }, revise: ChatTurn): Promise<void> {
+  /** A fresh, standalone call to the proposer's agent; `undefined`, once it has said why, when there is no reply. */
+  async reply(runId: string, name: string, message: string): Promise<string | undefined> {
+    const { engine, notify } = this.deps
+    const source = await this.deps.withEngine(() => fetchRun(engine, runId))
+    if (!source) return undefined
+
+    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === name)
+    const seed = panel && chatSeed(source.run, panel.node, message)
+    const agentName = panel && latestOutput(source.run.agentOutputs, panel.node)?.agentName
+    if (!panel || seed === undefined || agentName === undefined) {
+      notify(NOT_A_PROPOSER(name))
+      return undefined
+    }
+
+    const outcome = await this.deps.withEngine(() => runAgentOnce(engine, { agentName, seedPrompt: seed }))
+    if (!outcome) return undefined
+    if (outcome.error) {
+      notify(`Chat with ${name} failed: ${outcome.error}`)
+      return undefined
+    }
+    if (!outcome.output) {
+      notify(`Chat with ${name} produced no reply`)
+      return undefined
+    }
+    return outcome.output.output
+  }
+
+  /**
+   * A reply becomes the proposer's revision, rerun downstream; `mark` notes in the
+   * hold which reply it was. Answers the run the hold now lives under.
+   */
+  async revise(
+    file: TFile,
+    heading: { runId: string; chainName: string },
+    turn: Required<ChatTurn>,
+    mark: (content: string, newRunId: string) => string = markRevised,
+  ): Promise<string | undefined> {
     const { engine, notify } = this.deps
     const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
-    if (!source) return
+    if (!source) return undefined
 
-    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === revise.name)
-    if (!panel || revise.reply === undefined) {
-      notify(NOT_A_PROPOSER(revise.name))
-      return
+    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === turn.name)
+    if (!panel) {
+      notify(NOT_A_PROPOSER(turn.name))
+      return undefined
     }
 
     const canon = await readIfPresent(this.deps.app, normalizePath(CANON_PATH))
-    const request = rerunRequest(source.run, source.layout.panels, { [panel.node]: revise.reply }, canon)
+    const request = rerunRequest(source.run, source.layout.panels, { [panel.node]: turn.reply }, canon)
     if (!request) {
       notify(`Run ${heading.runId} carries no graph to rerun from`)
-      return
+      return undefined
     }
 
-    await rerunAndRefresh(this.deps, file, heading, request, { beforeRefresh: markRevised })
+    return rerunAndRefresh(this.deps, file, heading, request, { beforeRefresh: mark })
   }
 }

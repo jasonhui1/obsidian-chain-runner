@@ -24,6 +24,7 @@ const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
     { id: 'LOCKED: Abilities rotate. — gameplay', text: 'LOCKED: Abilities rotate.', proposer: 'gameplay', ticked: true },
     { id: 'LOCKED: A test. — world', text: 'LOCKED: A test.', proposer: 'world', ticked: false },
   ],
+  conversation: [],
   ...over,
 })
 
@@ -33,6 +34,13 @@ let root: HTMLElement
 let calls: string[]
 let released: number
 let overflowing: boolean
+/** Each call still waiting on the hold actions, answered by the test. */
+let waiting: ((done: boolean) => void)[]
+
+const answered = (call: string): Promise<boolean> => {
+  calls.push(call)
+  return new Promise(resolve => waiting.push(resolve))
+}
 
 function board(): DirectingBoard {
   return new DirectingBoard(root, {
@@ -45,6 +53,10 @@ function board(): DirectingBoard {
     tickCanon: (id, ticked) => void calls.push(`tick ${id} ${ticked}`),
     writeHold: () => void calls.push('write hold'),
     openMenu: () => void calls.push('menu'),
+    chat: (proposal, message) => answered(`chat ${proposal} ${message}`),
+    askRoom: question => answered(`ask ${question}`),
+    change: text => answered(`change ${text}`),
+    revise: turn => answered(`revise ${turn.name} ${turn.reply}`).then(() => {}),
     watchOverflow: (_frame, changed) => {
       changed(overflowing)
       return () => {}
@@ -62,6 +74,22 @@ const tabs = (): string[] => Array.from(root.querySelectorAll('[role="tab"]')).m
 const selectedTab = (): string | null | undefined => root.querySelector('[role="tab"][aria-selected="true"]')?.textContent
 const boxes = (): HTMLInputElement[] => Array.from(root.querySelectorAll('input[type="checkbox"]'))
 const text = (): string => root.textContent ?? ''
+const composer = (placeholder: string): HTMLTextAreaElement => {
+  const found = Array.from(root.querySelectorAll('textarea')).find(box => box.placeholder === placeholder)
+  if (!found) throw new Error(`no "${placeholder}" box`)
+  return found
+}
+const type = (box: HTMLTextAreaElement, words: string): void => {
+  box.value = words
+  box.dispatchEvent(new Event('input'))
+}
+const press = (box: HTMLTextAreaElement, key: string, shiftKey = false): KeyboardEvent => {
+  const event = new KeyboardEvent('keydown', { key, shiftKey, cancelable: true })
+  box.dispatchEvent(event)
+  return event
+}
+/** Lets the board's awaited answers land. */
+const settled = (): Promise<void> => new Promise(resolve => setTimeout(resolve))
 
 beforeEach(() => {
   document.body.replaceChildren()
@@ -70,6 +98,7 @@ beforeEach(() => {
   calls = []
   released = 0
   overflowing = false
+  waiting = []
 })
 
 describe('header', () => {
@@ -230,6 +259,159 @@ describe('the Run tab', () => {
   it('has no verb buttons', () => {
     board().open(showing())
     expect(buttons().some(b => b.textContent === 'KEEP')).toBe(false)
+  })
+})
+
+describe('a proposal tab, chatting', () => {
+  const talked = hold({
+    conversation: [
+      { kind: 'chat', name: 'world', message: 'why a test?', reply: 'Someone is watching.', revisedAs: '2026-09-16-Xy9zW2' },
+      { kind: 'room', question: 'too much Nier?', answers: [{ name: 'world', answer: 'No.' }] },
+      { kind: 'chat', name: 'gameplay', message: 'why rotate?', reply: 'Fresh fights.' },
+      { kind: 'chat', name: 'world', message: 'who watches?', reply: 'The player.' },
+      { kind: 'chat', name: 'world', message: 'and then?' },
+    ],
+  })
+
+  it('shows only this proposal’s messages and replies, in order', () => {
+    board().open(showing(talked), 'world')
+    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent)
+    expect(turns).toHaveLength(3)
+    expect(turns[0]).toContain('why a test?')
+    expect(turns[0]).toContain('Someone is watching.')
+    expect(turns[1]).toContain('who watches?')
+    expect(turns[2]).toContain('No reply')
+    expect(text()).not.toContain('why rotate?')
+    expect(text()).not.toContain('too much Nier?')
+  })
+
+  it('says which run a reply was revised as, and offers a reply not yet used', () => {
+    board().open(showing(talked), 'world')
+    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn'))
+    expect(turns[0]?.textContent).toContain('Used as the revision · run Xy9zW2')
+    expect(Array.from(turns[0]!.querySelectorAll('button'))).toEqual([])
+    button('Use this reply as the revision & rerun').click()
+    expect(calls).toEqual(['revise world The player.'])
+  })
+
+  it('says a rerun is going, and starts no second one, until it is done', async () => {
+    board().open(showing(talked), 'world')
+    button('Use this reply as the revision & rerun').click()
+    expect(button('Rerunning…').disabled).toBe(true)
+    button('Rerunning…').click()
+    expect(calls).toHaveLength(1)
+    waiting[0]!(true)
+    await settled()
+    expect(button('Use this reply as the revision & rerun').disabled).toBe(false)
+  })
+
+  it('hands what is typed to the hold actions, for this proposal, on Send or Enter', async () => {
+    board().open(showing(), 'world')
+    type(composer('Message world…'), 'really?')
+    button('Send').click()
+    waiting[0]!(true)
+    await settled()
+    type(composer('Message world…'), 'truly?')
+    expect(press(composer('Message world…'), 'Enter').defaultPrevented).toBe(true)
+    expect(calls).toEqual(['chat world really?', 'chat world truly?'])
+  })
+
+  it('sends nothing for a blank box, or on Shift+Enter', () => {
+    board().open(showing(), 'world')
+    button('Send').click()
+    type(composer('Message world…'), 'two')
+    expect(press(composer('Message world…'), 'Enter', true).defaultPrevented).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('shows the message and that a reply is coming, and cannot send again while it does', async () => {
+    board().open(showing(), 'world')
+    type(composer('Message world…'), 'really?')
+    button('Send').click()
+    expect(composer('Message world…').value).toBe('')
+    expect(root.querySelector('.chain-runner-directing-turn')?.textContent).toContain('really?')
+    expect(text()).toContain('world is replying…')
+    expect(button('Send').disabled).toBe(true)
+    type(composer('Message world…'), 'again?')
+    press(composer('Message world…'), 'Enter')
+    expect(calls).toEqual(['chat world really?'])
+
+    waiting[0]!(true)
+    await settled()
+    expect(text()).not.toContain('world is replying…')
+    expect(button('Send').disabled).toBe(false)
+    expect(composer('Message world…').value).toBe('again?')
+  })
+
+  it('puts the message back in the box when it could not be sent', async () => {
+    board().open(showing(), 'world')
+    type(composer('Message world…'), 'really?')
+    button('Send').click()
+    waiting[0]!(false)
+    await settled()
+    expect(composer('Message world…').value).toBe('really?')
+    expect(text()).not.toContain('world is replying…')
+  })
+
+  it('keeps what is being typed, and where, across a redraw', () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    const box = composer('Message world…')
+    type(box, 'half a thou')
+    box.focus()
+    box.setSelectionRange(4, 4)
+    panel.draw(showing())
+    const again = composer('Message world…')
+    expect(again).not.toBe(box)
+    expect(again.value).toBe('half a thou')
+    expect(document.activeElement).toBe(again)
+    expect(again.selectionStart).toBe(4)
+  })
+
+  it('keeps a draft to its own proposal', () => {
+    board().open(showing(), 'world')
+    type(composer('Message world…'), 'for world')
+    button('gameplay').click()
+    expect(composer('Message gameplay…').value).toBe('')
+    button('world').click()
+    expect(composer('Message world…').value).toBe('for world')
+  })
+})
+
+describe('the Run tab, talking to the room', () => {
+  const asked = hold({
+    conversation: [
+      { kind: 'chat', name: 'world', message: 'why a test?', reply: 'Someone is watching.' },
+      { kind: 'room', question: 'too much Nier?', answers: [{ name: 'gameplay', answer: 'A bit.' }, { name: 'world', answer: 'No.' }] },
+    ],
+  })
+
+  it('shows each question with who answered what, and no chats', () => {
+    board().open(showing(asked))
+    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent ?? '')
+    expect(turns).toHaveLength(1)
+    expect(turns[0]).toMatch(/too much Nier\?.*gameplay.*A bit\..*world.*No\./)
+    expect(text()).not.toContain('why a test?')
+  })
+
+  it('asks the room what is typed, and says the room is answering until it has', async () => {
+    board().open(showing())
+    type(composer('Ask every proposal…'), 'what is the hook?')
+    button('Ask').click()
+    expect(calls).toEqual(['ask what is the hook?'])
+    expect(text()).toContain('what is the hook?')
+    expect(text()).toContain('The room is answering…')
+    expect(button('Ask').disabled).toBe(true)
+    waiting[0]!(true)
+    await settled()
+    expect(text()).not.toContain('The room is answering…')
+  })
+
+  it('adds a CHANGE to the Direction from its own box', () => {
+    board().open(showing())
+    type(composer('CHANGE: …'), 'rotation should hurt')
+    press(composer('CHANGE: …'), 'Enter')
+    expect(calls).toEqual(['change rotation should hurt'])
   })
 })
 

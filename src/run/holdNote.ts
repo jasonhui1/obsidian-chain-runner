@@ -1,3 +1,4 @@
+import { readConversation, type ConversationEntry } from './conversation'
 import { fileName } from './outputNote'
 import { extractSection } from './section'
 import type { AgentOutput, LayoutPanel } from '../engine/types'
@@ -326,6 +327,7 @@ export interface HoldReading {
   /** The Direction's lines so far, minus the empty verb template and the canon checklist. */
   direction: string[]
   canon: CanonChoice[]
+  conversation: ConversationEntry[]
 }
 
 export interface HoldProposal {
@@ -364,6 +366,7 @@ export function readHold(content: string): HoldReading | undefined {
     })),
     direction: lines,
     canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
+    conversation: readConversation(content),
   }
 }
 

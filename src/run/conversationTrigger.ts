@@ -15,10 +15,37 @@ export function conversationStart(content: string): number {
   return newline === -1 ? content.length : newline + 1
 }
 
+/**
+ * `block` as the Conversation's last entry, a blank line after whatever came
+ * before it and ahead of any heading that follows; the heading is added when missing.
+ */
+export function appendToConversation(content: string, block: string): string {
+  const match = CONVERSATION_HEADING.exec(content)
+  if (!match) return `${content.trimEnd()}\n\n## Conversation\n\n${block}\n`
+  const start = conversationStart(content)
+  const heading = /^#{1,6}[ \t]+.*$/gm
+  heading.lastIndex = start
+  const end = heading.exec(content)?.index ?? content.length
+  const body = content.slice(start, end).trimEnd()
+  const rest = content.slice(end)
+  return `${content.slice(0, start)}${body === '' ? '\n' : `${body}\n\n`}${block}\n${rest === '' ? '' : `\n${rest}`}`
+}
+
+/** Text as blockquote lines, one `> ` per line, blank lines kept. */
+export function quoted(text: string): string {
+  return text
+    .trim()
+    .split('\n')
+    .map(line => `> ${line}`)
+    .join('\n')
+}
+
 export interface LocatedTrigger<T> {
   fields: T
-  /** Offset right after the trigger line (and its reply, if any) — where a fresh reply is inserted. */
+  /** Offset right after the trigger line — where a fresh reply is inserted. */
   insertAt: number
+  /** Offset right after the trigger line and its reply. */
+  end: number
   /** The blockquote body directly under the trigger line, `> ` stripped; `undefined` when none follows yet. */
   reply: string | undefined
 }
@@ -50,7 +77,7 @@ export function locatedTriggers<T>(content: string, pattern: RegExp, fields: (ma
       offset += lines[i].length + 1
       i++
     }
-    found.push({ fields: fields(match), insertAt, reply: replyLines.length > 0 ? replyLines.join('\n') : undefined })
+    found.push({ fields: fields(match), insertAt, end: offset, reply: replyLines.length > 0 ? replyLines.join('\n') : undefined })
   }
   return found
 }

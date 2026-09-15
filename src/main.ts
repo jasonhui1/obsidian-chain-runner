@@ -203,11 +203,25 @@ export default class ChainRunnerPlugin extends Plugin {
       currentRun: () => undefined,
       open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
     })
+    const chat = new ChatWithProposer({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const askRoom = new AskTheRoom({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
     const holds = new HoldActions({
       app: this.app,
       notify: message => new Notice(message),
       notes: holdNotes,
       write: runId => directInPanel.write(runId),
+      chat,
+      room: askRoom,
     })
     this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
     const directFromDrawing = new DirectFromDrawing({
@@ -342,24 +356,10 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void rerun.start(),
     })
 
-    const chat = new ChatWithProposer({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-    })
-
     this.addCommand({
       id: 'chat-with-proposer',
       name: 'Chat with proposer',
       callback: () => void chat.start(),
-    })
-
-    const askRoom = new AskTheRoom({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
     })
 
     this.addCommand({

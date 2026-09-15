@@ -1,4 +1,4 @@
-import { conversationStart, locatedTriggers } from './conversationTrigger'
+import { appendToConversation, conversationStart, locatedTriggers, quoted } from './conversationTrigger'
 import { joinSeed } from './seed'
 import type { AgentOutput, RunMeta } from '../engine/types'
 
@@ -16,21 +16,41 @@ export interface ChatTurn {
   reply?: string
 }
 
+/** A chat turn as the Conversation reads back, with the run its reply was revised as. */
+export interface ChatEntry extends ChatTurn {
+  revisedAs?: string
+}
+
 const MESSAGE_LINE = /^@(\S+)\s+(.+)$/
 const REVISE_LINE = /^revise$/i
+const revisedLine = (runId: string): string => `revise → reran as run ${runId}`
+const REVISED_LINE = /^revise → reran as run (\S+)$/
 
 export { conversationStart }
 
-interface LocatedTurn extends ChatTurn {
+interface LocatedTurn extends ChatEntry {
   /** Offset in the full note right after the message line — where a reply is inserted. */
   insertAt: number
+  /** Offset right after the reply — where a revised line goes. */
+  end: number
 }
 
 /** Every `@name message` line under Conversation, in order, positioned to insert a reply after. */
 function locatedTurns(content: string): LocatedTurn[] {
   return locatedTriggers(content, MESSAGE_LINE, match => ({ name: match[1], message: match[2].trim() })).map(
-    ({ fields, insertAt, reply }) => ({ ...fields, insertAt, ...(reply !== undefined ? { reply } : {}) }),
+    ({ fields, insertAt, end, reply }) => {
+      const revisedAs = REVISED_LINE.exec(content.slice(end, lineEnd(content, end)).trim())?.[1]
+      return { ...fields, insertAt, end, ...(reply !== undefined ? { reply } : {}), ...(revisedAs ? { revisedAs } : {}) }
+    },
   )
+}
+
+/** Every chat turn under Conversation, in order, each with where it sits in the note. */
+export function chatEntries(content: string): { entry: ChatEntry; at: number }[] {
+  return locatedTurns(content).map(({ name, message, reply, revisedAs, insertAt }) => ({
+    entry: { name, message, ...(reply !== undefined ? { reply } : {}), ...(revisedAs ? { revisedAs } : {}) },
+    at: insertAt,
+  }))
 }
 
 /** The most recent `@name message` line with no reply below it yet, or undefined when there is none. */
@@ -55,18 +75,33 @@ export function pendingRevise(content: string): ChatTurn | undefined {
 export function appendChatReply(content: string, turn: { name: string; message: string }, reply: string): string {
   const found = locatedTurns(content).find(t => t.name === turn.name && t.message === turn.message && t.reply === undefined)
   if (!found) return content
-  const block =
-    reply
-      .trim()
-      .split('\n')
-      .map(line => `> ${line}`)
-      .join('\n') + '\n'
-  return content.slice(0, found.insertAt) + block + content.slice(found.insertAt)
+  return content.slice(0, found.insertAt) + quoted(reply) + '\n' + content.slice(found.insertAt)
+}
+
+/** A message and its reply written together, as the Conversation's last entry. */
+export function appendChatTurn(content: string, turn: { name: string; message: string }, reply: string): string {
+  return appendToConversation(content, `@${turn.name} ${turn.message}\n${quoted(reply)}`)
 }
 
 /** The trailing bare `revise` replaced with which run it produced, so it is not acted on twice. */
 export function markRevised(content: string, runId: string): string {
-  return content.replace(/revise\s*$/i, `revise → reran as run ${runId}\n`)
+  return content.replace(/revise\s*$/i, `${revisedLine(runId)}\n`)
+}
+
+/** The last such turn not yet revised, marked as revised into `runId`; unchanged when there is none. */
+export function markTurnRevised(content: string, turn: Required<ChatTurn>, runId: string): string {
+  const found = locatedTurns(content)
+    .filter(t => t.name === turn.name && t.message === turn.message && t.reply === turn.reply && !t.revisedAs)
+    .at(-1)
+  if (!found) return content
+  const at = Math.min(found.end, content.length)
+  const before = content.slice(0, at)
+  return `${before}${before.endsWith('\n') ? '' : '\n'}${revisedLine(runId)}\n${content.slice(at)}`
+}
+
+function lineEnd(content: string, at: number): number {
+  const newline = content.indexOf('\n', at)
+  return newline === -1 ? content.length : newline
 }
 
 /** Last write wins, matching how the engine resolves a node's outputs. */

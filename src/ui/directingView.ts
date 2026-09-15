@@ -80,6 +80,15 @@ export class DirectingView extends ItemView {
       undirect: (verb, proposal, other) => this.onRun(runId => this.holds.undirect(runId, verb, proposal, other)),
       tickCanon: (id, ticked) => this.onRun(runId => this.holds.tickCanon(runId, id, ticked)),
       writeHold: () => this.onRun(runId => this.holds.writeHold(runId)),
+      chat: (proposal, message) => this.written(runId => this.holds.chat(runId, proposal, message)),
+      askRoom: question => this.written(runId => this.holds.askRoom(runId, question)),
+      change: text => this.written(runId => this.holds.change(runId, text)),
+      revise: async turn => {
+        const runId = this.runId
+        const landed = runId && (await this.holds.revise(runId, turn))
+        // A rerun moves the hold to the run it landed on.
+        if (landed) await this.show(landed, turn.name)
+      },
       openMenu: event =>
         this.onRun(runId =>
           new Menu()
@@ -98,5 +107,14 @@ export class DirectingView extends ItemView {
   /** A board action, on the run shown; nothing when none is. */
   private onRun(act: (runId: string) => unknown): void {
     if (this.runId) void act(this.runId)
+  }
+
+  /** A board action that writes the hold, redrawn from it before the board is told it landed. */
+  private async written(act: (runId: string) => Promise<boolean>): Promise<boolean> {
+    const runId = this.runId
+    if (!runId) return false
+    const done = await act(runId)
+    if (done && runId === this.runId) await this.refresh()
+    return done
   }
 }

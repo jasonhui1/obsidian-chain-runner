@@ -781,3 +781,58 @@
   flex-shrink: 0;
   margin-top: 3px;
 }
+
+.chain-runner-directing-turn {
+  margin-bottom: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-said {
+  margin-bottom: var(--size-2-2);
+  font-weight: var(--font-semibold);
+  white-space: pre-wrap;
+}
+
+.chain-runner-directing-said::before {
+  content: "You: ";
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.chain-runner-directing-answerer {
+  margin-top: var(--size-4-2);
+  color: var(--text-muted);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-directing-turn .chain-runner-directing-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chain-runner-directing-turn .chain-runner-directing-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chain-runner-directing-turn button.chain-runner-directing-quiet {
+  height: auto;
+  margin-top: var(--size-2-2);
+  padding: var(--size-2-1) 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-directing-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-3);
+}
+
+.chain-runner-directing-box textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  font-size: var(--font-ui-small);
+}
