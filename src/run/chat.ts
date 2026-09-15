@@ -1,3 +1,4 @@
+import { conversationStart, locatedTriggers } from './conversationTrigger'
 import { joinSeed } from './seed'
 import type { AgentOutput, RunMeta } from '../engine/types'
 
@@ -15,54 +16,21 @@ export interface ChatTurn {
   reply?: string
 }
 
-const CONVERSATION_HEADING = /^##\s+Conversation\s*$/m
 const MESSAGE_LINE = /^@(\S+)\s+(.+)$/
 const REVISE_LINE = /^revise$/i
+
+export { conversationStart }
 
 interface LocatedTurn extends ChatTurn {
   /** Offset in the full note right after the message line — where a reply is inserted. */
   insertAt: number
 }
 
-/** Where the Conversation section's body starts; the note's length when there is no such heading. */
-function conversationStart(content: string): number {
-  const match = CONVERSATION_HEADING.exec(content)
-  if (!match) return content.length
-  const newline = content.indexOf('\n', match.index)
-  return newline === -1 ? content.length : newline + 1
-}
-
 /** Every `@name message` line under Conversation, in order, positioned to insert a reply after. */
 function locatedTurns(content: string): LocatedTurn[] {
-  const start = conversationStart(content)
-  const lines = content.slice(start).split('\n')
-  const turns: LocatedTurn[] = []
-  let offset = start
-
-  for (let i = 0; i < lines.length; ) {
-    const match = MESSAGE_LINE.exec(lines[i].trim())
-    if (!match) {
-      offset += lines[i].length + 1
-      i++
-      continue
-    }
-    offset += lines[i].length + 1
-    i++
-    const insertAt = offset
-    const replyLines: string[] = []
-    while (i < lines.length && lines[i].startsWith('> ')) {
-      replyLines.push(lines[i].slice(2))
-      offset += lines[i].length + 1
-      i++
-    }
-    turns.push({
-      name: match[1],
-      message: match[2].trim(),
-      insertAt,
-      ...(replyLines.length > 0 ? { reply: replyLines.join('\n') } : {}),
-    })
-  }
-  return turns
+  return locatedTriggers(content, MESSAGE_LINE, match => ({ name: match[1], message: match[2].trim() })).map(
+    ({ fields, insertAt, reply }) => ({ ...fields, insertAt, ...(reply !== undefined ? { reply } : {}) }),
+  )
 }
 
 /** The most recent `@name message` line with no reply below it yet, or undefined when there is none. */

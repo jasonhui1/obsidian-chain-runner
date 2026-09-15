@@ -6,6 +6,7 @@ import { EngineStatus } from './engine/status'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
+import { AskTheRoom } from './ui/askTheRoom'
 import { ChatWithProposer } from './ui/chatWithProposer'
 import {
   createDrawingSurface,
@@ -29,6 +30,7 @@ import { RerunDownstream } from './ui/rerunDownstream'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { Resume } from './ui/resume'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
+import { SideQuest } from './ui/sideQuest'
 import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
 import { installScript } from './ui/toolScript'
@@ -300,6 +302,33 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'chat-with-proposer',
       name: 'Chat with proposer',
       callback: () => void chat.start(),
+    })
+
+    const askRoom = new AskTheRoom({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+
+    this.addCommand({
+      id: 'ask-the-room',
+      name: 'Ask the room',
+      callback: () => void askRoom.start(),
+    })
+
+    const sideQuest = new SideQuest({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
+
+    this.addCommand({
+      id: 'side-quest',
+      name: 'Side quest',
+      callback: () => void sideQuest.start(),
     })
 
     // Proof the client reaches a live engine, and something to exercise the
