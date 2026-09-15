@@ -1,7 +1,7 @@
 /**
  * PROTOTYPE (#35) — throwaway. Three layouts for directing a run from the right
- * sidebar, switchable from the bar at the panel’s top: A per run, B per
- * proposal, C a conversation. Every button goes
+ * sidebar, switchable from the ⋯ menu: A per run, B per proposal,
+ * C a conversation. Every button goes
  * through `PrototypeHold`, never the note.
  */
 
@@ -104,11 +104,6 @@ export class DirectingPanelPrototype extends ItemView {
     return this.runId ? this.holds.get(this.runId) : undefined
   }
 
-  private cycle(step: number): void {
-    this.variant = (this.variant + step + VARIANTS.length) % VARIANTS.length
-    this.draw()
-  }
-
   // ── drawing ────────────────────────────────────────────────────────────────
 
   private draw(): void {
@@ -118,7 +113,6 @@ export class DirectingPanelPrototype extends ItemView {
     const scroll = root.querySelector('.crp-body')?.scrollTop ?? 0
     root.empty()
     root.addClass('crp')
-    this.switcher(root)
     this.header(root)
     const body = root.createDiv({ cls: 'crp-body' })
     const hold = this.hold
@@ -141,20 +135,26 @@ export class DirectingPanelPrototype extends ItemView {
     const head = root.createDiv({ cls: 'crp-header' })
     const hold = this.hold?.read()
     const titleRow = head.createDiv({ cls: 'crp-title-row' })
-    titleRow.createDiv({ cls: 'crp-title', text: hold ? `Directing · run ${hold.runId}` : 'Directing' })
-    if (this.hold && this.runId) {
-      const runId = this.runId
-      const more = this.button(titleRow, '⋯', () => {}, 'crp-more')
-      more.setAttribute('aria-label', 'More')
-      more.onclick = event => this.moreMenu(runId).showAtMouseEvent(event)
-    }
-    if (hold) head.createDiv({ cls: 'crp-sub', text: `${hold.chainName} · prototype: nothing is saved, replies are canned` })
+    const title = titleRow.createDiv({ cls: 'crp-title' })
+    title.createSpan({ text: hold ? hold.chainName : 'Directing' })
+    if (hold) title.createSpan({ cls: 'crp-sub', text: ` · ${hold.runId.split('-').pop() ?? hold.runId}` }).title = `run ${hold.runId}`
+    const badge = titleRow.createSpan({ cls: 'crp-badge', text: 'prototype' })
+    badge.title = 'Nothing is saved; replies are canned'
+    const more = this.button(titleRow, '⋯', () => {}, 'crp-more')
+    more.setAttribute('aria-label', 'More')
+    more.onclick = event => this.moreMenu(this.hold ? this.runId : undefined).showAtMouseEvent(event)
   }
 
-  private moreMenu(runId: string): Menu {
+  private moreMenu(runId: string | undefined): Menu {
+    const menu = new Menu()
+    VARIANTS.forEach((name, index) =>
+      menu.addItem(item => item.setTitle(`Layout ${name}`).setChecked(this.variant === index).onClick(() => ((this.variant = index), this.draw()))),
+    )
+    if (!runId) return menu
+    menu.addSeparator()
     const drawerItem = (which: 'note' | 'calls', title: string, icon: string) => (item: MenuItem) =>
       item.setTitle(title).setIcon(icon).setChecked(this.drawer === which).onClick(() => this.toggleDrawer(which))
-    return new Menu()
+    return menu
       .addItem(item =>
         item.setTitle('Open the hold note in a tab').setIcon('file-text').onClick(() => {
           this.openCount++
@@ -202,13 +202,6 @@ export class DirectingPanelPrototype extends ItemView {
       this.holds.delete(runId)
       await this.point(runId, this.selected)
     }, 'mod-cta')
-  }
-
-  private switcher(root: HTMLElement): void {
-    const bar = root.createDiv({ cls: 'crp-switcher' })
-    this.button(bar, '‹', () => this.cycle(-1))
-    bar.createSpan({ text: VARIANTS[this.variant] })
-    this.button(bar, '›', () => this.cycle(1))
   }
 
   private revealSelected(): void {

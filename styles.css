@@ -673,3 +673,4 @@
 .crp-drawer { max-height: 40%; overflow: auto; border-top: 1px solid var(--background-modifier-border); background: var(--background-primary-alt); }
 .crp-drawer-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px var(--crp-gutter); font-size: var(--font-ui-smaller); color: var(--text-muted); position: sticky; top: 0; background: var(--background-primary-alt); }
 .crp-drawer pre { margin: 0; padding: 8px var(--crp-gutter); font-size: 11px; white-space: pre-wrap; }
+.crp-badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-warning); border: 1px solid currentColor; border-radius: 8px; padding: 0 6px; opacity: 0.8; }
