@@ -656,3 +656,4 @@
 .crp-title-row .crp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crp button.crp-more { background: none; box-shadow: none; padding: 0 8px; font-size: var(--font-ui-large); color: var(--text-muted); }
 .crp-drawer-bar { display: flex; justify-content: space-between; align-items: center; padding: 2px var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--text-muted); position: sticky; top: 0; background: var(--background-primary-alt); }
+.crp-typing { font-family: var(--font-monospace); font-size: 10px; color: var(--text-faint); padding: 2px var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); white-space: nowrap; overflow-x: auto; }

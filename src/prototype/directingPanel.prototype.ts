@@ -34,7 +34,8 @@ export class DirectingPanelPrototype extends ItemView {
   private readonly busy = new Set<string>()
   private readonly drafts = new Map<string, string>()
   private readonly editing = new Set<string>()
-  private focusKey: string | undefined
+  private typingEl: HTMLElement | undefined
+  private readonly typing: string[] = []
   private chains: string[] = []
   private to = ROOM
   private questing = false
@@ -67,8 +68,37 @@ export class DirectingPanelPrototype extends ItemView {
     this.registerDomEvent(this.contentEl, 'keydown', event => {
       if ((event.target as HTMLElement).closest('input, textarea')) event.stopPropagation()
     })
+    this.watchTyping()
     void this.deps.chainNames().then(names => (this.chains = names))
     this.draw()
+  }
+
+  /** PROTOTYPE diagnostic: where a key press in the panel's text boxes ends up, shown under the layout switcher. */
+  private watchTyping(): void {
+    const doc = this.contentEl.ownerDocument
+    const describe = (el: Element | null): string =>
+      !el ? 'nothing' : this.contentEl.contains(el) ? `panel ${(el as HTMLElement).dataset.key ?? el.tagName.toLowerCase()}` : `${el.tagName.toLowerCase()}.${Array.from(el.classList).slice(0, 2).join('.')}`
+    const note = (line: string): void => {
+      this.typing.push(line)
+      this.typing.splice(0, this.typing.length - 5)
+      this.typingEl?.setText(this.typing.join('  ·  '))
+    }
+    let ours = 0
+    this.registerDomEvent(this.contentEl, 'focusin', event => {
+      ours = Date.now()
+      note(`focus ${describe(event.target as Element)}`)
+    })
+    this.registerDomEvent(this.contentEl, 'focusout', () => setTimeout(() => note(`focus left → ${describe(doc.activeElement)}`)))
+    this.registerDomEvent(this.contentEl, 'input', () => note('text arrived ✓'))
+    this.registerDomEvent(
+      doc,
+      'keydown',
+      event => {
+        if (Date.now() - ours > 10000 || event.key.length !== 1) return
+        setTimeout(() => note(`key "${event.key}" → ${describe(event.target as Element)}${event.defaultPrevented ? ' BLOCKED' : ''}`))
+      },
+      { capture: true },
+    )
   }
 
   /** Points the panel at a run and, when a card was clicked, its proposal. */
@@ -106,10 +136,13 @@ export class DirectingPanelPrototype extends ItemView {
 
   private draw(): void {
     const root = this.contentEl
+    const active = root.ownerDocument.activeElement
+    const focusKey = active instanceof HTMLElement && root.contains(active) ? active.dataset.key : undefined
     const scroll = root.querySelector('.crp-body')?.scrollTop ?? 0
     root.empty()
     root.addClass('crp')
     this.switcher(root)
+    this.typingEl = root.createDiv({ cls: 'crp-typing', text: this.typing.join('  ·  ') || 'typing check: click a text box and type' })
     this.header(root)
     const body = root.createDiv({ cls: 'crp-body' })
     const hold = this.hold
@@ -125,7 +158,7 @@ export class DirectingPanelPrototype extends ItemView {
     }
     if (hold && this.drawer) this.drawerView(root, hold)
     body.scrollTop = scroll
-    if (this.focusKey) root.querySelector<HTMLElement>(`[data-key="${CSS.escape(this.focusKey)}"]`)?.focus()
+    if (focusKey) root.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusKey)}"]`)?.focus()
   }
 
   private header(root: HTMLElement): void {
@@ -392,8 +425,6 @@ export class DirectingPanelPrototype extends ItemView {
       area.dataset.key = key
       area.value = this.drafts.get(key) ?? text
       area.oninput = () => this.drafts.set(key, area.value)
-      area.onfocus = () => (this.focusKey = key)
-      area.onblur = () => this.focusKey === key && (this.focusKey = undefined)
       const row = box.createDiv({ cls: 'crp-row' })
       this.button(row, 'Save edit', () => {
         this.editing.delete(name)
@@ -484,8 +515,6 @@ export class DirectingPanelPrototype extends ItemView {
     input.value = this.drafts.get(key) ?? ''
     input.disabled = this.busy.has(key)
     input.oninput = () => this.drafts.set(key, input.value)
-    input.onfocus = () => (this.focusKey = key)
-    input.onblur = () => this.focusKey === key && (this.focusKey = undefined)
     const send = (): void => {
       const text = input.value.trim()
       if (!text || this.busy.has(key)) return
