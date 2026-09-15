@@ -1,6 +1,7 @@
 /**
  * Canon: the vault note a hold's CANON? ticks land in. Humans write it; a
- * resume only ever adds under LOCKED, never touching UNRESOLVED or REJECTED.
+ * resume adds each ticked line under the section its own tag names —
+ * LOCKED, UNRESOLVED, or REJECTED — defaulting an untagged line to LOCKED.
  */
 
 export const CANON_PATH = 'context/canon-anime-game.md'
@@ -32,11 +33,25 @@ function freshCanon(): string {
   return '## LOCKED\n\n## UNRESOLVED\n\n## REJECTED\n'
 }
 
+type CanonSection = 'LOCKED' | 'UNRESOLVED' | 'REJECTED'
+
+const CANON_SECTIONS: readonly CanonSection[] = ['LOCKED', 'UNRESOLVED', 'REJECTED']
+
+const TAGGED_LINE = new RegExp(`^(${CANON_SECTIONS.join('|')}):\\s*(.+)$`)
+
+/** A ticked line's own tag decides its section; an untagged line defaults to LOCKED. */
+function sectionOf(line: string): { section: CanonSection; text: string } {
+  const match = TAGGED_LINE.exec(line)
+  return match ? { section: match[1] as CanonSection, text: match[2] } : { section: 'LOCKED', text: line }
+}
+
 // `[ \t]`, not `\s`: `\s` reaches across the heading's own newline, pulling it
 // into the match and throwing bodyStart a line too far.
-const LOCKED_HEADING = /^##[ \t]+LOCKED[ \t]*$/m
+function sectionHeading(section: CanonSection): RegExp {
+  return new RegExp(`^##[ \\t]+${section}[ \\t]*$`, 'm')
+}
 
-/** Where LOCKED's body ends: the next heading, or the end of the file. */
+/** Where a section's body ends: the next heading, or the end of the file. */
 function nextHeadingIndex(text: string, from: number): number {
   const heading = /^#{1,6}[ \t]+.*$/gm
   heading.lastIndex = from
@@ -56,15 +71,29 @@ function bulletTexts(body: string): string[] {
 }
 
 /**
- * `lines` appended under `## LOCKED`, after whatever is already there. A file
- * with no LOCKED heading gets one, so nothing ticked is ever lost; nothing
- * ticked at all leaves the file exactly as it was. A line already sitting
- * under LOCKED — human-written or from an earlier resume — is skipped rather
- * than duplicated.
+ * `lines` appended each under the section its own tag names, after whatever is
+ * already there — tag stripped, and defaulting to LOCKED when a line carries
+ * none. A file missing a targeted section's heading gets one, so nothing
+ * ticked is ever lost; nothing ticked at all leaves the file exactly as it
+ * was. A line already sitting under its section — human-written or from an
+ * earlier resume — is skipped rather than duplicated.
  */
-export function appendLockedCanon(existing: string | undefined, lines: string[]): string {
+export function appendCanon(existing: string | undefined, lines: string[]): string {
   const base = existing ?? freshCanon()
-  const heading = LOCKED_HEADING.exec(base)
+  const bySection = new Map<CanonSection, string[]>()
+  for (const line of lines) {
+    const { section, text } = sectionOf(line)
+    bySection.set(section, [...(bySection.get(section) ?? []), text])
+  }
+
+  return CANON_SECTIONS.reduce((acc, section) => {
+    const sectionLines = bySection.get(section)
+    return sectionLines ? appendUnderSection(acc, section, sectionLines) : acc
+  }, base)
+}
+
+function appendUnderSection(base: string, section: CanonSection, lines: string[]): string {
+  const heading = sectionHeading(section).exec(base)
   const bodyStart = heading ? heading.index + heading[0].length : -1
   const bodyEnd = heading ? nextHeadingIndex(base, bodyStart + 1) : -1
   const body = heading ? base.slice(bodyStart, bodyEnd).trim() : ''
@@ -74,7 +103,7 @@ export function appendLockedCanon(existing: string | undefined, lines: string[])
   if (newLines.length === 0) return base
 
   const bullets = newLines.map(line => `- ${line}`).join('\n')
-  if (!heading) return `${base.replace(/\s+$/, '')}\n\n## LOCKED\n${bullets}\n`
+  if (!heading) return `${base.replace(/\s+$/, '')}\n\n## ${section}\n${bullets}\n`
 
   const newBody = `${body === '' ? '' : `${body}\n`}${bullets}`
   return `${base.slice(0, bodyStart)}\n${newBody}\n\n${base.slice(bodyEnd).replace(/^\s+/, '')}`

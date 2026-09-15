@@ -1,6 +1,6 @@
 import { normalizePath, TFile, type App } from 'obsidian'
 import { ensureFolder, guardWrite, readIfPresent } from './vaultWrite'
-import { appendLockedCanon, CANON_PATH, tickedCanonLines } from '../run/canon'
+import { appendCanon, CANON_PATH, tickedCanonLines } from '../run/canon'
 import { appendResumeLink, directionBlock } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
 import { runResume } from '../run/resume'
@@ -49,13 +49,13 @@ export class Resume {
       return
     }
 
-    const locked = tickedCanonLines(direction)
-    if (locked.length > 0 && !outcome.error) await this.writeCanon(canonPath, locked)
+    const ticked = tickedCanonLines(direction)
+    if (ticked.length > 0 && !outcome.error) await this.writeCanon(canonPath, ticked)
 
     const linked = await this.linkRun(file, content, outcome.runId)
     if (!linked) return
 
-    this.deps.notify(this.resumeNotice(outcome.runId, outcome.error, locked.length > 0))
+    this.deps.notify(this.resumeNotice(outcome.runId, outcome.error, ticked.length > 0))
   }
 
   private resumeNotice(runId: string, error: string | undefined, hadTicks: boolean): string {
@@ -69,7 +69,7 @@ export class Resume {
     await guardWrite(this.deps.notify, 'the canon file', async () => {
       await ensureFolder(this.deps.app, path.slice(0, path.lastIndexOf('/')))
       const current = this.deps.app.vault.getAbstractFileByPath(path)
-      const fresh = appendLockedCanon(current instanceof TFile ? await this.deps.app.vault.cachedRead(current) : undefined, lines)
+      const fresh = appendCanon(current instanceof TFile ? await this.deps.app.vault.cachedRead(current) : undefined, lines)
       if (current instanceof TFile) await this.deps.app.vault.modify(current, fresh)
       else await this.deps.app.vault.create(path, fresh)
     })
