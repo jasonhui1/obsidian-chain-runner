@@ -1,11 +1,10 @@
 import { normalizePath, type App } from 'obsidian'
-import { guardWrite, readIfPresent } from './vaultWrite'
+import { readIfPresent } from './vaultWrite'
+import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
-import { runHeadless } from '../run/headlessRun'
-import { holdHeading, proposalEdits, refreshHoldNote, thoughtsByNode } from '../run/holdNote'
+import { holdHeading, proposalEdits } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
 import type { EngineClient } from '../engine/client'
-import type { LayoutModel, RunMeta } from '../engine/types'
 
 /** The "Rerun downstream" command: the vault half of `src/run/rerun.ts`. */
 
@@ -32,7 +31,7 @@ export class RerunDownstream {
       return
     }
 
-    const source = await this.deps.withEngine(() => this.fetchRun(heading.runId))
+    const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
     if (!source) return
 
     const edits = proposalEdits(content, source.layout.panels)
@@ -47,38 +46,6 @@ export class RerunDownstream {
       return
     }
 
-    const outcome = await this.deps.withEngine(() => runHeadless(engine, request))
-    if (!outcome) return
-    const newRunId = outcome.runId
-    if (!newRunId) {
-      notify(outcome.error ? `Rerun failed: ${outcome.error}` : 'Rerun produced no run')
-      return
-    }
-    if (outcome.error) {
-      notify(`Rerun ${newRunId} failed: ${outcome.error}`)
-      return
-    }
-    const landed = await this.deps.withEngine(() => this.fetchRun(newRunId))
-    if (!landed) return
-
-    const { run, layout } = landed
-    const wrote = await guardWrite(notify, 'the hold note', async () => {
-      // Read again: the human may have written in the note while the rerun went.
-      const current = await app.vault.cachedRead(file)
-      const refreshed = refreshHoldNote(current, {
-        runId: run.runId,
-        chainName: heading.chainName,
-        panels: layout.panels,
-        thoughts: thoughtsByNode(run.agentOutputs),
-      })
-      await app.vault.modify(file, refreshed)
-      return true
-    })
-    if (wrote) notify(`Reran downstream as run ${run.runId}`)
-  }
-
-  private async fetchRun(runId: string): Promise<{ run: RunMeta; layout: LayoutModel }> {
-    const [run, layout] = await Promise.all([this.deps.engine.getRun(runId), this.deps.engine.getLayout(runId)])
-    return { run, layout }
+    await rerunAndRefresh(this.deps, file, heading, request)
   }
 }

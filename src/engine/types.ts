@@ -140,10 +140,12 @@ export interface Capabilities {
   runFailureFrame?: boolean
 }
 
-/** What `POST /api/run` is asked for. A run names a chain and supplies its inputs. */
+/** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
 export interface RunRequest {
   /** Chain name or slug — the engine resolves by name first, then slug. */
-  chainName: string
+  chainName?: string
+  /** Runs one agent alone, with no chain around it. Exclusive with `chainName`. */
+  agentName?: string
   seedPrompt: string
   /** The pick for the chain's declared dropdown, when it declares one. */
   paramValue?: string

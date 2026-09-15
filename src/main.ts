@@ -6,6 +6,7 @@ import { EngineStatus } from './engine/status'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
+import { ChatWithProposer } from './ui/chatWithProposer'
 import {
   createDrawingSurface,
   createNodeSurface,
@@ -286,6 +287,19 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'rerun-downstream',
       name: 'Rerun downstream',
       callback: () => void rerun.start(),
+    })
+
+    const chat = new ChatWithProposer({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+
+    this.addCommand({
+      id: 'chat-with-proposer',
+      name: 'Chat with proposer',
+      callback: () => void chat.start(),
     })
 
     // Proof the client reaches a live engine, and something to exercise the
