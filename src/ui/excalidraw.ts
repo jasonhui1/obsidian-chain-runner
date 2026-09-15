@@ -37,7 +37,7 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
-import { buildDirectLabel, cardProposal, selectedRunId, type NoteFrontmatter } from './runLabel'
+import { buildDirectLabel, cardProposal, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary } from '../engine/types'
@@ -253,7 +253,7 @@ export interface NodeSurface {
   /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
   selectedRun(on?: DrawingView): string | undefined
   /** The run and proposal a card on the drawing shows, by its output note. */
-  cardProposal(element: unknown, on: DrawingView): { runId: string; proposal: string } | undefined
+  cardProposal(element: unknown, on: DrawingView): CardProposal | undefined
   /** The proposal the reader has selected, for the commands that decide one. */
   selectedProposal(on?: DrawingView): ProposalData | undefined
   /** The one node element the reader has selected, for the gestures the hook cannot see. */

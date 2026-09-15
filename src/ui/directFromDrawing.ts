@@ -1,4 +1,4 @@
-import { directLabelRunId } from './runLabel'
+import { directLabelRunId, type CardProposal } from './runLabel'
 import { UNREACHABLE_DRAWING } from './onDrawing'
 import type { Point } from './panelSpot'
 
@@ -15,7 +15,7 @@ export interface DirectFromDrawingDeps {
     /** The run the selection belongs to; throws when the drawing cannot be reached. */
     selectedRun(): string | undefined
     /** The run and proposal a clicked card shows, or `undefined` for any other element. */
-    cardProposal(element: unknown, view: unknown): { runId: string; proposal: string } | undefined
+    cardProposal(element: unknown, view: unknown): CardProposal | undefined
   }
   direct: (runId: string) => Promise<void>
   showProposal: (runId: string, proposal: string) => Promise<void>

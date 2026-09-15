@@ -18,9 +18,9 @@ export interface DirectingViewDeps {
 export class DirectingView extends ItemView {
   private runId: string | undefined
   private stopListening: (() => void) | undefined
-  /** Which `show` is current, so a slow read for an earlier run draws nothing. */
-  private shown = 0
-  private board: DirectingBoard | undefined
+  /** Counts reads, so a slow one overtaken by a later `show` draws nothing. */
+  private latestRead = 0
+  private made: DirectingBoard | undefined
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -42,33 +42,33 @@ export class DirectingView extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
-    this.drawing().open({ kind: 'idle' })
+    this.board().open({ kind: 'idle' })
   }
 
   override async onClose(): Promise<void> {
     this.stopListening?.()
     this.stopListening = this.runId = undefined
-    this.board?.draw({ kind: 'idle' })
+    this.made?.draw({ kind: 'idle' })
   }
 
   /** Shows a run's hold, on a proposal's tab when one is named. */
   async show(runId: string, proposal?: string): Promise<void> {
-    const shown = ++this.shown
+    const read = ++this.latestRead
     if (runId !== this.runId) {
       this.stopListening?.()
       this.runId = runId
       this.stopListening = this.deps.holds.onChange(runId, () => void this.refresh())
     }
     const state = await this.read(runId)
-    if (shown === this.shown) this.drawing().open(state, proposal)
+    if (read === this.latestRead) this.board().open(state, proposal)
   }
 
   private async refresh(): Promise<void> {
     const runId = this.runId
     if (!runId) return
-    const shown = this.shown
+    const read = this.latestRead
     const state = await this.read(runId)
-    if (shown === this.shown) this.drawing().draw(state)
+    if (read === this.latestRead) this.board().draw(state)
   }
 
   private async read(runId: string): Promise<DirectingState> {
@@ -76,29 +76,27 @@ export class DirectingView extends ItemView {
     return hold ? { kind: 'hold', hold } : { kind: 'missing', runId }
   }
 
-  private drawing(): DirectingBoard {
-    return (this.board ??= new DirectingBoard(this.contentEl, {
+  private board(): DirectingBoard {
+    return (this.made ??= new DirectingBoard(this.contentEl, {
       renderMarkdown: (text, into) => {
         const host = this.addChild(new Component())
         void MarkdownRenderer.render(this.app, text, into, '', host)
         return () => this.removeChild(host)
       },
-      direct: (verb, proposal, other) => {
-        if (this.runId) void this.deps.holds.direct(this.runId, verb, proposal, other)
-      },
-      tickCanon: (id, ticked) => {
-        if (this.runId) void this.deps.holds.tickCanon(this.runId, id, ticked)
-      },
-      writeHold: () => {
-        if (this.runId) void this.deps.writeHold(this.runId)
-      },
-      openMenu: event => {
-        const runId = this.runId
-        if (!runId) return
-        new Menu()
-          .addItem(item => item.setTitle('Open the hold note in a tab').setIcon('file-text').onClick(() => this.deps.openHoldNote(runId)))
-          .showAtMouseEvent(event)
-      },
+      direct: (verb, proposal, other) => this.onRun(runId => this.deps.holds.direct(runId, verb, proposal, other)),
+      tickCanon: (id, ticked) => this.onRun(runId => this.deps.holds.tickCanon(runId, id, ticked)),
+      writeHold: () => this.onRun(runId => this.deps.writeHold(runId)),
+      openMenu: event =>
+        this.onRun(runId =>
+          new Menu()
+            .addItem(item => item.setTitle('Open the hold note in a tab').setIcon('file-text').onClick(() => this.deps.openHoldNote(runId)))
+            .showAtMouseEvent(event),
+        ),
     }))
+  }
+
+  /** A board action, on the run shown; nothing when none is. */
+  private onRun(act: (runId: string) => unknown): void {
+    if (this.runId) void act(this.runId)
   }
 }

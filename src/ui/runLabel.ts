@@ -62,13 +62,20 @@ export function directLabelRunId(element: { customData?: unknown }): string | un
 /** A card's output note's frontmatter, by the link the card shows it through. */
 export type NoteFrontmatter = (linkpath: string) => unknown
 
+/** A card on the drawing, as the output note it shows records it. */
+export interface CardProposal {
+  runId: string
+  proposal: string
+}
+
 /** The run and proposal a card's output note records, or `undefined` for anything but such a card. */
-export function cardProposal(element: SceneShape, frontmatter: NoteFrontmatter): { runId: string; proposal: string } | undefined {
+export function cardProposal(element: SceneShape, frontmatter: NoteFrontmatter): CardProposal | undefined {
   if (element.type !== 'embeddable' && element.type !== 'iframe') return undefined
   const linkpath = linkpathOf(element.link)
   const front = linkpath ? frontmatter(linkpath) : undefined
   const runId = sourceRunId(front)
-  return runId ? { runId, proposal: (front as { output: string }).output } : undefined
+  const proposal = (front as Record<string, unknown> | undefined)?.['output']
+  return runId && typeof proposal === 'string' ? { runId, proposal } : undefined
 }
 
 /** The run an output note records, by the link a card shows it through. */
