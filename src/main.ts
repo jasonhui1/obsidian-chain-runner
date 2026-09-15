@@ -460,15 +460,18 @@ export default class ChainRunnerPlugin extends Plugin {
   /** PROTOTYPE (#35): a click on a run's card points an open directing panel at that run and proposal. */
   private pointDirectingPanelAtCard(clicked: unknown, view: unknown): void {
     const element = clicked as { type?: string; link?: string | null }
-    const panel = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)[0]?.view
-    if (!(panel instanceof DirectingPanelPrototype)) return
     if (element.type !== 'embeddable' && element.type !== 'iframe') return
     const linkpath = linkpathOf(element.link)
     const drawing = (view as { file?: TFile }).file?.path ?? ''
     const note = linkpath ? this.app.metadataCache.getFirstLinkpathDest(linkpath, drawing) : null
     const front = note ? this.app.metadataCache.getFileCache(note)?.frontmatter : undefined
-    if (typeof front?.['run'] !== 'string') return
-    void panel.point(front['run'], typeof front['output'] === 'string' ? front['output'] : undefined)
+    const runId: unknown = front?.['run']
+    if (typeof runId !== 'string') return
+    // A closed panel opens only for a run that already has a hold, so ordinary card clicks stay quiet.
+    const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)[0]?.view
+    if (!(open instanceof DirectingPanelPrototype) && !this.app.vault.getAbstractFileByPath(normalizePath(holdNotePath(runId)))) return
+    const output: unknown = front?.['output']
+    void this.openDirectingPanel().then(panel => panel?.point(runId, typeof output === 'string' ? output : undefined))
   }
 
   /** The result view already open, if any — this never opens one of its own. */

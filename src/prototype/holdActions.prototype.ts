@@ -60,7 +60,6 @@ export interface HoldReading {
 export class PrototypeHold implements HoldActions {
   readonly events: HoldEvent[] = []
   /** Every hold-action call, in order — what the real layer would have been asked. */
-  readonly calls: string[] = []
   private readonly edited = new Set<string>()
   private reruns = 0
 
@@ -68,6 +67,7 @@ export class PrototypeHold implements HoldActions {
     public note: string,
     private readonly changed: () => void,
     private readonly fetchPitch: (runId: string) => Promise<string | undefined>,
+    readonly calls: string[] = [],
   ) {
     this.events.push(...conversationEvents(note))
   }

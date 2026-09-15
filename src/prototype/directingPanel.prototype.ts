@@ -40,6 +40,8 @@ export class DirectingPanelPrototype extends ItemView {
   private questing = false
   private openCount = 0
   private readonly folds = new Map<string, boolean>()
+  /** Survives Reload and switching runs, so the tally of what got used is kept for the session. */
+  private readonly calls: string[] = []
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -91,7 +93,7 @@ export class DirectingPanelPrototype extends ItemView {
   }
 
   private newHold(note: string): PrototypeHold {
-    return new PrototypeHold(note, () => this.draw(), runId => this.deps.fetchPitch(runId))
+    return new PrototypeHold(note, () => this.draw(), runId => this.deps.fetchPitch(runId), this.calls)
   }
 
   private get hold(): PrototypeHold | undefined {
@@ -158,14 +160,22 @@ export class DirectingPanelPrototype extends ItemView {
 
   private drawerView(root: HTMLElement, hold: PrototypeHold): void {
     const drawer = root.createDiv({ cls: 'crp-drawer' })
-    const text = this.drawer === 'note' ? hold.note : hold.calls.join('\n') || '(no calls yet)'
-    drawer.createEl('pre', { text })
+    drawer.createEl('pre', { text: this.drawer === 'note' ? hold.note : this.callTally() })
+  }
+
+  /** How often each hold action was used this session, then every call in order. */
+  private callTally(): string {
+    if (this.calls.length === 0) return '(no calls yet)'
+    const counts = new Map<string, number>()
+    for (const call of this.calls) counts.set(call.split('(')[0], (counts.get(call.split('(')[0]) ?? 0) + 1)
+    const tally = [...counts].sort((a, b) => b[1] - a[1]).map(([action, count]) => `${count} × ${action}`)
+    return [...tally, `${this.openCount} × open hold note`, '', ...this.calls].join('\n')
   }
 
   private noHold(body: HTMLElement): void {
     const runId = this.runId as string
     body.createDiv({ cls: 'crp-empty', text: this.missing ? `Run ${runId} has no hold note yet.` : 'Loading…' })
-    this.action(body, 'direct', '✎ Direct this run', async () => {
+    this.action(body, 'direct', '✎ Direct this run (writes the hold note, for real)', async () => {
       await this.deps.writeHold(runId)
       this.holds.delete(runId)
       await this.point(runId, this.selected)
@@ -414,15 +424,11 @@ export class DirectingPanelPrototype extends ItemView {
     for (const event of hold.events.filter(e => e.kind === 'quest' && e.name === name)) this.bubble(el, event)
     const key = `quest:${name}`
     if (this.busy.has(key)) el.createDiv({ cls: 'crp-bubble crp-waiting', text: 'Side quest running…' })
-    const row = el.createDiv({ cls: 'crp-row' })
-    const select = row.createEl('select')
-    select.createEl('option', { text: 'Send through chain…', value: '' })
-    for (const chain of this.chains) select.createEl('option', { text: chain, value: chain })
-    if (this.chains.length === 0) select.createEl('option', { text: '(engine offline — no chains)', value: '' })
-    select.onchange = () => {
-      const chain = select.value
-      if (chain) void this.run(key, () => hold.sideQuest(name, chain))
-    }
+    const list = el.createEl('datalist')
+    list.id = `crp-chains-${this.variant}-${name}`
+    for (const chain of this.chains) list.createEl('option', { value: chain })
+    this.input(el, key, 'Chain to send it through…', chain => hold.sideQuest(name, chain))
+    el.querySelector<HTMLInputElement>(`[data-key="${CSS.escape(key)}"]`)?.setAttribute('list', list.id)
   }
 
   private directionSummary(el: HTMLElement, hold: PrototypeHold, reading: HoldReading): void {
