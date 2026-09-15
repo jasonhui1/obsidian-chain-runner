@@ -57,9 +57,8 @@ export class DirectingBoard {
   /** Each proposal being edited, by `editKey`, and the words so far. */
   private readonly editing = new Map<string, string>()
   private readonly saving = new Set<string>()
-  /** The engine's chains, once it has named any. */
+  /** The chains the engine named when a tab was last opened. */
   private chains: string[] = []
-  private askingChains = false
   private releases: (() => void)[] = []
   private body: HTMLElement | undefined
 
@@ -165,7 +164,7 @@ export class DirectingBoard {
       key,
       placeholder: 'Chain to send it through…',
       label: 'Go',
-      choices: this.knownChains(),
+      choices: this.chains,
       send: chain => this.deps.sideQuest(name, chain),
     })
   }
@@ -180,18 +179,12 @@ export class DirectingBoard {
     link.rel = 'noopener'
   }
 
-  /** What the engine has named so far; asked again on a later draw while it has named none, since it may have been offline. */
-  private knownChains(): string[] {
-    if (this.chains.length === 0 && !this.askingChains) {
-      this.askingChains = true
-      void this.deps.chains().then(names => {
-        this.askingChains = false
-        if (names.length === 0) return
-        this.chains = names
-        this.draw(this.state)
-      })
-    }
-    return this.chains
+  /** Kept until the engine names chains again, so an engine gone offline leaves the last list to pick from. */
+  private async askForChains(): Promise<void> {
+    const names = await this.deps.chains()
+    if (names.length === 0 || names.join('\n') === this.chains.join('\n')) return
+    this.chains = names
+    this.draw(this.state)
   }
 
   private chat(el: HTMLElement, hold: HoldReading, name: string): void {
@@ -285,6 +278,7 @@ export class DirectingBoard {
     this.tab = proposal
     this.draw(state)
     if (this.body) this.body.scrollTop = 0
+    void this.askForChains()
   }
 
   /** A verb already given is taken back when pressed again. */

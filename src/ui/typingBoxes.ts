@@ -15,7 +15,8 @@ export interface TypingBox {
   choices?: string[]
 }
 
-let lists = 0
+/** Numbers each suggestion list, since a box finds its list by a document-wide id. */
+let choiceLists = 0
 
 export class TypingBoxes {
   private readonly drafts = new Map<string, string>()
@@ -41,6 +42,7 @@ export class TypingBoxes {
     button.textContent = box.label
     button.disabled = this.sending.has(box.key)
 
+    // Widened: the input-or-textarea union loses addEventListener's typed events.
     const field: HTMLElement = input
     field.addEventListener('input', () => void this.drafts.set(box.key, input.value))
     // The hold keeps each message on one line, so Enter always sends.
@@ -76,7 +78,7 @@ export class TypingBoxes {
     const input = row.appendChild(doc.createElement('input'))
     input.type = 'text'
     const list = row.appendChild(doc.createElement('datalist'))
-    list.id = `chain-runner-directing-choices-${++lists}`
+    list.id = `chain-runner-directing-choices-${++choiceLists}`
     for (const choice of choices) list.appendChild(doc.createElement('option')).value = choice
     input.setAttribute('list', list.id)
     return input

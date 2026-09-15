@@ -560,14 +560,19 @@ describe('a proposal tab, side quests', () => {
     expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab', 'develop-direction'])
   })
 
-  it('asks the engine for its chains once they are known, however often it redraws', async () => {
+  it('asks the engine for its chains when a tab opens, not on every redraw', async () => {
     chainNames = ['combat lab']
     const panel = board()
     panel.open(showing(), 'world')
     await settled()
     panel.draw(showing())
-    button('gameplay').click()
     expect(chainsAsked).toBe(1)
+    chainNames = []
+    button('gameplay').click()
+    await settled()
+    expect(chainsAsked).toBe(2)
+    const list = root.querySelector<HTMLDataListElement>(`datalist#${chainBox().getAttribute('list')}`)
+    expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab'])
   })
 
   it('takes a typed chain when the engine offers none', async () => {

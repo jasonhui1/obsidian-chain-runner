@@ -238,6 +238,7 @@ export default class ChainRunnerPlugin extends Plugin {
       room: askRoom,
       rerun,
       quest: sideQuest,
+      engineUrl: () => this.settings.engineUrl,
       panels: new RunPanels(this.engine),
     })
     this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))

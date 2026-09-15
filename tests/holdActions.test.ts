@@ -235,6 +235,7 @@ function makeActions(): HoldActions {
     room: new AskTheRoom({ app, engine, withEngine, notify }),
     rerun: new RerunDownstream({ app, engine, withEngine, notify }),
     quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
+    engineUrl: () => ENGINE_URL,
     panels: new RunPanels(engine),
   })
 }

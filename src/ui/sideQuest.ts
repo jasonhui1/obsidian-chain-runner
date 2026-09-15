@@ -82,7 +82,7 @@ export class SideQuest {
 
     const landed = await this.deps.withEngine(() => engine.getRun(runId))
     if (!landed) return undefined
-    const url = this.runUrl(runId)
+    const url = runViewUrl(this.deps.engineUrl(), runId)
     return { runId, ...(url ? { url } : {}), result: landed.agentOutputs.at(-1)?.output ?? '' }
   }
 
@@ -92,9 +92,5 @@ export class SideQuest {
       chains => chains.map(chain => chain.name),
       () => [],
     )
-  }
-
-  runUrl(runId: string): string | undefined {
-    return runViewUrl(this.deps.engineUrl(), runId)
   }
 }

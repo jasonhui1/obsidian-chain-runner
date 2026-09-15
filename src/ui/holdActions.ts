@@ -20,6 +20,7 @@ import {
   type HoldHeading,
   type HoldReading,
 } from '../run/holdNote'
+import { runViewUrl } from '../run/provenance'
 import { appendSideQuest } from '../run/sideQuest'
 
 /**
@@ -47,6 +48,7 @@ export interface HoldActionsDeps {
   room: AskTheRoom
   rerun: RerunDownstream
   quest: SideQuest
+  engineUrl: () => string
   /** What each run wrote, which tells an edited proposal from one left as it was. */
   panels: RunPanels
 }
@@ -136,9 +138,9 @@ export class HoldActions {
     return this.deps.quest.chains()
   }
 
-  /** Where a run is shown on the engine, as it is set now. */
+  /** Where a run is shown on the engine, as it is set now (ADR-0004). */
   runUrl(runId: string): string | undefined {
-    return this.deps.quest.runUrl(runId)
+    return runViewUrl(this.deps.engineUrl(), runId)
   }
 
   /** A reply made its proposal's revision and rerun downstream; answers the run the hold now lives under. */
