@@ -32,6 +32,7 @@ import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
 import { RerunDownstream } from './ui/rerunDownstream'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
+import { RunPanels } from './ui/runPanels'
 import { Resume } from './ui/resume'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { SideQuest } from './ui/sideQuest'
@@ -229,6 +230,7 @@ export default class ChainRunnerPlugin extends Plugin {
       chat,
       room: askRoom,
       rerun,
+      panels: new RunPanels(this.engine),
     })
     this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
     const directFromDrawing = new DirectFromDrawing({

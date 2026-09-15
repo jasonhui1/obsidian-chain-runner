@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { HoldActions } from '@/ui/holdActions'
+import { HoldActions, PROPOSAL_HEADING } from '@/ui/holdActions'
 import { HoldNotes } from '@/ui/holdNotes'
 import { AskTheRoom, NOBODY_ANSWERED } from '@/ui/askTheRoom'
 import { ChatWithProposer } from '@/ui/chatWithProposer'
 import { NO_EDITED_PROPOSAL, RerunDownstream } from '@/ui/rerunDownstream'
 import { EngineOfflineError } from '@/engine/transport'
+import { RunPanels } from '@/ui/runPanels'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TAbstractFile, TFile } from 'obsidian'
@@ -204,6 +205,7 @@ function makeActions(): HoldActions {
     chat: new ChatWithProposer({ app, engine, withEngine, notify }),
     room: new AskTheRoom({ app, engine, withEngine, notify }),
     rerun: new RerunDownstream({ app, engine, withEngine, notify }),
+    panels: new RunPanels(engine),
   })
 }
 
@@ -328,6 +330,13 @@ describe('editProposal', () => {
     const actions = makeActions()
     await actions.editProposal(RUN, 'world', 'The world is real.')
     expect((await actions.read(RUN))?.proposals[1]).toMatchObject({ text: 'The world is real.', edited: true })
+  })
+
+  it('writes nothing, and says why, for words with a line the note would read as the next proposal', async () => {
+    const actions = makeActions()
+    expect(await actions.editProposal(RUN, 'world', 'The world.\n### Another\nMore.')).toBe(false)
+    expect(notes[PATH]).toBe(HOLD)
+    expect(notices).toEqual([PROPOSAL_HEADING])
   })
 
   it('writes nothing for blank words, or a proposal the hold does not have', async () => {

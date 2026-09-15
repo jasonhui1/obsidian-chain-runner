@@ -3,6 +3,7 @@ import type { AskTheRoom } from './askTheRoom'
 import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
 import type { RerunDownstream } from './rerunDownstream'
+import type { RunPanels } from './runPanels'
 import { guardWrite } from './vaultWrite'
 import { appendRoomQuestion } from '../run/askRoom'
 import { appendChatTurn, markTurnRevised, type ChatTurn } from '../run/chat'
@@ -32,6 +33,8 @@ export type { RoomAnswer } from '../run/askRoom'
 /** A chat reply that can become its proposal's revision. */
 export type RepliedTurn = Required<ChatTurn>
 
+export const PROPOSAL_HEADING = 'A proposal cannot hold a “### ” heading: the hold note starts the next proposal there'
+
 export interface HoldActionsDeps {
   app: App
   notify: (message: string) => void
@@ -41,6 +44,8 @@ export interface HoldActionsDeps {
   chat: ChatWithProposer
   room: AskTheRoom
   rerun: RerunDownstream
+  /** What each run wrote, which tells an edited proposal from one left as it was. */
+  panels: RunPanels
 }
 
 export class HoldActions {
@@ -50,8 +55,8 @@ export class HoldActions {
   async read(runId: string): Promise<HoldReading | undefined> {
     const file = this.deps.notes.find(runId)
     if (!file) return undefined
-    const [content, panels] = await Promise.all([this.deps.app.vault.cachedRead(file), this.deps.rerun.panels(runId)])
-    return readHold(content, panels)
+    const [content, panels] = await Promise.all([this.deps.app.vault.cachedRead(file), this.deps.panels.of(runId)])
+    return readHold(content, panels ?? [])
   }
 
   /** A verb given to a proposal; COMBINE names the second proposal it joins. */
@@ -73,8 +78,12 @@ export class HoldActions {
   /** A proposal's words, rewritten; whether they were written. */
   async editProposal(runId: string, proposal: string, text: string): Promise<boolean> {
     if (text.trim() === '') return false
+    if (/^### /m.test(text)) {
+      this.deps.notify(PROPOSAL_HEADING)
+      return false
+    }
     const found = await this.holdFile(runId)
-    const exists = found && readHold(found.content)?.proposals.some(one => one.name === proposal)
+    const exists = found && readHold(found.content, [])?.proposals.some(one => one.name === proposal)
     return exists === true && this.edit(runId, content => rewriteProposal(content, proposal, text))
   }
 

@@ -366,7 +366,7 @@ export interface CanonChoice {
  * A hold note read whole; `undefined` for a note that is not one. A proposal
  * reads as edited only against `panels`, the run's own.
  */
-export function readHold(content: string, panels: LayoutPanel[] = []): HoldReading | undefined {
+export function readHold(content: string, panels: LayoutPanel[]): HoldReading | undefined {
   const heading = holdHeading(content)
   const direction = directionBlock(content)
   if (!heading || direction === undefined) return undefined

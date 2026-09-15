@@ -47,9 +47,9 @@ export class DirectingBoard {
   private tab: string | undefined
   private readonly unclamped = new Set<string>()
   private readonly boxes = new TypingBoxes(() => this.draw(this.state))
-  /** What each run is being rerun from while its rerun goes: its edits, or a reply. */
-  private readonly rerunning = new Map<string, RepliedTurn | 'edits'>()
-  /** Each proposal being edited, by its box key, and the words so far. */
+  /** What each run is being rerun from, while its rerun goes. */
+  private readonly rerunning = new Map<string, RerunFrom>()
+  /** Each proposal being edited, by `editKey`, and the words so far. */
   private readonly editing = new Map<string, string>()
   private readonly saving = new Set<string>()
   private releases: (() => void)[] = []
@@ -128,8 +128,8 @@ export class DirectingBoard {
 
     const top = this.section(body)
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
-    const editKey = boxKey(hold.runId, `edit ${proposal.name}`)
-    if (this.editing.has(editKey)) this.editor(top, editKey, proposal.name)
+    const key = editKey(hold.runId, proposal.name)
+    if (this.editing.has(key)) this.editor(top, key, proposal.name)
     else this.proposalText(top, hold.runId, proposal.name, proposal.text)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
@@ -146,7 +146,7 @@ export class DirectingBoard {
       if (turn.reply === undefined) this.add(shown, 'div', `${CLS}-faint`, 'No reply')
       else this.markdown(shown, turn.reply)
       if (turn.revisedAs) this.add(shown, 'div', `${CLS}-faint`, `Used as the revision · run ${shortId(turn.revisedAs)}`)
-      else if (turn.reply !== undefined) this.reviseButton(shown, hold.runId, { name, message: turn.message, reply: turn.reply })
+      else if (turn.reply !== undefined) this.reviseButton(shown, hold, { name, message: turn.message, reply: turn.reply })
     }
     if (pending !== undefined) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
     this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.deps.chat(name, text) })
@@ -174,28 +174,38 @@ export class DirectingBoard {
     return turn
   }
 
-  /** While a run's rerun goes, nothing else of it can start one. */
-  private reviseButton(el: HTMLElement, runId: string, turn: RepliedTurn): void {
-    const going = this.rerunning.get(runId)
-    const label = going && going !== 'edits' && sameTurn(going, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
+  private reviseButton(el: HTMLElement, hold: HoldReading, turn: RepliedTurn): void {
+    const going = this.rerunning.get(hold.runId)
+    const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
-    button.disabled = going !== undefined
-    button.addEventListener('click', () => void this.startRerun(runId, turn, () => this.deps.revise(turn)))
+    button.disabled = !this.canRerun(hold)
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, () => this.deps.revise(turn)))
   }
 
   private rerunBar(body: HTMLElement, hold: HoldReading): void {
     const edited = hold.proposals.filter(one => one.edited).map(one => one.name)
     if (edited.length === 0) return
     const bar = this.add(body, 'div', `${CLS}-rerun`)
-    this.add(bar, 'span', `${CLS}-faint`, `Edited: ${edited.join(', ')}`)
+    const editOpen = this.editOpen(hold)
+    this.add(bar, 'span', `${CLS}-faint`, editOpen ? 'Save or cancel the edit first' : `Edited: ${edited.join(', ')}`)
     const going = this.rerunning.get(hold.runId)
-    const button = this.button(bar, going === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', 'mod-cta')
-    button.disabled = going !== undefined
-    button.addEventListener('click', () => void this.startRerun(hold.runId, 'edits', () => this.deps.rerun()))
+    const button = this.button(bar, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', 'mod-cta')
+    button.disabled = !this.canRerun(hold)
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, () => this.deps.rerun()))
   }
 
-  private async startRerun(runId: string, from: RepliedTurn | 'edits', rerun: () => Promise<void>): Promise<void> {
-    if (this.rerunning.has(runId)) return
+  /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
+  private canRerun(hold: HoldReading): boolean {
+    return !this.rerunning.has(hold.runId) && !this.editOpen(hold)
+  }
+
+  private editOpen(hold: HoldReading): boolean {
+    return hold.proposals.some(one => this.editing.has(editKey(hold.runId, one.name)))
+  }
+
+  private async startRerun(hold: HoldReading, from: RerunFrom, rerun: () => Promise<void>): Promise<void> {
+    const runId = hold.runId
+    if (!this.canRerun(hold)) return
     this.rerunning.set(runId, from)
     this.draw(this.state)
     try {
@@ -262,7 +272,7 @@ export class DirectingBoard {
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
     edit.disabled = this.rerunning.has(runId)
     edit.addEventListener('click', () => {
-      this.editing.set(boxKey(runId, `edit ${name}`), text)
+      this.editing.set(editKey(runId, name), text)
       this.draw(this.state)
     })
     toggle.addEventListener('click', () => {
@@ -286,10 +296,14 @@ export class DirectingBoard {
     input.value = this.editing.get(key) ?? ''
     input.rows = 12
     input.dataset.box = key
-    input.addEventListener('input', () => void this.editing.set(key, input.value))
     const row = this.add(editor, 'div', `${CLS}-editor-actions`)
     const save = this.button(row, 'Save', 'mod-cta')
-    save.disabled = this.saving.has(key)
+    const savable = (): boolean => !this.saving.has(key) && input.value.trim() !== ''
+    save.disabled = !savable()
+    input.addEventListener('input', () => {
+      this.editing.set(key, input.value)
+      save.disabled = !savable()
+    })
     save.addEventListener('click', () => void this.save(key, name))
     this.button(row, 'Cancel', '').addEventListener('click', () => {
       this.editing.delete(key)
@@ -358,6 +372,12 @@ export class DirectingBoard {
 }
 
 type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>
+
+type RerunFrom = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn }
+
+function editKey(runId: string, proposal: string): string {
+  return boxKey(runId, `edit ${proposal}`)
+}
 
 function boxKey(runId: string, box: string): string {
   return `${runId} ${box}`

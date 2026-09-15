@@ -5,8 +5,6 @@ import { CANON_PATH } from '../run/canon'
 import { holdHeading, proposalEdits } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
 import type { EngineClient } from '../engine/client'
-import { engineFailureMessage } from '../engine/guard'
-import type { LayoutPanel } from '../engine/types'
 
 /** The "Rerun downstream" command: the vault half of `src/run/rerun.ts`. */
 
@@ -21,9 +19,6 @@ export interface RerunDownstreamDeps {
 }
 
 export class RerunDownstream {
-  /** A finished run's panels never change, so each is fetched once. */
-  private readonly panelsByRun = new Map<string, LayoutPanel[]>()
-
   constructor(private readonly deps: RerunDownstreamDeps) {}
 
   async start(): Promise<void> {
@@ -59,20 +54,6 @@ export class RerunDownstream {
     return rerunAndRefresh(this.deps, file, heading, request, {
       proposalsStale: current => !sameEdits(proposalEdits(current, panels), edits),
     })
-  }
-
-  /** What the run wrote, panel by panel; `undefined`, without a notice, while the engine cannot say. */
-  async panels(runId: string): Promise<LayoutPanel[] | undefined> {
-    const known = this.panelsByRun.get(runId)
-    if (known) return known
-    try {
-      const { panels } = await this.deps.engine.getLayout(runId)
-      this.panelsByRun.set(runId, panels)
-      return panels
-    } catch (error) {
-      if (engineFailureMessage(error) === undefined) throw error
-      return undefined
-    }
   }
 }
 

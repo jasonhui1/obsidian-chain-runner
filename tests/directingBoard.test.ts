@@ -272,6 +272,15 @@ describe('a proposal tab, editing', () => {
     expect(button('Save').disabled).toBe(false)
   })
 
+  it('cannot save blank words', () => {
+    board().open(showing(), 'world')
+    button('✎ Edit').click()
+    type(editor()!, ' \n ')
+    expect(button('Save').disabled).toBe(true)
+    type(editor()!, 'Words.')
+    expect(button('Save').disabled).toBe(false)
+  })
+
   it('puts the proposal back as it was on Cancel', () => {
     board().open(showing(), 'world')
     button('✎ Edit').click()
@@ -322,6 +331,17 @@ describe('rerunning downstream', () => {
     expect(root.querySelector('.chain-runner-directing-rerun')?.textContent).not.toContain('world')
     button('Run').click()
     expect(button('⟳ Rerun downstream')).toBeDefined()
+  })
+
+  it('starts no rerun while an edit is open, so no unsaved words are left behind', () => {
+    const talked = hold({ ...edited, conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }] })
+    board().open(showing(talked), 'world')
+    button('✎ Edit').click()
+    expect(button('⟳ Rerun downstream').disabled).toBe(true)
+    expect(button('Use this reply as the revision & rerun').disabled).toBe(true)
+    expect(text()).toContain('Save or cancel the edit first')
+    button('Cancel').click()
+    expect(button('⟳ Rerun downstream').disabled).toBe(false)
   })
 
   it('hands the rerun to the hold actions, and starts no other rerun until it is done', async () => {
