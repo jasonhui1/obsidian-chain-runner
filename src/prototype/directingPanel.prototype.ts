@@ -1,6 +1,6 @@
 /**
  * PROTOTYPE (#35) — throwaway. Three layouts for directing a run from the right
- * sidebar, switchable from the bar at the panel's foot (or ← → with the panel
+ * sidebar, switchable from the bar at the panel’s top (or ← → with the panel
  * focused): A per run, B per proposal, C a conversation. Every button goes
  * through `PrototypeHold`, never the note.
  */
@@ -228,7 +228,7 @@ export class DirectingPanelPrototype extends ItemView {
   // ── B: one proposal at a time ──────────────────────────────────────────────
 
   private proposalFocus(body: HTMLElement, hold: PrototypeHold, reading: HoldReading): void {
-    const chips = body.createDiv({ cls: 'crp-chips' })
+    const chips = body.createDiv({ cls: 'crp-tabs' })
     this.button(chips, 'Run', () => ((this.selected = undefined), this.draw()), this.selected ? '' : 'is-on')
     for (const proposal of reading.proposals) {
       this.button(chips, proposal.name, () => ((this.selected = proposal.name), this.draw()), proposal.name === this.selected ? 'is-on' : '')

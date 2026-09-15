@@ -649,3 +649,6 @@
 .crp-drawer pre { margin: 0; padding: var(--size-4-2); font-size: 11px; white-space: pre-wrap; }
 .crp-switcher { display: flex; justify-content: center; align-items: center; gap: var(--size-4-2); padding: 6px; background: var(--text-normal); color: var(--background-primary); font-size: var(--font-ui-smaller); }
 .crp-switcher button { background: none; box-shadow: none; color: inherit; }
+.crp-tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--background-modifier-border); margin: 0 calc(-1 * var(--size-4-3)) var(--size-4-2); padding: 0 var(--size-4-3); }
+.crp-tabs button { background: none; box-shadow: none; border-radius: 0; border-bottom: 2px solid transparent; color: var(--text-muted); padding: 6px 10px; }
+.crp .crp-tabs button.is-on { background: none; color: var(--text-normal); border-bottom-color: var(--interactive-accent); font-weight: var(--font-semibold); }
