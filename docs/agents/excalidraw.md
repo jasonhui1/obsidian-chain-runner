@@ -167,30 +167,19 @@ already-selected element can never be seen.
 
 ## Typing in a sidebar beside a drawing
 
-**Key presses into a text box in our own sidebar view arrive already cancelled.**
-Found by #35's directing panel on 2026-09-15 (Excalidraw 2.26.4, Windows), with
-a drawing open in the main pane: the box had focus, every key reached it, and
-every key came back `defaultPrevented`, so no text went in. The console stayed
-silent.
+**Not Excalidraw.** #35's directing panel found every key into its text boxes
+arriving `defaultPrevented`, with no text going in and a silent console
+(2026-09-15, Excalidraw 2.26.4, Windows). The canceller was the panel's own
+Enter handler (#36):
 
-What is and is not known:
+```ts
+input.onkeydown = event => event.key === 'Enter' && send()
+```
 
-- **Who cancels it is not known, nor is it proven to be Excalidraw.** Swapping
-  `Event.prototype.preventDefault` for a recording version never caught the
-  call, so the cancel happens some other way. Candidates: `returnValue = false`,
-  a handler returning `false`, or a listener from another realm. Obsidian's own
-  inputs beside a drawing were not checked.
-- **`stopPropagation` at the view does not help**, so the cancel happens in the
-  capture phase or before it.
-- **What worked:** a `keydown` listener on the view's `contentEl` that sees
-  `defaultPrevented` on an `input`/`textarea` and applies the key by hand with
-  `setRangeText`: characters, Backspace, Delete, arrows, Home/End, and Enter in
-  a textarea. It then dispatches an `input` event so the view's own handlers
-  run. Paste (Ctrl+V) is still lost.
-
-The workaround lives only on the `prototype/35-directing-panel` branch. A real
-panel with text inputs has to find the canceller first. A check with no drawing
-open is the cheapest next step.
+An `on…` handler property that returns `false` cancels the event, without ever
+calling `preventDefault`. That arrow returns `false` for every key but Enter.
+Lint now requires `(): void =>` on an `on…` handler, so the compiler rejects one
+that returns a value.
 
 ## Resizing a text element
 
