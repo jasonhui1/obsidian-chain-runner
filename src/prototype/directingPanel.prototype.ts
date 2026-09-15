@@ -5,7 +5,7 @@
  * through `PrototypeHold`, never the note.
  */
 
-import { ItemView, MarkdownRenderer, type IconName, type WorkspaceLeaf } from 'obsidian'
+import { ItemView, MarkdownRenderer, Menu, type IconName, type MenuItem, type WorkspaceLeaf } from 'obsidian'
 import { PrototypeHold, type HoldEvent, type HoldReading } from './holdActions.prototype'
 import { DIRECTION_VERBS, type DirectionVerb } from '../run/holdNote'
 
@@ -134,23 +134,36 @@ export class DirectingPanelPrototype extends ItemView {
   private header(root: HTMLElement): void {
     const head = root.createDiv({ cls: 'crp-header' })
     const hold = this.hold?.read()
-    head.createDiv({ cls: 'crp-title', text: hold ? `Directing · run ${hold.runId}` : 'Directing' })
-    if (hold) head.createDiv({ cls: 'crp-sub', text: hold.chainName })
-    head.createDiv({ cls: 'crp-proto', text: 'PROTOTYPE · nothing is saved · replies are canned' })
-    if (!this.hold || !this.runId) return
-    const runId = this.runId
-    const row = head.createDiv({ cls: 'crp-row' })
-    this.button(row, `Open hold note${this.openCount ? ` (${this.openCount})` : ''}`, () => {
-      this.openCount++
-      this.deps.openNote(runId)
-      this.draw()
-    })
-    this.button(row, this.drawer === 'note' ? 'Hide note' : 'Note as saved', () => this.toggleDrawer('note'), 'crp-quiet')
-    this.button(row, this.drawer === 'calls' ? 'Hide calls' : 'Hold-action calls', () => this.toggleDrawer('calls'), 'crp-quiet')
-    this.button(row, 'Reload', () => {
-      this.holds.delete(runId)
-      void this.point(runId, this.selected)
-    }, 'crp-quiet')
+    const titleRow = head.createDiv({ cls: 'crp-title-row' })
+    titleRow.createDiv({ cls: 'crp-title', text: hold ? `Directing · run ${hold.runId}` : 'Directing' })
+    if (this.hold && this.runId) {
+      const runId = this.runId
+      const more = this.button(titleRow, '⋯', () => {}, 'crp-more')
+      more.setAttribute('aria-label', 'More')
+      more.onclick = event => this.moreMenu(runId).showAtMouseEvent(event)
+    }
+    if (hold) head.createDiv({ cls: 'crp-sub', text: `${hold.chainName} · prototype: nothing is saved, replies are canned` })
+  }
+
+  private moreMenu(runId: string): Menu {
+    const drawerItem = (which: 'note' | 'calls', title: string, icon: string) => (item: MenuItem) =>
+      item.setTitle(title).setIcon(icon).setChecked(this.drawer === which).onClick(() => this.toggleDrawer(which))
+    return new Menu()
+      .addItem(item =>
+        item.setTitle('Open the hold note in a tab').setIcon('file-text').onClick(() => {
+          this.openCount++
+          this.deps.openNote(runId)
+        }),
+      )
+      .addItem(drawerItem('note', 'Preview the hold note with my changes', 'eye'))
+      .addSeparator()
+      .addItem(drawerItem('calls', 'Which buttons I’ve used (prototype)', 'bar-chart'))
+      .addItem(item =>
+        item.setTitle('Discard my changes').setIcon('rotate-ccw').onClick(() => {
+          this.holds.delete(runId)
+          void this.point(runId, this.selected)
+        }),
+      )
   }
 
   private toggleDrawer(which: 'note' | 'calls'): void {
@@ -160,6 +173,9 @@ export class DirectingPanelPrototype extends ItemView {
 
   private drawerView(root: HTMLElement, hold: PrototypeHold): void {
     const drawer = root.createDiv({ cls: 'crp-drawer' })
+    const bar = drawer.createDiv({ cls: 'crp-drawer-bar' })
+    bar.createSpan({ text: this.drawer === 'note' ? 'The hold note, with your changes' : 'Buttons you’ve used this session' })
+    this.button(bar, '✕', () => this.toggleDrawer(this.drawer as 'note' | 'calls'), 'crp-quiet')
     drawer.createEl('pre', { text: this.drawer === 'note' ? hold.note : this.callTally() })
   }
 
