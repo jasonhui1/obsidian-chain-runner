@@ -1,9 +1,9 @@
-import { appendToConversation, locatedTriggers } from './conversationTrigger'
+import { appendToConversation, locatedTriggers, quoted } from './conversationTrigger'
 
 /**
- * Ask the room: one question sent to every proposer, each answer folded to a
- * few lines and appended under the question — the same Conversation-section
- * loop as `./chat.ts`, addressed to everyone instead of one name.
+ * Ask the room: one question sent to every proposer, each answer appended whole
+ * under the question — the same Conversation-section loop as `./chat.ts`,
+ * addressed to everyone instead of one name.
  */
 
 export interface RoomAnswer {
@@ -12,7 +12,6 @@ export interface RoomAnswer {
 }
 
 const QUESTION_LINE = /^ask the room:\s*(.+)$/i
-const MAX_LINES = 3
 
 /** The most recent `ask the room: …` line with no answers under it yet. */
 export function pendingRoomQuestion(content: string): string | undefined {
@@ -21,23 +20,9 @@ export function pendingRoomQuestion(content: string): string | undefined {
   return last && last.reply === undefined ? last.fields : undefined
 }
 
-/** An answer folded to its first `max` non-blank lines. */
-function shortAnswer(text: string, max: number): string {
-  return text
-    .trim()
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line !== '')
-    .slice(0, max)
-    .join('\n')
-}
-
-/** Every proposer's answer, labeled and folded to at most three lines, one blockquote. */
+/** Every proposer's answer, whole and labeled, one blockquote. */
 function answerBlock(answers: RoomAnswer[]): string {
-  return answers
-    .flatMap(({ name, answer }) => [`**${name}:**`, ...shortAnswer(answer, MAX_LINES).split('\n').filter(line => line !== '')])
-    .map(line => `> ${line}`)
-    .join('\n')
+  return answers.map(({ name, answer }) => quoted(`**${name}:**\n${answer.trim()}`)).join('\n')
 }
 
 /** A question and every answer to it written together, as the Conversation's last entry. */
@@ -54,23 +39,22 @@ export interface RoomEntry {
 const ANSWER_LABEL = /^\*\*(.+?):\*\*$/
 
 /** Every question to the room under Conversation, in order, each with where it sits in the note. */
-export function roomEntries(content: string): { entry: RoomEntry; at: number }[] {
+export function roomEntries(content: string, proposers: string[]): { entry: RoomEntry; at: number }[] {
   return locatedTriggers(content, QUESTION_LINE, match => match[1].trim()).map(({ fields, insertAt, reply }) => ({
-    entry: { question: fields, answers: answersIn(reply ?? '') },
+    entry: { question: fields, answers: answersIn(reply ?? '', proposers) },
     at: insertAt,
   }))
 }
 
-/** An answer block read back into who said what. */
-function answersIn(block: string): RoomAnswer[] {
-  const answers: RoomAnswer[] = []
+/** An answer block read back into who said what; only a proposer's name starts a new answer, so a bold line inside one stays in it. */
+function answersIn(block: string, proposers: string[]): RoomAnswer[] {
+  const answers: { name: string; lines: string[] }[] = []
   for (const line of block.split('\n')) {
-    const label = ANSWER_LABEL.exec(line.trim())
-    const last = answers.at(-1)
-    if (label) answers.push({ name: label[1], answer: '' })
-    else if (last && line.trim() !== '') last.answer = last.answer === '' ? line : `${last.answer}\n${line}`
+    const name = ANSWER_LABEL.exec(line.trim())?.[1]
+    if (name !== undefined && proposers.includes(name)) answers.push({ name, lines: [] })
+    else answers.at(-1)?.lines.push(line)
   }
-  return answers
+  return answers.map(({ name, lines }) => ({ name, answer: lines.join('\n').trim() }))
 }
 
 /** Every proposer's answer appended under the question they answered. Unchanged if that question is gone. */

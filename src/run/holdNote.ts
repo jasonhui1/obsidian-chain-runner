@@ -356,17 +356,18 @@ export function readHold(content: string): HoldReading | undefined {
   if (!heading || direction === undefined) return undefined
   const lines = directionLines(direction)
   const verdict = bodyUnder(content, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim()
+  const proposals = proposalsIn(content)
   return {
     ...heading,
     ...(verdict ? { verdict } : {}),
-    proposals: proposalsIn(content).map(proposal => ({
+    proposals: proposals.map(proposal => ({
       ...proposal,
       given: verbsGiven(lines, proposal.name),
       combinedWith: combinedWith(lines, proposal.name),
     })),
     direction: lines,
     canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
-    conversation: readConversation(content),
+    conversation: readConversation(content, proposals.map(proposal => proposal.name)),
   }
 }
 

@@ -449,6 +449,29 @@ describe('askRoom', () => {
     })
   })
 
+  it('keeps each answer whole, and reads it back whole', async () => {
+    const long = '## Short answer\nA bit.\n\n**Verdict:** keep it.\n\n## Why\nThe halo reads as a pod.\n## What I would change\nTie it to the stance.'
+    framesByAgent = { gameplay: answer('gameplay', long), world: answer('world', 'No.') }
+    const actions = makeActions()
+    await actions.askRoom(RUN, 'too much?')
+    expect((await actions.read(RUN))?.conversation.at(-1)).toEqual({
+      kind: 'room',
+      question: 'too much?',
+      answers: [
+        { name: 'gameplay', answer: long },
+        { name: 'world', answer: 'No.' },
+      ],
+    })
+  })
+
+  it('does not take a bold line inside an answer for the next proposal', async () => {
+    framesByAgent = { gameplay: answer('gameplay', '**Short answer:**\nA bit.'), world: answer('world', 'No.') }
+    const actions = makeActions()
+    await actions.askRoom(RUN, 'too much?')
+    const room = (await actions.read(RUN))?.conversation.at(-1)
+    expect(room?.kind === 'room' && room.answers.map(one => one.name)).toEqual(['gameplay', 'world'])
+  })
+
   it('writes nothing, and says so, when nobody answered', async () => {
     framesByAgent = { gameplay: [{ type: 'error', error: 'refused' }], world: [{ type: 'error', error: 'refused' }] }
     expect(await makeActions().askRoom(RUN, 'what is the hook?')).toBe(false)
