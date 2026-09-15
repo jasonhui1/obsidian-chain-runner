@@ -68,4 +68,20 @@ describe('appendLockedCanon', () => {
     expect(content).toContain('some note with no headings')
     expect(content).toContain('## LOCKED\n- halo = burden')
   })
+
+  it('leaves the file unchanged when the line is already under LOCKED', () => {
+    const existing = '## LOCKED\n- halo = burden\n\n## UNRESOLVED\n'
+    expect(appendLockedCanon(existing, ['halo = burden'])).toBe(existing)
+  })
+
+  it('skips a line a human wrote by hand, compared after trimming', () => {
+    const existing = '## LOCKED\n-   halo = burden  \n\n## UNRESOLVED\n'
+    expect(appendLockedCanon(existing, ['halo = burden'])).toBe(existing)
+  })
+
+  it('adds only the lines not already under LOCKED', () => {
+    const existing = '## LOCKED\n- halo = burden\n\n## UNRESOLVED\n'
+    const content = appendLockedCanon(existing, ['halo = burden', 'silver, not gold'])
+    expect(content).toContain('## LOCKED\n- halo = burden\n- silver, not gold')
+  })
 })

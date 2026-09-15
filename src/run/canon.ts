@@ -44,22 +44,38 @@ function nextHeadingIndex(text: string, from: number): number {
   return match ? match.index : text.length
 }
 
+const BULLET_LINE = /^-\s*(.+)$/
+
+/** The trimmed text of each bullet directly under a heading's body. */
+function bulletTexts(body: string): string[] {
+  return body
+    .split('\n')
+    .map(line => BULLET_LINE.exec(line.trim()))
+    .filter((match): match is RegExpExecArray => match !== null)
+    .map(match => match[1].trim())
+}
+
 /**
  * `lines` appended under `## LOCKED`, after whatever is already there. A file
  * with no LOCKED heading gets one, so nothing ticked is ever lost; nothing
- * ticked at all leaves the file exactly as it was.
+ * ticked at all leaves the file exactly as it was. A line already sitting
+ * under LOCKED — human-written or from an earlier resume — is skipped rather
+ * than duplicated.
  */
 export function appendLockedCanon(existing: string | undefined, lines: string[]): string {
-  if (lines.length === 0) return existing ?? freshCanon()
-
-  const bullets = lines.map(line => `- ${line}`).join('\n')
   const base = existing ?? freshCanon()
   const heading = LOCKED_HEADING.exec(base)
+  const bodyStart = heading ? heading.index + heading[0].length : -1
+  const bodyEnd = heading ? nextHeadingIndex(base, bodyStart + 1) : -1
+  const body = heading ? base.slice(bodyStart, bodyEnd).trim() : ''
+
+  const existingBulletTexts = new Set(bulletTexts(body))
+  const newLines = lines.filter(line => !existingBulletTexts.has(line.trim()))
+  if (newLines.length === 0) return base
+
+  const bullets = newLines.map(line => `- ${line}`).join('\n')
   if (!heading) return `${base.replace(/\s+$/, '')}\n\n## LOCKED\n${bullets}\n`
 
-  const bodyStart = heading.index + heading[0].length
-  const bodyEnd = nextHeadingIndex(base, bodyStart + 1)
-  const body = base.slice(bodyStart, bodyEnd).trim()
   const newBody = `${body === '' ? '' : `${body}\n`}${bullets}`
   return `${base.slice(0, bodyStart)}\n${newBody}\n\n${base.slice(bodyEnd).replace(/^\s+/, '')}`
 }
