@@ -50,14 +50,18 @@ export class Resume {
     }
 
     const locked = tickedCanonLines(direction)
-    if (locked.length > 0) await this.writeCanon(canonPath, locked)
+    if (locked.length > 0 && !outcome.error) await this.writeCanon(canonPath, locked)
 
     const linked = await this.linkRun(file, content, outcome.runId)
     if (!linked) return
 
-    this.deps.notify(
-      outcome.error ? `Resumed as run ${outcome.runId}, but it failed: ${outcome.error}` : `Resumed as run ${outcome.runId}`,
-    )
+    this.deps.notify(this.resumeNotice(outcome.runId, outcome.error, locked.length > 0))
+  }
+
+  private resumeNotice(runId: string, error: string | undefined, hadTicks: boolean): string {
+    if (!error) return `Resumed as run ${runId}`
+    const canonNote = hadTicks ? ' (canon not written)' : ''
+    return `Resumed as run ${runId}, but it failed: ${error}${canonNote}`
   }
 
   /** Reads canon again right before writing — not the snapshot sent with the run — so a change made while the run was going is never clobbered. */

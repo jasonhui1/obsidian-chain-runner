@@ -154,11 +154,18 @@ describe('start', () => {
     expect(notes['context/canon-anime-game.md']).toBeUndefined()
   })
 
-  it('still links and ticks canon when the run itself failed partway through', async () => {
+  it('still links the run but skips canon when it failed partway through', async () => {
     runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
     await makeResume().start()
     expect(notes[HOLD_PATH]).toContain('2026-09-20-Xy9zW2')
-    expect(notes['context/canon-anime-game.md']).toContain('halo = burden')
+    expect(notes['context/canon-anime-game.md']).toBeUndefined()
+    expect(notices).toEqual(['Resumed as run 2026-09-20-Xy9zW2, but it failed: the model refused (canon not written)'])
+  })
+
+  it('says nothing extra about canon on failure when nothing was ticked', async () => {
+    notes[HOLD_PATH] = holdNote('KEEP: fast combat\n')
+    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    await makeResume().start()
     expect(notices).toEqual(['Resumed as run 2026-09-20-Xy9zW2, but it failed: the model refused'])
   })
 
