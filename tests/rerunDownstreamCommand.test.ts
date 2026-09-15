@@ -24,6 +24,9 @@ const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
 
 const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
 
+/** A human's words replayed in place of a node's output: nothing ran, so nothing was spent. */
+const revision = (nodeId: string, text: string): AgentOutput => ({ ...output(nodeId, text), tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 })
+
 const oldPanels = [
   panel('character-director', 'Shrine-maiden silhouette.'),
   panel('gameplay-director', 'Stances mapped to segments.'),
@@ -145,7 +148,7 @@ describe('start', () => {
     expect(requests[0].branchedFromRunId).toBe(OLD)
     expect(requests[0].branchOutputs).toEqual([
       output('character-director', 'Shrine-maiden silhouette.'),
-      output('gameplay-director', 'Halo is a burden.'),
+      revision('gameplay-director', 'Halo is a burden.'),
     ])
   })
 

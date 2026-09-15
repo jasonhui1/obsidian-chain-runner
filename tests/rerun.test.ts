@@ -77,6 +77,21 @@ describe('rerunRequest', () => {
     expect(request?.branchOutputs?.find(o => o.nodeId === 'gameplay-director')).not.toHaveProperty('thought')
   })
 
+  it('gives the revision every field the engine logs a replayed output with, at no cost, since nothing ran', () => {
+    const logged = { systemPrompt: 'You direct gameplay.', input: 'the brief', tokensIn: 900, tokensOut: 400, costUsd: 0.02, latencyMs: 8000, model: 'claude' }
+    const outputs = run().agentOutputs.map(o => (o.nodeId === 'gameplay-director' ? { ...o, ...logged } : o))
+    const request = rerunRequest(run({ agentOutputs: outputs }), panels, { 'gameplay-director': 'Halo is a burden.' }, undefined)
+    expect(request?.branchOutputs?.find(o => o.nodeId === 'gameplay-director')).toMatchObject({
+      systemPrompt: 'You direct gameplay.',
+      input: 'the brief',
+      model: 'claude',
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
+      latencyMs: 0,
+    })
+  })
+
   it('swaps only the panel’s part of an output that carried more than the panel shows', () => {
     const outputs = run().agentOutputs.map(o =>
       o.nodeId === 'gameplay-director' ? { ...o, output: '## Pitch\nStances.\n\n## Notes\nKeep it fast.' } : o,

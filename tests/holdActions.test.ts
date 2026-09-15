@@ -104,6 +104,9 @@ const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
 
 const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
 
+/** A human's words replayed in place of a node's output: nothing ran, so nothing was spent. */
+const revision = (nodeId: string, text: string): AgentOutput => ({ ...output(nodeId, text), tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 })
+
 const GAMEPLAY = '## Core verb\nRotate abilities mid-fight.\n\n## Proposed canon\n- LOCKED: Abilities rotate randomly during active combat.'
 const WORLD = '## The rule\nThe world is a test — and someone is watching.\n\n## Proposed canon\n- LOCKED: The world is a controlled testing environment.'
 
@@ -358,7 +361,7 @@ describe('rerun', () => {
     await actions.rerun(RUN)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.branchedFromRunId).toBe(RUN)
-    expect(requests[0]?.branchOutputs).toContainEqual(output('world', 'The world is real.'))
+    expect(requests[0]?.branchOutputs).toContainEqual(revision('world', 'The world is real.'))
     expect(requests[0]?.branchOutputs).toContainEqual(output('gameplay', '## Core verb\nRotate abilities mid-fight.'))
   })
 
@@ -537,7 +540,7 @@ describe('revise', () => {
     await makeActions().revise(RUN, turn)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.branchedFromRunId).toBe(RUN)
-    expect(requests[0]?.branchOutputs).toContainEqual(output('world', 'Someone is watching.'))
+    expect(requests[0]?.branchOutputs).toContainEqual(revision('world', 'Someone is watching.'))
   })
 
   it('says which run the hold now lives under, and marks that reply revised as it', async () => {
