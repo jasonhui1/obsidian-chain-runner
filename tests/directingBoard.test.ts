@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectingBoard, type DirectingState } from '@/ui/directingBoard'
-import type { HoldReading } from '@/ui/holdActions'
+import type { HoldReading, ResumeResult } from '@/ui/holdActions'
 
 /**
  * The directing panel's elements: which tab shows what, and that every button
@@ -38,6 +38,8 @@ let overflowing: boolean
 let waiting: ((done: boolean) => void)[]
 let chainNames: string[]
 let chainsAsked: number
+/** Each resume still waiting on the hold actions, answered by the test. */
+let resumesWaiting: ((result: ResumeResult | undefined) => void)[]
 
 const answered = (call: string): Promise<boolean> => {
   calls.push(call)
@@ -61,6 +63,10 @@ function board(): DirectingBoard {
     revise: turn => answered(`revise ${turn.name} ${turn.reply}`).then(() => {}),
     editProposal: (proposal, words) => answered(`edit ${proposal} ${words}`),
     rerun: () => answered('rerun').then(() => {}),
+    resume: runId => {
+      calls.push(`resume ${runId}`)
+      return new Promise(resolve => resumesWaiting.push(resolve))
+    },
     sideQuest: (proposal, chain) => answered(`quest ${proposal} ${chain}`),
     chains: () => {
       chainsAsked++
@@ -111,6 +117,7 @@ beforeEach(() => {
   waiting = []
   chainNames = []
   chainsAsked = 0
+  resumesWaiting = []
 })
 
 describe('header', () => {
@@ -662,5 +669,101 @@ describe('without a hold', () => {
     expect(text()).toContain(`Run ${RUN} has no hold note yet.`)
     button('✎ Direct this run').click()
     expect(calls).toEqual(['write hold'])
+  })
+})
+
+describe('resume', () => {
+  const resumed = (over: Partial<ResumeResult> = {}): ResumeResult => ({
+    runId: '2026-09-16-pitch1',
+    pitch: 'A combat trial in a void.',
+    canon: 'written',
+    ...over,
+  })
+
+  const land = async (result: ResumeResult | undefined): Promise<void> => {
+    resumesWaiting.pop()?.(result)
+    await settled()
+  }
+
+  it('names how many canon lines are ticked', () => {
+    board().open(showing())
+    expect(button('▶ Resume · 1 of 2 canon ticked')).toBeTruthy()
+  })
+
+  it('drops the count for a hold with no canon lines at all', () => {
+    board().open(showing(hold({ canon: [] })))
+    expect(button('▶ Resume')).toBeTruthy()
+  })
+
+  it('stays under every tab', () => {
+    const made = board()
+    made.open(showing(), 'gameplay')
+    expect(button('▶ Resume · 1 of 2 canon ticked')).toBeTruthy()
+  })
+
+  it('says so while the run goes, and takes no second press', () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    expect(button('Resuming…').disabled).toBe(true)
+    expect(calls).toEqual([`resume ${RUN}`])
+  })
+
+  it('shows the Greenlight Pitch, and the run it came from, without opening a browser', async () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land(resumed())
+    expect(text()).toContain('Greenlight Pitch')
+    expect(text()).toContain('A combat trial in a void.')
+    expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe('http://engine/history/2026-09-16-pitch1')
+  })
+
+  it('opens the Run tab on landing, so the pitch is on screen', async () => {
+    const made = board()
+    made.open(showing(), 'gameplay')
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land(resumed())
+    expect(selectedTab()).toBe('Run')
+    expect(text()).toContain('A combat trial in a void.')
+  })
+
+  it('says canon was written', async () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land(resumed())
+    expect(text()).toContain('canon written')
+  })
+
+  it('says a landed run pitched nothing, rather than passing off what else it wrote', async () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land({ runId: '2026-09-16-pitch1', canon: 'written' })
+    expect(text()).toContain('Greenlight Pitch')
+    expect(text()).toContain('The run pitched nothing.')
+  })
+
+  it('says a run failed, and that its canon was held back, instead of a pitch', async () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land({ runId: '2026-09-16-pitch1', error: 'the model refused', canon: 'held-back' })
+    expect(text()).toContain('Failed: the model refused')
+    expect(text()).toContain('canon not written')
+    expect(text()).not.toContain('Greenlight Pitch')
+  })
+
+  it('says a resume that never ran did not run', async () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land(undefined)
+    expect(text()).toContain('Resume did not run.')
+    expect(button('▶ Resume · 1 of 2 canon ticked').disabled).toBe(false)
+  })
+
+  it('keeps the pitch when the hold is redrawn under it', async () => {
+    const made = board()
+    made.open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land(resumed())
+    made.draw(showing())
+    expect(text()).toContain('A combat trial in a void.')
   })
 })

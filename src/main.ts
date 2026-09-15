@@ -229,6 +229,13 @@ export default class ChainRunnerPlugin extends Plugin {
       notify: message => new Notice(message),
       engineUrl: () => this.settings.engineUrl,
     })
+    const resume = new Resume({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
     const holds = new HoldActions({
       app: this.app,
       notify: message => new Notice(message),
@@ -238,6 +245,7 @@ export default class ChainRunnerPlugin extends Plugin {
       room: askRoom,
       rerun,
       quest: sideQuest,
+      resume,
       engineUrl: () => this.settings.engineUrl,
       panels: new RunPanels(this.engine),
     })
@@ -345,14 +353,6 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'direct-selected-run',
       name: 'Direct the selected run',
       callback: () => void directFromDrawing.directSelected(),
-    })
-
-    const resume = new Resume({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      engineUrl: () => this.settings.engineUrl,
     })
 
     this.addCommand({

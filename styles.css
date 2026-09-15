@@ -885,3 +885,32 @@
   font-size: var(--font-ui-small);
   line-height: 1.5;
 }
+
+.chain-runner-directing-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  padding: var(--size-4-3) var(--chain-runner-directing-gutter);
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.chain-runner-directing-footer button {
+  width: 100%;
+}
+
+.chain-runner-directing-resumed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-directing-resumed .chain-runner-directing-run-link {
+  margin-top: 0;
+}
+
+.chain-runner-directing-failed {
+  color: var(--text-error);
+}

@@ -6,11 +6,12 @@ import { ChatWithProposer } from '@/ui/chatWithProposer'
 import { NO_EDITED_PROPOSAL, RerunDownstream } from '@/ui/rerunDownstream'
 import { EngineOfflineError } from '@/engine/transport'
 import { RunPanels } from '@/ui/runPanels'
+import { Resume } from '@/ui/resume'
 import { SideQuest } from '@/ui/sideQuest'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TAbstractFile, TFile } from 'obsidian'
-import { TFile as StubFile } from './obsidian'
+import { TFile as StubFile, TFolder } from './obsidian'
 
 /**
  * The hold-actions layer the directing panel talks to: what it reads out of a
@@ -148,6 +149,7 @@ const answer = (agentName: string, text: string): RunEvent[] => [
 ]
 
 const QUEST = '2026-09-16-quest1'
+const RESUMED = '2026-09-16-pitch1'
 const ENGINE_URL = 'http://localhost:4000'
 
 const questRun: RunMeta = {
@@ -157,6 +159,15 @@ const questRun: RunMeta = {
   startedAt: '',
   status: 'complete',
   agentOutputs: [output('sparring', 'A first pass.'), output('combat-report', 'Rotation lands as a rhythm.\n\nKeep it.')],
+}
+
+const resumedRun: RunMeta = {
+  runId: RESUMED,
+  chainName: 'develop-direction',
+  seedPrompt: '',
+  startedAt: '',
+  status: 'complete',
+  agentOutputs: [output('greenlight', '## Risks\nToo much Nier.\n\n## Greenlight Pitch\nA combat trial in a void.')],
 }
 
 let notes: Record<string, string>
@@ -170,6 +181,7 @@ let chainFrames: RunEvent[]
 let requests: RunRequest[]
 let online: boolean
 let layoutsFetched: number
+let folders: string[]
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -180,7 +192,12 @@ function file(path: string): TFile {
 function makeActions(): HoldActions {
   const app = {
     vault: {
-      getAbstractFileByPath: (path: string) => (notes[path] !== undefined ? file(path) : null),
+      getAbstractFileByPath: (path: string) => {
+        if (notes[path] !== undefined) return file(path)
+        return folders.includes(path) ? Object.assign(new TFolder(), { path }) : null
+      },
+      create: (path: string, content: string) => Promise.resolve(void (notes[path] = content)),
+      createFolder: (path: string) => Promise.resolve(void folders.push(path)),
       cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
       process: (target: { path: string }, edit: (data: string) => string) => {
         if (notes[target.path] === '!refuse') return Promise.reject(new Error('the file is read-only'))
@@ -207,7 +224,10 @@ function makeActions(): HoldActions {
     },
   } as unknown as App
   const engine = {
-    getRun: (runId: string) => Promise.resolve(runId === QUEST ? questRun : theRun(runId)),
+    getRun: (runId: string) => {
+      if (runId === QUEST) return Promise.resolve(questRun)
+      return Promise.resolve(runId === RESUMED ? resumedRun : theRun(runId))
+    },
     listChains: () =>
       online
         ? Promise.resolve([{ slug: 'combat-lab', name: 'combat lab' }, { slug: 'develop', name: 'develop-direction' }])
@@ -235,6 +255,7 @@ function makeActions(): HoldActions {
     room: new AskTheRoom({ app, engine, withEngine, notify }),
     rerun: new RerunDownstream({ app, engine, withEngine, notify }),
     quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
+    resume: new Resume({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
     engineUrl: () => ENGINE_URL,
     panels: new RunPanels(engine),
   })
@@ -256,6 +277,7 @@ beforeEach(() => {
   requests = []
   online = true
   layoutsFetched = 0
+  folders = []
 })
 
 describe('read', () => {
@@ -769,5 +791,60 @@ describe('onChange', () => {
     stop()
     touch('modify', PATH)
     expect(heard).toEqual([])
+  })
+})
+
+describe('resume', () => {
+  const started = (runId: string): RunEvent[] => [{ type: 'run_start', runId }]
+
+  beforeEach(() => {
+    chainFrames = started(RESUMED)
+  })
+
+  it('sends the Direction block through develop-direction, with canon as its context', async () => {
+    notes['context/canon-anime-game.md'] = '## LOCKED\n- an older commitment\n'
+    await makeActions().resume(RUN)
+    expect(requests).toEqual([
+      {
+        chainName: 'develop-direction',
+        seedPrompt: expect.stringContaining('KEEP: gameplay') as string,
+        context: { 'canon-anime-game': '## LOCKED\n- an older commitment\n' },
+      },
+    ])
+  })
+
+  it('brings back the Greenlight Pitch, not the whole output, with the run it landed on', async () => {
+    expect(await makeActions().resume(RUN)).toMatchObject({ runId: RESUMED, pitch: 'A combat trial in a void.' })
+  })
+
+  it('locks the hold’s ticked canon lines, and only those', async () => {
+    expect(await makeActions().resume(RUN)).toMatchObject({ canon: 'written' })
+    const canon = notes['context/canon-anime-game.md']
+    expect(canon).toContain('- Abilities rotate randomly during active combat.')
+    expect(canon).not.toContain('someone is watching')
+  })
+
+  it('links the run in the hold note', async () => {
+    await makeActions().resume(RUN)
+    expect(notes[PATH]).toContain(`## Resumed`)
+    expect(notes[PATH]).toContain(RESUMED)
+  })
+
+  it('reports a failed run, holds its canon back, and asks for no pitch', async () => {
+    chainFrames = [...started(RESUMED), { type: 'error', error: 'the model refused' }]
+    const result = await makeActions().resume(RUN)
+    expect(result).toMatchObject({ runId: RESUMED, error: 'the model refused', canon: 'held-back' })
+    expect(result?.pitch).toBeUndefined()
+    expect(notes['context/canon-anime-game.md']).toBeUndefined()
+  })
+
+  it('has nothing to report for a run with no hold note', async () => {
+    expect(await makeActions().resume('2026-09-15-nothing')).toBeUndefined()
+    expect(requests).toEqual([])
+  })
+
+  it('has nothing to report while the engine is offline', async () => {
+    online = false
+    expect(await makeActions().resume(RUN)).toBeUndefined()
   })
 })

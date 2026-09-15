@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { resumeRequest, runResume } from '@/run/resume'
+import { greenlightPitch, resumeRequest, runResume } from '@/run/resume'
 import type { EngineClient } from '@/engine/client'
-import type { RunEvent } from '@/engine/types'
+import type { AgentOutput, RunEvent } from '@/engine/types'
 
 /**
  * Resume's run, apart from the vault: what it asks the engine for, and what it
@@ -63,5 +63,30 @@ describe('runResume', () => {
   it('answers with no run id at all when the engine never named one', async () => {
     const engine = stubEngine([{ type: 'error', error: 'no such chain' }])
     expect(await runResume(engine, 'KEEP: fast combat', undefined)).toEqual({ error: 'no such chain' })
+  })
+})
+
+describe('greenlightPitch', () => {
+  const output = (text: string): AgentOutput => ({ agentName: 'greenlight', output: text, status: 'success', timestamp: '' })
+
+  it('takes the Greenlight Pitch section out of the run’s last output', () => {
+    const pitch = greenlightPitch([
+      output('## Notes\nEarlier thinking.'),
+      output('## Risks\nToo much Nier.\n\n## Greenlight Pitch\nA combat trial in a void.\n\n## Next\nBuild it.'),
+    ])
+    expect(pitch).toBe('A combat trial in a void.')
+  })
+
+  it('reaches back to an earlier output when the last one pitches nothing', () => {
+    const pitch = greenlightPitch([output('## Greenlight Pitch\nA combat trial.'), output('## Risks\nNone.')])
+    expect(pitch).toBe('A combat trial.')
+  })
+
+  it('calls nothing a pitch when no output names that section', () => {
+    expect(greenlightPitch([output('Just some words.')])).toBeUndefined()
+  })
+
+  it('has no pitch for a run that wrote nothing', () => {
+    expect(greenlightPitch([])).toBeUndefined()
   })
 })

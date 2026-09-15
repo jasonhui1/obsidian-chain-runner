@@ -1,4 +1,5 @@
 import {
+  canonNote,
   DIRECTION_VERBS,
   type CanonChoice,
   type ConversationEntry,
@@ -6,6 +7,7 @@ import {
   type HoldProposal,
   type HoldReading,
   type RepliedTurn,
+  type ResumeResult,
   sameTurn,
 } from './holdActions'
 import { TypingBoxes } from './typingBoxes'
@@ -29,6 +31,8 @@ export interface DirectingBoardDeps {
   editProposal: (proposal: string, text: string) => Promise<boolean>
   /** Reruns downstream of every edited proposal. */
   rerun: () => Promise<void>
+  /** Runs the hold's Direction as develop-direction; `undefined` when nothing ran. */
+  resume: (runId: string) => Promise<ResumeResult | undefined>
   /** Answers whether the side quest's result reached the hold. */
   sideQuest: (proposal: string, chain: string) => Promise<boolean>
   /** The chains a side quest can go through; none while the engine cannot say. */
@@ -54,6 +58,8 @@ export class DirectingBoard {
   private readonly boxes = new TypingBoxes(() => this.draw(this.state))
   /** What each run is being rerun from, while its rerun goes. */
   private readonly rerunning = new Map<string, RerunFrom>()
+  /** Each run's resume, while it goes and once it has landed. */
+  private readonly resumes = new Map<string, ResumeShown>()
   /** Each proposal being edited, by `editKey`, and the words so far. */
   private readonly editing = new Map<string, string>()
   private readonly saving = new Set<string>()
@@ -87,7 +93,10 @@ export class DirectingBoard {
     const body = (this.body = this.add(this.root, 'div', `${CLS}-body`))
     if (state.kind === 'idle') this.add(body, 'div', `${CLS}-empty`, 'Click a card, or a run’s ✎ Direct, on the drawing.')
     if (state.kind === 'missing') this.missing(body, state.runId)
-    if (state.kind === 'hold') this.hold(body, state.hold)
+    if (state.kind === 'hold') {
+      this.hold(body, state.hold)
+      this.resumeBar(state.hold)
+    }
     body.scrollTop = scroll
     keepTyping()
   }
@@ -118,6 +127,7 @@ export class DirectingBoard {
     this.rerunBar(body, hold)
 
     if (!proposal) {
+      this.pitch(body, hold.runId)
       if (hold.verdict) this.markdown(this.section(body, 'Verdict'), hold.verdict)
       const direction = this.section(body, 'Direction so far')
       this.directionSoFar(direction, hold.direction)
@@ -231,6 +241,53 @@ export class DirectingBoard {
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = !this.canRerun(hold)
     button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, () => this.deps.revise(turn)))
+  }
+
+  /** What the last resume landed on, shown where the Run tab opens. A failed run says so in the bar instead. */
+  private pitch(body: HTMLElement, runId: string): void {
+    const shown = this.resumes.get(runId)
+    if (shown?.kind !== 'landed' || shown.result.error !== undefined) return
+    const section = this.section(body, 'Greenlight Pitch')
+    if (shown.result.pitch === undefined) this.add(section, 'div', `${CLS}-faint`, 'The run pitched nothing.')
+    else this.markdown(section, shown.result.pitch)
+    if (shown.result.runId) this.runLink(section, shown.result.runId)
+  }
+
+  /** Pinned under every tab: the Direction run as it stands, and what the last run of it landed on. */
+  private resumeBar(hold: HoldReading): void {
+    const bar = this.add(this.root, 'div', `${CLS}-footer`)
+    const shown = this.resumes.get(hold.runId)
+    const running = shown?.kind === 'running'
+    const button = this.button(bar, running ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
+    button.disabled = running
+    button.addEventListener('click', () => void this.startResume(hold.runId))
+    if (shown?.kind === 'stopped') this.add(bar, 'div', `${CLS}-faint`, 'Resume did not run.')
+    if (shown?.kind === 'landed') this.resumeStatus(bar, shown.result)
+  }
+
+  private resumeStatus(bar: HTMLElement, result: ResumeResult): void {
+    const line = this.add(bar, 'div', `${CLS}-resumed`)
+    const failed = result.error !== undefined
+    const said = failed ? `Failed: ${result.error}` : 'Resumed'
+    const canon = canonNote(result.canon)
+    this.add(line, 'span', failed ? `${CLS}-failed` : `${CLS}-faint`, canon ? `${said} · ${canon}` : said)
+    if (result.runId) this.runLink(line, result.runId)
+  }
+
+  /** One resume at a time per run; what it lands on shows on the Run tab, so that is where the panel goes. */
+  private async startResume(runId: string): Promise<void> {
+    if (this.resumes.get(runId)?.kind === 'running') return
+    this.resumes.set(runId, { kind: 'running' })
+    this.draw(this.state)
+    let outcome: ResumeShown = { kind: 'stopped' }
+    try {
+      const result = await this.deps.resume(runId)
+      if (result) outcome = { kind: 'landed', result }
+      if (result && result.error === undefined) this.tab = undefined
+    } finally {
+      this.resumes.set(runId, outcome)
+      this.draw(this.state)
+    }
   }
 
   private rerunBar(body: HTMLElement, hold: HoldReading): void {
@@ -426,6 +483,15 @@ export class DirectingBoard {
 type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>
 
 type RerunFrom = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn }
+
+/** A resume from the panel: going, landed, or stopped before it ran. */
+type ResumeShown = { kind: 'running' } | { kind: 'landed'; result: ResumeResult } | { kind: 'stopped' }
+
+/** The button names what the run would lock, so nothing is resumed on ticks the reader forgot. */
+function resumeLabel(canon: CanonChoice[]): string {
+  if (canon.length === 0) return '▶ Resume'
+  return `▶ Resume · ${canon.filter(line => line.ticked).length} of ${canon.length} canon ticked`
+}
 
 function editKey(runId: string, proposal: string): string {
   return boxKey(runId, `edit ${proposal}`)

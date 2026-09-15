@@ -3,6 +3,7 @@ import type { AskTheRoom } from './askTheRoom'
 import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
 import type { RerunDownstream } from './rerunDownstream'
+import type { Resume, ResumeResult } from './resume'
 import type { RunPanels } from './runPanels'
 import type { SideQuest } from './sideQuest'
 import { guardWrite } from './vaultWrite'
@@ -32,6 +33,7 @@ export { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldProposa
 export type { ConversationEntry } from '../run/conversation'
 export { sameTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
+export { canonNote, type CanonOutcome, type ResumeResult } from './resume'
 
 /** A chat reply that can become its proposal's revision. */
 export type RepliedTurn = Required<ChatTurn>
@@ -48,6 +50,7 @@ export interface HoldActionsDeps {
   room: AskTheRoom
   rerun: RerunDownstream
   quest: SideQuest
+  resume: Resume
   engineUrl: () => string
   /** What each run wrote, which tells an edited proposal from one left as it was. */
   panels: RunPanels
@@ -131,6 +134,16 @@ export class HoldActions {
     if (quest.chainName === '' || !found || !hasProposal(found.content, proposal)) return false
     const run = await this.deps.quest.send(found.content, quest)
     return run !== undefined && this.edit(runId, content => appendSideQuest(content, quest, run))
+  }
+
+  /**
+   * The hold's Direction run as `develop-direction`, its ticks locked and the
+   * run linked back; the pitch it landed on comes back with it. `undefined`
+   * when nothing ran.
+   */
+  async resume(runId: string): Promise<ResumeResult | undefined> {
+    const file = this.deps.notes.find(runId)
+    return file ? this.deps.resume.resumeNote(file) : undefined
   }
 
   /** The chains a side quest can go through; none while the engine cannot say. */

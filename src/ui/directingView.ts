@@ -100,6 +100,7 @@ export class DirectingView extends ItemView {
         const runId = this.runId
         if (runId) await this.follow(runId, await this.holds.revise(runId, turn))
       },
+      resume: runId => this.holds.resume(runId),
       rerun: async () => {
         const runId = this.runId
         if (runId) await this.follow(runId, await this.holds.rerun(runId))
