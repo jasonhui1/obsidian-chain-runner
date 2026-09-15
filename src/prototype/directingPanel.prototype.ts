@@ -34,8 +34,6 @@ export class DirectingPanelPrototype extends ItemView {
   private readonly busy = new Set<string>()
   private readonly drafts = new Map<string, string>()
   private readonly editing = new Set<string>()
-  private typingEl: HTMLElement | undefined
-  private readonly typing: string[] = []
   private chains: string[] = []
   private to = ROOM
   private questing = false
@@ -69,30 +67,9 @@ export class DirectingPanelPrototype extends ItemView {
     this.draw()
   }
 
-  /**
-   * Something outside the panel cancels key presses meant for its text boxes, so
-   * a cancelled key is typed in by hand; the canceller's stack is shown for #35.
-   */
+  /** Key presses into the panel's text boxes arrive cancelled beside a drawing; a cancelled key is typed by hand (docs/agents/excalidraw.md). */
   private keepTyping(): void {
     const panel = this.contentEl
-    const original = Event.prototype.preventDefault
-    Event.prototype.preventDefault = function (this: Event): void {
-      if (this.type === 'keydown' && this.target instanceof Node && panel.contains(this.target)) {
-        const frames = (new Error().stack ?? '').split('\n').slice(2, 6).map(line => line.trim().replace(/^at /, ''))
-        blockedBy(frames.join('  ←  '))
-      }
-      original.call(this)
-    }
-    this.register(() => (Event.prototype.preventDefault = original))
-
-    let reported = false
-    const blockedBy = (stack: string): void => {
-      if (reported) return
-      reported = true
-      this.typing.splice(0, this.typing.length, `keys were blocked by: ${stack}`)
-      this.typingEl?.setText(this.typing[0])
-    }
-
     this.registerDomEvent(panel, 'keydown', event => {
       const field = event.target
       if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return
@@ -142,7 +119,6 @@ export class DirectingPanelPrototype extends ItemView {
     root.empty()
     root.addClass('crp')
     this.switcher(root)
-    this.typingEl = root.createDiv({ cls: 'crp-typing', text: this.typing.join('  ·  ') || 'typing check: nothing blocked yet' })
     this.header(root)
     const body = root.createDiv({ cls: 'crp-body' })
     const hold = this.hold
@@ -274,31 +250,32 @@ export class DirectingPanelPrototype extends ItemView {
   // ── B: one proposal at a time ──────────────────────────────────────────────
 
   private proposalFocus(body: HTMLElement, hold: PrototypeHold, reading: HoldReading): void {
-    const chips = body.createDiv({ cls: 'crp-tabs' })
-    this.button(chips, 'Run', () => ((this.selected = undefined), this.draw()), this.selected ? '' : 'is-on')
+    const tabs = body.createDiv({ cls: 'crp-tabs' })
+    const pick = (name: string | undefined): void => {
+      this.selected = name
+      this.draw()
+      body.scrollTop = 0
+    }
+    this.button(tabs, 'Run', () => pick(undefined), this.selected ? '' : 'is-on')
     for (const proposal of reading.proposals) {
-      this.button(chips, proposal.name, () => ((this.selected = proposal.name), this.draw()), proposal.name === this.selected ? 'is-on' : '')
+      this.button(tabs, proposal.name, () => pick(proposal.name), proposal.name === this.selected ? 'is-on' : '')
     }
 
     const proposal = reading.proposals.find(p => p.name === this.selected)
     if (!proposal) {
-      this.verdict(body, reading, true)
-      this.heading(body, 'Direction so far')
-      this.directionSummary(body, hold, reading)
-      this.heading(body, 'Ask the room')
-      this.roomBox(body, hold)
-      this.heading(body, `Canon (${reading.canon.filter(c => c.ticked).length} of ${reading.canon.length} ticked)`)
-      this.canon(body, hold, reading)
+      this.verdict(this.section(body), reading, true)
+      this.directionSummary(this.section(body, 'Direction so far'), hold, reading)
+      this.roomBox(this.section(body, 'Ask the room'), hold)
+      this.canon(this.section(body, `Canon · ${reading.canon.filter(c => c.ticked).length} of ${reading.canon.length} ticked`), hold, reading)
     } else {
-      body.createDiv({ cls: 'crp-big', text: proposal.name }).dataset.proposal = proposal.name
-      this.verbs(body, hold, reading, proposal.name, 'crp-verbs-big')
-      this.proposalText(body, hold, proposal.name, proposal.text, false)
-      this.heading(body, `Canon from ${proposal.name}`)
-      this.canon(body, hold, reading, proposal.name)
-      this.heading(body, `Chat with ${proposal.name}`)
-      this.chatThread(body, hold, proposal.name)
-      this.heading(body, 'Side quest')
-      this.questBox(body, hold, proposal.name)
+      const top = this.section(body)
+      top.dataset.proposal = proposal.name
+      this.verbs(top, hold, reading, proposal.name, 'crp-verbs-big')
+      this.proposalText(top, hold, proposal.name, proposal.text, false)
+      const canon = reading.canon.filter(c => c.name === proposal.name)
+      if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), hold, reading, proposal.name)
+      this.chatThread(this.section(body, `Chat with ${proposal.name}`), hold, proposal.name)
+      this.questBox(this.section(body, 'Side quest'), hold, proposal.name)
     }
 
     const tray = body.createDiv({ cls: 'crp-tray' })
@@ -434,9 +411,16 @@ export class DirectingPanelPrototype extends ItemView {
       this.button(row, 'Cancel', () => (this.editing.delete(name), this.drafts.delete(key), this.draw()))
       return
     }
-    const wrap = folded ? this.fold(el, `read:${name}`, 'Read proposal', false) : el.createDiv()
-    this.markdown(wrap.createDiv({ cls: 'crp-text' }), text)
+    const wrap = folded ? this.fold(el, `read:${name}`, 'Read proposal', false) : el.createDiv({ cls: 'crp-proposal' })
+    const shown = wrap.createDiv({ cls: 'crp-text' })
+    this.markdown(shown, text || '*This proposal is empty.*')
     const row = el.createDiv({ cls: 'crp-row' })
+    if (!folded && text.length > 600) {
+      const key = `${this.variant}:more:${name}`
+      const open = this.folds.get(key) ?? false
+      shown.toggleClass('is-clamped', !open)
+      this.button(row, open ? 'Show less' : 'Show the whole proposal', () => (this.folds.set(key, !open), this.draw()), 'crp-quiet')
+    }
     this.button(row, '✎ Edit', () => (this.editing.add(name), this.draw()))
     const edits = hold.pendingEdits()
     if (edits.length > 0) this.action(row, 'rerun', `⟳ Rerun downstream (${edits.join(', ')})`, () => hold.rerunDownstream(), 'mod-cta')
@@ -502,6 +486,13 @@ export class DirectingPanelPrototype extends ItemView {
     if (!compact && last?.kind === 'resume' && last.pitch) {
       this.markdown(el.createDiv({ cls: 'crp-pitch' }), `**Greenlight pitch** · run ${last.runId}\n\n${last.pitch}`)
     }
+  }
+
+  /** A spaced block of the panel, with its title when it has one. */
+  private section(el: HTMLElement, title?: string): HTMLElement {
+    const section = el.createDiv({ cls: 'crp-section' })
+    if (title) section.createDiv({ cls: 'crp-section-title', text: title })
+    return section
   }
 
   private heading(el: HTMLElement, text: string): void {
