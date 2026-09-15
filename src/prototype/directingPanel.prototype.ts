@@ -1,7 +1,7 @@
 /**
  * PROTOTYPE (#35) — throwaway. Three layouts for directing a run from the right
- * sidebar, switchable from the bar at the panel’s top (or ← → with the panel
- * focused): A per run, B per proposal, C a conversation. Every button goes
+ * sidebar, switchable from the bar at the panel’s top: A per run, B per
+ * proposal, C a conversation. Every button goes
  * through `PrototypeHold`, never the note.
  */
 
@@ -63,12 +63,9 @@ export class DirectingPanelPrototype extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
-    this.containerEl.tabIndex = -1
-    this.registerDomEvent(this.containerEl, 'keydown', event => {
-      const target = event.target as HTMLElement
-      if (target.closest('input, textarea, select, [contenteditable]')) return
-      if (event.key === 'ArrowLeft') this.cycle(-1)
-      if (event.key === 'ArrowRight') this.cycle(1)
+    // Typing in the panel stays in the panel; the drawing beside it listens for keys too.
+    this.registerDomEvent(this.contentEl, 'keydown', event => {
+      if ((event.target as HTMLElement).closest('input, textarea')) event.stopPropagation()
     })
     void this.deps.chainNames().then(names => (this.chains = names))
     this.draw()
