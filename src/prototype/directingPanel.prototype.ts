@@ -64,41 +64,41 @@ export class DirectingPanelPrototype extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
-    // Typing in the panel stays in the panel; the drawing beside it listens for keys too.
-    this.registerDomEvent(this.contentEl, 'keydown', event => {
-      if ((event.target as HTMLElement).closest('input, textarea')) event.stopPropagation()
-    })
-    this.watchTyping()
+    this.keepTyping()
     void this.deps.chainNames().then(names => (this.chains = names))
     this.draw()
   }
 
-  /** PROTOTYPE diagnostic: where a key press in the panel's text boxes ends up, shown under the layout switcher. */
-  private watchTyping(): void {
-    const doc = this.contentEl.ownerDocument
-    const describe = (el: Element | null): string =>
-      !el ? 'nothing' : this.contentEl.contains(el) ? `panel ${(el as HTMLElement).dataset.key ?? el.tagName.toLowerCase()}` : `${el.tagName.toLowerCase()}.${Array.from(el.classList).slice(0, 2).join('.')}`
-    const note = (line: string): void => {
-      this.typing.push(line)
-      this.typing.splice(0, this.typing.length - 5)
-      this.typingEl?.setText(this.typing.join('  ·  '))
+  /**
+   * Something outside the panel cancels key presses meant for its text boxes, so
+   * a cancelled key is typed in by hand; the canceller's stack is shown for #35.
+   */
+  private keepTyping(): void {
+    const panel = this.contentEl
+    const original = Event.prototype.preventDefault
+    Event.prototype.preventDefault = function (this: Event): void {
+      if (this.type === 'keydown' && this.target instanceof Node && panel.contains(this.target)) {
+        const frames = (new Error().stack ?? '').split('\n').slice(2, 6).map(line => line.trim().replace(/^at /, ''))
+        blockedBy(frames.join('  ←  '))
+      }
+      original.call(this)
     }
-    let ours = 0
-    this.registerDomEvent(this.contentEl, 'focusin', event => {
-      ours = Date.now()
-      note(`focus ${describe(event.target as Element)}`)
+    this.register(() => (Event.prototype.preventDefault = original))
+
+    let reported = false
+    const blockedBy = (stack: string): void => {
+      if (reported) return
+      reported = true
+      this.typing.splice(0, this.typing.length, `keys were blocked by: ${stack}`)
+      this.typingEl?.setText(this.typing[0])
+    }
+
+    this.registerDomEvent(panel, 'keydown', event => {
+      const field = event.target
+      if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return
+      event.stopPropagation()
+      if (event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.altKey) typeInto(field, event.key)
     })
-    this.registerDomEvent(this.contentEl, 'focusout', () => setTimeout(() => note(`focus left → ${describe(doc.activeElement)}`)))
-    this.registerDomEvent(this.contentEl, 'input', () => note('text arrived ✓'))
-    this.registerDomEvent(
-      doc,
-      'keydown',
-      event => {
-        if (Date.now() - ours > 10000 || event.key.length !== 1) return
-        setTimeout(() => note(`key "${event.key}" → ${describe(event.target as Element)}${event.defaultPrevented ? ' BLOCKED' : ''}`))
-      },
-      { capture: true },
-    )
   }
 
   /** Points the panel at a run and, when a card was clicked, its proposal. */
@@ -142,7 +142,7 @@ export class DirectingPanelPrototype extends ItemView {
     root.empty()
     root.addClass('crp')
     this.switcher(root)
-    this.typingEl = root.createDiv({ cls: 'crp-typing', text: this.typing.join('  ·  ') || 'typing check: click a text box and type' })
+    this.typingEl = root.createDiv({ cls: 'crp-typing', text: this.typing.join('  ·  ') || 'typing check: nothing blocked yet' })
     this.header(root)
     const body = root.createDiv({ cls: 'crp-body' })
     const hold = this.hold
@@ -561,4 +561,21 @@ function appliedVerbs(reading: HoldReading, name: string): string[] {
     .map(line => /^([A-Z]+): (.+)$/.exec(line))
     .filter((m): m is RegExpExecArray => !!m && m[2].split(' + ').includes(name))
     .map(m => m[1])
+}
+
+/** A key press the text box never got, applied as the browser would have. */
+function typeInto(field: HTMLInputElement | HTMLTextAreaElement, key: string): void {
+  const start = field.selectionStart ?? field.value.length
+  const end = field.selectionEnd ?? start
+  const caret = (at: number): void => field.setSelectionRange(at, at)
+  if (key.length === 1) field.setRangeText(key, start, end, 'end')
+  else if (key === 'Enter' && field instanceof HTMLTextAreaElement) field.setRangeText('\n', start, end, 'end')
+  else if (key === 'Backspace') field.setRangeText('', start === end ? Math.max(0, start - 1) : start, end, 'end')
+  else if (key === 'Delete') field.setRangeText('', start, start === end ? start + 1 : end, 'end')
+  else if (key === 'ArrowLeft') return caret(Math.max(0, start - 1))
+  else if (key === 'ArrowRight') return caret(Math.min(field.value.length, end + 1))
+  else if (key === 'Home') return caret(0)
+  else if (key === 'End') return caret(field.value.length)
+  else return
+  field.dispatchEvent(new Event('input', { bubbles: true }))
 }
