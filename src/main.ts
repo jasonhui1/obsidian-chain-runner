@@ -8,6 +8,7 @@ import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
 import { AskTheRoom } from './ui/askTheRoom'
 import { ChatWithProposer } from './ui/chatWithProposer'
+import { createDirectionButtons } from './ui/directionButtons'
 import {
   createDrawingSurface,
   createNodeSurface,
@@ -82,6 +83,10 @@ export default class ChainRunnerPlugin extends Plugin {
         engineUrl: () => this.settings.engineUrl,
         exists: runId => this.engine.runExists(runId),
       }),
+    )
+    // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
+    this.registerMarkdownPostProcessor(
+      createDirectionButtons({ app: this.app, notify: message => new Notice(message) }),
     )
     const keep = new KeepPiece({
       app: this.app,

@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
+  appendDirectionLine,
   appendResumeLink,
   directionBlock,
+  directionLine,
   holdHeading,
   holdNoteContent,
   holdNotePath,
@@ -174,6 +176,58 @@ describe('directionBlock', () => {
 
   it('reads a fresh template’s Direction, all-empty, rather than saying there is none', () => {
     expect(directionBlock(holdNoteContent(input()))).toContain('KEEP:')
+  })
+})
+
+describe('directionLine', () => {
+  it('names the proposal the verb was pressed on', () => {
+    expect(directionLine('KEEP', 'character-director')).toBe('KEEP: character-director')
+  })
+
+  it('names a second proposal for COMBINE', () => {
+    expect(directionLine('COMBINE', 'character-director', 'gameplay-director')).toBe('COMBINE: character-director + gameplay-director')
+  })
+})
+
+describe('appendDirectionLine', () => {
+  it('leaves a note with no Direction heading unchanged', () => {
+    expect(appendDirectionLine('just some words', 'KEEP: character-director')).toBe('just some words')
+  })
+
+  it('appends after the template’s own verb lines, ahead of the next heading', () => {
+    const content = holdNoteContent(input())
+    const appended = appendDirectionLine(content, 'KEEP: character-director')
+    expect(appended).toContain('COMBINE:\nKEEP: character-director\n\n## Conversation')
+  })
+
+  it('appends after CANON? ticks the human already made, not before them', () => {
+    const content = [
+      '## Direction',
+      'KEEP:',
+      '',
+      'CANON?',
+      '- [x] halo = burden — character-director',
+      '',
+      '## Conversation',
+      '',
+    ].join('\n')
+    const appended = appendDirectionLine(content, 'KILL: gameplay-director')
+    const canonAt = appended.indexOf('- [x] halo = burden')
+    const appendedAt = appended.indexOf('KILL: gameplay-director')
+    expect(canonAt).toBeGreaterThan(-1)
+    expect(appendedAt).toBeGreaterThan(canonAt)
+  })
+
+  it('stacks a second press under the first', () => {
+    const once = appendDirectionLine(holdNoteContent(input()), 'KEEP: character-director')
+    const twice = appendDirectionLine(once, 'KILL: gameplay-director')
+    expect(twice).toContain('KEEP: character-director\nKILL: gameplay-director')
+  })
+
+  it('leaves the rest of the note, Conversation included, untouched', () => {
+    const content = holdNoteContent(input()).replace('## Conversation\n', '## Conversation\n@gameplay-director defend this.\n')
+    const appended = appendDirectionLine(content, 'KEEP: character-director')
+    expect(appended).toContain('@gameplay-director defend this.')
   })
 })
 

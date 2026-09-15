@@ -10,7 +10,14 @@ import type { AgentOutput, LayoutPanel } from '../engine/types'
 
 const HOLD_FOLDER = 'Maestro/holds'
 
-const DIRECTIONS = ['KEEP', 'CHANGE', 'KILL', 'PUSH', 'REDUCE', 'MUTATE', 'COMBINE']
+const DIRECTIONS = ['KEEP', 'CHANGE', 'KILL', 'PUSH', 'REDUCE', 'MUTATE', 'COMBINE'] as const
+type Direction = (typeof DIRECTIONS)[number]
+
+/** The verbs a proposal carries a button for; CHANGE stays free text only — it describes a change rather than naming a proposal whole. */
+export const DIRECTION_VERBS: readonly Exclude<Direction, 'CHANGE'>[] = DIRECTIONS.filter(
+  (direction): direction is Exclude<Direction, 'CHANGE'> => direction !== 'CHANGE',
+)
+export type DirectionVerb = (typeof DIRECTION_VERBS)[number]
 
 export interface HoldNoteInput {
   runId: string
@@ -184,14 +191,44 @@ function lineAt(content: string, line: string, from: number): number {
   return -1
 }
 
+/** Where the line starting at `at` ends — the start of whatever follows it. */
+function afterLine(content: string, at: number): number {
+  const newline = content.indexOf('\n', at)
+  return newline === -1 ? content.length : newline + 1
+}
+
 /** The text under the `heading` line, up to the first of `ends` after it; `undefined` without the heading. */
 function bodyUnder(content: string, heading: string, ends: string[], from: number): string | undefined {
   const start = lineAt(content, heading, from)
   if (start === -1) return undefined
-  const newline = content.indexOf('\n', start)
-  const bodyStart = newline === -1 ? content.length : newline + 1
+  const bodyStart = afterLine(content, start)
   const endAt = Math.min(content.length, ...ends.map(end => lineAt(content, end, bodyStart)).filter(at => at !== -1))
   return content.slice(bodyStart, endAt)
+}
+
+/** A verb button's line: the verb naming the proposal it was pressed on; COMBINE names a second. */
+export function directionLine(verb: DirectionVerb, name: string, secondName?: string): string {
+  return `${verb}: ${name}${secondName ? ` + ${secondName}` : ''}`
+}
+
+/**
+ * `line` appended at the end of the Direction block, after whatever the human
+ * already put there — free text and CANON? ticks included. Unchanged without a
+ * Direction heading, which is what tells a button this is not a hold note.
+ */
+export function appendDirectionLine(content: string, line: string): string {
+  const match = DIRECTION_HEADING.exec(content)
+  if (!match) return content
+  const bodyStart = afterLine(content, match.index)
+
+  const heading = /^#{1,6}[ \t]+.*$/gm
+  heading.lastIndex = bodyStart
+  const next = heading.exec(content)
+  const bodyEnd = next ? next.index : content.length
+
+  const body = content.slice(bodyStart, bodyEnd).replace(/\s+$/, '')
+  const newBody = `${body === '' ? '' : `${body}\n`}${line}\n`
+  return `${content.slice(0, bodyStart)}${newBody}\n${content.slice(bodyEnd).replace(/^\s+/, '')}`
 }
 
 const RESUMED_HEADING = /^##\s+Resumed\s*$/m
