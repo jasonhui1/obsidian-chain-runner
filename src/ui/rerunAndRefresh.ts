@@ -1,7 +1,7 @@
-import type { App, TFile } from 'obsidian'
+import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { refreshHoldNote, thoughtsByNode } from '../run/holdNote'
+import { holdNotePath, refreshHoldNote, thoughtsByNode } from '../run/holdNote'
 import type { EngineClient } from '../engine/client'
 import type { LayoutModel, RunMeta, RunRequest } from '../engine/types'
 
@@ -35,7 +35,7 @@ export interface RerunAndRefreshHooks {
   proposalsStale?: (current: string) => boolean
 }
 
-/** Runs `request`, then refreshes the hold note with the run it lands on. */
+/** Runs `request`, then refreshes the hold note with the run it lands on and renames it to that run. */
 export async function rerunAndRefresh(
   deps: RerunAndRefreshDeps,
   file: TFile,
@@ -59,12 +59,11 @@ export async function rerunAndRefresh(
   const landed = await deps.withEngine(() => fetchRun(engine, newRunId))
   if (!landed) return
 
-  const wrote = await guardWrite(notify, 'the hold note', async () => {
+  const notice = await guardWrite(notify, 'the hold note', async () => {
     // Read again: the human may have written in the note while the rerun went.
     const current = await app.vault.cachedRead(file)
     if (hooks.proposalsStale?.(current)) {
-      notify(`Reran as run ${newRunId}, but proposals changed meanwhile — note left as is`)
-      return false
+      return `Reran as run ${newRunId}, but proposals changed meanwhile — note left as is`
     }
     const refreshed = refreshHoldNote(beforeRefresh(current, newRunId), {
       runId: landed.run.runId,
@@ -73,7 +72,14 @@ export async function rerunAndRefresh(
       thoughts: thoughtsByNode(landed.run.agentOutputs),
     })
     await app.vault.modify(file, refreshed)
-    return true
+
+    // Named for the run it now shows, so directing that run finds it.
+    const renamed = normalizePath(holdNotePath(newRunId))
+    if (app.vault.getAbstractFileByPath(renamed)) {
+      return `Reran downstream as run ${newRunId}, but ${renamed} already exists — note not renamed`
+    }
+    await app.fileManager.renameFile(file, renamed)
+    return `Reran downstream as run ${newRunId}`
   })
-  if (wrote) notify(`Reran downstream as run ${landed.run.runId}`)
+  if (notice) notify(notice)
 }

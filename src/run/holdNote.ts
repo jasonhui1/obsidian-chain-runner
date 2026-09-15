@@ -5,7 +5,7 @@ import type { AgentOutput, LayoutPanel } from '../engine/types'
 /**
  * The hold-note convention: what a finished run's layout becomes on disk, for a
  * human to direct. Every hold lives under one fixed folder, keyed by run id
- * alone — there is one hold per run.
+ * alone — there is one hold per run, renamed to the newest run a rerun lands on.
  */
 
 const HOLD_FOLDER = 'Maestro/holds'

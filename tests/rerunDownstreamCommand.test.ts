@@ -11,6 +11,7 @@ import { TFile as StubFile } from './obsidian'
 const OLD = '2026-09-15-Ab3dE1'
 const NEW = '2026-09-16-Xy9zW2'
 const HOLD_PATH = `Maestro/holds/${OLD}.md`
+const RENAMED_PATH = `Maestro/holds/${NEW}.md`
 
 const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
   name,
@@ -86,6 +87,14 @@ function makeRerun(): RerunDownstream {
         return Promise.resolve()
       },
     },
+    fileManager: {
+      renameFile: (target: { path: string }, path: string) => {
+        notes[path] = notes[target.path]
+        delete notes[target.path]
+        target.path = path
+        return Promise.resolve()
+      },
+    },
   } as unknown as App
 
   const engine = {
@@ -148,13 +157,26 @@ describe('start', () => {
 
   it('refreshes the note with the new run’s verdict, folding the old one and keeping the Direction', async () => {
     await makeRerun().start()
-    const note = notes[HOLD_PATH]
+    const note = notes[RENAMED_PATH]
     expect(note).toContain(`# Hold: run ${NEW} · creative-director`)
     expect(note).toContain('Burden-driven combat.')
     expect(note).toContain('## Previous verdict')
     expect(note).toContain('Stance-switching combat.')
     expect(note).toContain('KEEP: fast combat')
     expect(notices).toEqual([`Reran downstream as run ${NEW}`])
+  })
+
+  it('renames the note to the new run, so directing that run finds it', async () => {
+    await makeRerun().start()
+    expect(Object.keys(notes)).toEqual([RENAMED_PATH])
+  })
+
+  it('keeps the note’s name, and says so, when a note for the new run is already there', async () => {
+    notes[RENAMED_PATH] = 'another note'
+    await makeRerun().start()
+    expect(notes[HOLD_PATH]).toContain(`# Hold: run ${NEW} · creative-director`)
+    expect(notes[RENAMED_PATH]).toBe('another note')
+    expect(notices).toEqual([`Reran downstream as run ${NEW}, but ${RENAMED_PATH} already exists — note not renamed`])
   })
 
   it('writes nothing when the engine is offline', async () => {
@@ -175,7 +197,7 @@ describe('start', () => {
     const pending = makeRerun().start()
     notes[HOLD_PATH] = edited().replace('## Conversation\n', '## Conversation\nwritten mid-run\n')
     await pending
-    expect(notes[HOLD_PATH]).toContain('written mid-run')
+    expect(notes[RENAMED_PATH]).toContain('written mid-run')
   })
 
   it('leaves the note as is, and says so, when a proposal changed while the rerun was going', async () => {

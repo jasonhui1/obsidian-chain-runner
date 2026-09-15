@@ -77,6 +77,14 @@ function makeCommand(): ChatWithProposer {
         return Promise.resolve()
       },
     },
+    fileManager: {
+      renameFile: (target: { path: string }, path: string) => {
+        notes[path] = notes[target.path]
+        delete notes[target.path]
+        target.path = path
+        return Promise.resolve()
+      },
+    },
   } as unknown as App
 
   const engine = {
@@ -181,6 +189,6 @@ describe('start, revising from a reply', () => {
     expect(requests).toHaveLength(1)
     expect(requests[0].branchedFromRunId).toBe(RUN)
     expect(requests[0].branchOutputs).toContainEqual(output('gameplay-director', 'Halo is a burden, not a toolkit.'))
-    expect(notes[HOLD_PATH]).toContain(`revise → reran as run ${NEW}`)
+    expect(notes[`Maestro/holds/${NEW}.md`]).toContain(`revise → reran as run ${NEW}`)
   })
 })
