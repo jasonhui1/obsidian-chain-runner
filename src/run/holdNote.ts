@@ -44,10 +44,21 @@ export function thoughtsByNode(outputs: AgentOutput[]): Record<string, string> {
   return thoughts
 }
 
+/** A run's proposals: every panel but the one they converge on. */
+export function proposerPanels(panels: LayoutPanel[]): LayoutPanel[] {
+  return panels.filter(panel => panel.emphasis !== 'join')
+}
+
+/** The run and chain a hold note was written for. */
+export interface HoldHeading {
+  runId: string
+  chainName: string
+}
+
 const HOLD_HEADING = /^# Hold: run (\S+) · (.+?)\s*$/m
 
 /** The run and chain a hold note was written for, from its title; `undefined` for any other note. */
-export function holdHeading(content: string): { runId: string; chainName: string } | undefined {
+export function holdHeading(content: string): HoldHeading | undefined {
   const match = HOLD_HEADING.exec(content)
   return match ? { runId: match[1], chainName: match[2] } : undefined
 }
@@ -65,7 +76,7 @@ const DIRECTION = '## Direction'
  */
 export function holdNoteContent(input: HoldNoteInput): string {
   const verdict = input.panels.find(panel => panel.emphasis === 'join')
-  const proposers = input.panels.filter(panel => panel.emphasis !== 'join')
+  const proposers = proposerPanels(input.panels)
 
   return (
     [
@@ -236,7 +247,7 @@ export function directionBlock(content: string): string | undefined {
 export function proposalEdits(content: string, panels: LayoutPanel[]): Record<string, string> {
   const proposalsAt = lineAt(content, PROPOSALS, 0)
   if (proposalsAt === -1) return {}
-  const proposers = panels.filter(panel => panel.emphasis !== 'join')
+  const proposers = proposerPanels(panels)
   const ends = [...proposers.map(panel => `### ${panel.name}`), DIRECTION]
 
   const edits: Record<string, string> = {}

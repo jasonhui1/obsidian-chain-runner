@@ -10,9 +10,13 @@ const CONVERSATION_HEADING = /^##\s+Conversation\s*$/m
 /** Where the Conversation section's body starts; the note's length when there is no such heading. */
 export function conversationStart(content: string): number {
   const match = CONVERSATION_HEADING.exec(content)
-  if (!match) return content.length
-  const newline = content.indexOf('\n', match.index)
-  return newline === -1 ? content.length : newline + 1
+  return match ? Math.min(lineEnd(content, match.index) + 1, content.length) : content.length
+}
+
+/** Where the line starting at `at` ends, not including its newline. */
+export function lineEnd(content: string, at: number): number {
+  const newline = content.indexOf('\n', at)
+  return newline === -1 ? content.length : newline
 }
 
 /**

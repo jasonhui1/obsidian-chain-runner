@@ -4,7 +4,7 @@ import { fetchRun } from './rerunAndRefresh'
 import { appendRoomAnswers, pendingRoomQuestion, type RoomAnswer } from '../run/askRoom'
 import { chatSeed, latestOutput } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
-import { holdHeading } from '../run/holdNote'
+import { holdHeading, proposerPanels } from '../run/holdNote'
 import type { EngineClient } from '../engine/client'
 
 /** The "Ask the room" command: the vault half of `src/run/askRoom.ts`. */
@@ -56,9 +56,8 @@ export class AskTheRoom {
     const { engine, notify } = this.deps
     const answers = await this.deps.withEngine(async () => {
       const source = await fetchRun(engine, runId)
-      const proposers = source.layout.panels.filter(panel => panel.emphasis !== 'join')
       const gathered: RoomAnswer[] = []
-      for (const panel of proposers) {
+      for (const panel of proposerPanels(source.layout.panels)) {
         const seed = chatSeed(source.run, panel.node, question)
         const agentName = latestOutput(source.run.agentOutputs, panel.node)?.agentName
         if (seed === undefined || agentName === undefined) continue

@@ -23,6 +23,7 @@ import {
 
 export { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldProposal, type HoldReading } from '../run/holdNote'
 export type { ConversationEntry } from '../run/conversation'
+export { sameTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
 
 /** A chat reply that can become its proposal's revision. */

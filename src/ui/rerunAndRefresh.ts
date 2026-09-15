@@ -1,7 +1,7 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { holdNotePath, refreshHoldNote, thoughtsByNode } from '../run/holdNote'
+import { holdNotePath, refreshHoldNote, thoughtsByNode, type HoldHeading } from '../run/holdNote'
 import type { EngineClient } from '../engine/client'
 import type { LayoutModel, RunMeta, RunRequest } from '../engine/types'
 
@@ -39,7 +39,7 @@ export interface RerunAndRefreshHooks {
 export async function rerunAndRefresh(
   deps: RerunAndRefreshDeps,
   file: TFile,
-  heading: { runId: string; chainName: string },
+  heading: HoldHeading,
   request: RunRequest,
   hooks: RerunAndRefreshHooks = {},
 ): Promise<string | undefined> {

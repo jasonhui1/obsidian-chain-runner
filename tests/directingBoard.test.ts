@@ -316,12 +316,18 @@ describe('a proposal tab, chatting', () => {
     expect(calls).toEqual(['chat world really?', 'chat world truly?'])
   })
 
-  it('sends nothing for a blank box, or on Shift+Enter', () => {
+  it('sends nothing for a blank box', () => {
     board().open(showing(), 'world')
     button('Send').click()
-    type(composer('Message world…'), 'two')
-    expect(press(composer('Message world…'), 'Enter', true).defaultPrevented).toBe(false)
+    press(composer('Message world…'), 'Enter')
     expect(calls).toEqual([])
+  })
+
+  it('sends on Shift+Enter too, since a message is one line', () => {
+    board().open(showing(), 'world')
+    type(composer('Message world…'), 'two')
+    expect(press(composer('Message world…'), 'Enter', true).defaultPrevented).toBe(true)
+    expect(calls).toEqual(['chat world two'])
   })
 
   it('shows the message and that a reply is coming, and cannot send again while it does', async () => {
@@ -409,8 +415,8 @@ describe('the Run tab, talking to the room', () => {
 
   it('adds a CHANGE to the Direction from its own box', () => {
     board().open(showing())
-    type(composer('CHANGE: …'), 'rotation should hurt')
-    press(composer('CHANGE: …'), 'Enter')
+    type(composer('What should change…'), 'rotation should hurt')
+    press(composer('What should change…'), 'Enter')
     expect(calls).toEqual(['change rotation should hurt'])
   })
 })

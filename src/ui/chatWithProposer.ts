@@ -4,7 +4,7 @@ import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatTurn } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
-import { holdHeading } from '../run/holdNote'
+import { holdHeading, proposerPanels, type HoldHeading } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
 import type { EngineClient } from '../engine/client'
 
@@ -63,7 +63,7 @@ export class ChatWithProposer {
     const source = await this.deps.withEngine(() => fetchRun(engine, runId))
     if (!source) return undefined
 
-    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === name)
+    const panel = proposerPanels(source.layout.panels).find(candidate => candidate.name === name)
     const seed = panel && chatSeed(source.run, panel.node, message)
     const agentName = panel && latestOutput(source.run.agentOutputs, panel.node)?.agentName
     if (!panel || seed === undefined || agentName === undefined) {
@@ -90,7 +90,7 @@ export class ChatWithProposer {
    */
   async revise(
     file: TFile,
-    heading: { runId: string; chainName: string },
+    heading: HoldHeading,
     turn: Required<ChatTurn>,
     mark: (content: string, newRunId: string) => string = markRevised,
   ): Promise<string | undefined> {
@@ -98,7 +98,7 @@ export class ChatWithProposer {
     const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
     if (!source) return undefined
 
-    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === turn.name)
+    const panel = proposerPanels(source.layout.panels).find(candidate => candidate.name === turn.name)
     if (!panel) {
       notify(NOT_A_PROPOSER(turn.name))
       return undefined

@@ -2,7 +2,7 @@ import type { App } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { fetchRun } from './rerunAndRefresh'
 import { runHeadless } from '../run/headlessRun'
-import { holdHeading, proposalEdits } from '../run/holdNote'
+import { holdHeading, proposalEdits, proposerPanels } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
 import { appendSideQuestResult, pendingSideQuest } from '../run/sideQuest'
 import type { EngineClient } from '../engine/client'
@@ -43,7 +43,7 @@ export class SideQuest {
     const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
     if (!source) return
 
-    const panel = source.layout.panels.find(candidate => candidate.emphasis !== 'join' && candidate.name === quest.name)
+    const panel = proposerPanels(source.layout.panels).find(candidate => candidate.name === quest.name)
     if (!panel) {
       notify(NOT_A_PROPOSER(quest.name))
       return

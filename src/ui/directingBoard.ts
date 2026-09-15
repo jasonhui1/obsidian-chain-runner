@@ -6,7 +6,9 @@ import {
   type HoldProposal,
   type HoldReading,
   type RepliedTurn,
+  sameTurn,
 } from './holdActions'
+import { TypingBoxes } from './typingBoxes'
 
 /** The directing panel's elements: a Run tab, and a tab per proposal. Plain DOM; every button is handed to the deps. */
 
@@ -40,10 +42,7 @@ export class DirectingBoard {
   /** The proposal whose tab is open; `undefined` is the Run tab. */
   private tab: string | undefined
   private readonly unclamped = new Set<string>()
-  /** What each box holds, by `boxKey`, kept across redraws. */
-  private readonly drafts = new Map<string, string>()
-  /** What each box sent that the hold actions have not answered yet, by `boxKey`. */
-  private readonly sending = new Map<string, string>()
+  private readonly boxes = new TypingBoxes(() => this.draw(this.state))
   /** The reply each run is being revised from, while its rerun goes. */
   private readonly revising = new Map<string, RepliedTurn>()
   private releases: (() => void)[] = []
@@ -64,7 +63,7 @@ export class DirectingBoard {
   draw(state: DirectingState): void {
     this.state = state
     const scroll = this.body?.scrollTop ?? 0
-    const typing = this.typing()
+    const keepTyping = this.boxes.keepTyping(this.root)
     this.releases.forEach(release => release())
     this.releases = []
     this.root.replaceChildren()
@@ -76,7 +75,7 @@ export class DirectingBoard {
     if (state.kind === 'missing') this.missing(body, state.runId)
     if (state.kind === 'hold') this.hold(body, state.hold)
     body.scrollTop = scroll
-    this.resumeTyping(typing)
+    keepTyping()
   }
 
   private header(): void {
@@ -107,7 +106,12 @@ export class DirectingBoard {
       if (hold.verdict) this.markdown(this.section(body, 'Verdict'), hold.verdict)
       const direction = this.section(body, 'Direction so far')
       this.directionSoFar(direction, hold.direction)
-      this.box(direction, hold.runId, 'change', 'CHANGE: …', 'Add', text => this.deps.change(text))
+      this.boxes.draw(direction, {
+        key: boxKey(hold.runId, 'change'),
+        placeholder: 'What should change…',
+        label: 'Add',
+        send: text => this.deps.change(text),
+      })
       this.room(this.section(body, 'Ask the room'), hold)
       const ticked = hold.canon.filter(line => line.ticked).length
       if (hold.canon.length > 0) this.canon(this.section(body, `Canon · ${ticked} of ${hold.canon.length} ticked`), hold.canon, true)
@@ -123,9 +127,9 @@ export class DirectingBoard {
   }
 
   private chat(el: HTMLElement, hold: HoldReading, name: string): void {
-    const key = `chat ${name}`
+    const key = boxKey(hold.runId, `chat ${name}`)
     const turns = hold.conversation.filter((entry): entry is ChatEntry => entry.kind === 'chat' && entry.name === name)
-    const pending = this.sending.get(boxKey(hold.runId, key))
+    const pending = this.boxes.waiting(key)
     if (turns.length === 0 && pending === undefined) this.add(el, 'div', `${CLS}-faint`, `Nothing said to ${name} yet`)
     for (const turn of turns) {
       const shown = this.turn(el, turn.message)
@@ -135,11 +139,12 @@ export class DirectingBoard {
       else if (turn.reply !== undefined) this.reviseButton(shown, hold.runId, { name, message: turn.message, reply: turn.reply })
     }
     if (pending !== undefined) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
-    this.box(el, hold.runId, key, `Message ${name}…`, 'Send', text => this.deps.chat(name, text))
+    this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.deps.chat(name, text) })
   }
 
   private room(el: HTMLElement, hold: HoldReading): void {
-    const pending = this.sending.get(boxKey(hold.runId, 'room'))
+    const key = boxKey(hold.runId, 'room')
+    const pending = this.boxes.waiting(key)
     for (const entry of hold.conversation) {
       if (entry.kind !== 'room') continue
       const shown = this.turn(el, entry.question)
@@ -149,7 +154,7 @@ export class DirectingBoard {
       }
     }
     if (pending !== undefined) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, 'The room is answering…')
-    this.box(el, hold.runId, 'room', 'Ask every proposal…', 'Ask', text => this.deps.askRoom(text))
+    this.boxes.draw(el, { key, placeholder: 'Ask every proposal…', label: 'Ask', send: text => this.deps.askRoom(text) })
   }
 
   /** One exchange: what was said, with whatever came back added under it by the caller. */
@@ -178,65 +183,6 @@ export class DirectingBoard {
       this.revising.delete(runId)
       this.draw(this.state)
     }
-  }
-
-  /** A box to type in, sent on its button or Enter; Shift+Enter is a new line. */
-  private box(
-    el: HTMLElement,
-    runId: string,
-    name: string,
-    placeholder: string,
-    label: string,
-    send: (text: string) => Promise<boolean>,
-  ): void {
-    const key = boxKey(runId, name)
-    const row = this.add(el, 'div', `${CLS}-box`)
-    const input = this.add(row, 'textarea')
-    input.placeholder = placeholder
-    input.rows = 2
-    input.dataset.box = key
-    input.value = this.drafts.get(key) ?? ''
-    const button = this.button(row, label, 'mod-cta')
-    button.disabled = this.sending.has(key)
-    input.addEventListener('input', () => void this.drafts.set(key, input.value))
-    input.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
-      event.preventDefault()
-      void this.send(key, send)
-    })
-    button.addEventListener('click', () => void this.send(key, send))
-  }
-
-  /** The box empties while what it sent is shown waiting; a send that fails puts it back. */
-  private async send(key: string, send: (text: string) => Promise<boolean>): Promise<void> {
-    const text = this.drafts.get(key)?.trim() ?? ''
-    if (text === '' || this.sending.has(key)) return
-    this.drafts.delete(key)
-    this.sending.set(key, text)
-    this.draw(this.state)
-    let sent = false
-    try {
-      sent = await send(text)
-    } finally {
-      this.sending.delete(key)
-      if (!sent && !this.drafts.get(key)) this.drafts.set(key, text)
-      this.draw(this.state)
-    }
-  }
-
-  /** The box being typed in, and where in it, so a redraw can hand it back. */
-  private typing(): Typing | undefined {
-    const active = this.root.ownerDocument.activeElement
-    if (active?.tagName !== 'TEXTAREA' || !this.root.contains(active)) return undefined
-    const input = active as HTMLTextAreaElement
-    return input.dataset.box ? { key: input.dataset.box, start: input.selectionStart, end: input.selectionEnd } : undefined
-  }
-
-  private resumeTyping(typing: Typing | undefined): void {
-    if (!typing) return
-    const input = Array.from(this.root.querySelectorAll('textarea')).find(box => box.dataset.box === typing.key)
-    input?.focus()
-    input?.setSelectionRange(typing.start, typing.end)
   }
 
   private tabButton(tabs: HTMLElement, label: string, proposal: string | undefined, selected: boolean): void {
@@ -354,19 +300,8 @@ export class DirectingBoard {
 
 type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>
 
-interface Typing {
-  key: string
-  start: number
-  end: number
-}
-
-/** A box's key: which run, and which box on it. */
-function boxKey(runId: string, name: string): string {
-  return `${runId} ${name}`
-}
-
-function sameTurn(a: RepliedTurn, b: RepliedTurn): boolean {
-  return a.name === b.name && a.message === b.message && a.reply === b.reply
+function boxKey(runId: string, box: string): string {
+  return `${runId} ${box}`
 }
 
 function shortId(runId: string): string {
