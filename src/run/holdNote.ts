@@ -349,6 +349,8 @@ export interface HoldProposal {
   given: DirectionVerb[]
   /** The proposals a COMBINE line already joins it with. */
   combinedWith: string[]
+  /** Whether its words differ from what its run wrote. */
+  edited: boolean
 }
 
 export interface CanonChoice {
@@ -360,14 +362,19 @@ export interface CanonChoice {
   ticked: boolean
 }
 
-/** A hold note read whole; `undefined` for a note that is not one. */
-export function readHold(content: string): HoldReading | undefined {
+/**
+ * A hold note read whole; `undefined` for a note that is not one. A proposal
+ * reads as edited only against `panels`, the run's own.
+ */
+export function readHold(content: string, panels: LayoutPanel[] = []): HoldReading | undefined {
   const heading = holdHeading(content)
   const direction = directionBlock(content)
   if (!heading || direction === undefined) return undefined
   const lines = directionLines(direction)
   const verdict = bodyUnder(content, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim()
   const proposals = proposalsIn(content)
+  const edits = proposalEdits(content, panels)
+  const edited = new Set(proposerPanels(panels).filter(panel => panel.node in edits).map(panel => panel.name))
   return {
     ...heading,
     ...(verdict ? { verdict } : {}),
@@ -375,6 +382,7 @@ export function readHold(content: string): HoldReading | undefined {
       ...proposal,
       given: verbsGiven(lines, proposal.name),
       combinedWith: combinedWith(lines, proposal.name),
+      edited: edited.has(proposal.name),
     })),
     direction: lines,
     canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
@@ -398,6 +406,21 @@ function proposalsIn(content: string): { name: string; text: string }[] {
       const newline = afterLine(chunk, 0)
       return { name: chunk.slice(0, newline).trim(), text: chunk.slice(newline).replace(THINKING_FOLD, '').trim() }
     })
+}
+
+/** The proposal `name`'s words replaced by `text`, its thinking fold kept; unchanged when the note has no such proposal. */
+export function rewriteProposal(content: string, name: string, text: string): string {
+  const proposalsAt = lineAt(content, PROPOSALS, 0)
+  if (proposalsAt === -1) return content
+  const found = lineAt(content, DIRECTION, proposalsAt)
+  const directionAt = found === -1 ? content.length : found
+  const start = lineAt(content, `### ${name}`, proposalsAt)
+  if (start === -1 || start > directionAt) return content
+  const bodyStart = afterLine(content, start)
+  const next = /^### /m.exec(content.slice(bodyStart, directionAt))
+  const bodyEnd = next ? bodyStart + next.index : directionAt
+  const fold = THINKING_FOLD.exec(content.slice(bodyStart, bodyEnd))?.[0].trim()
+  return `${content.slice(0, bodyStart)}\n${fold ? `${fold}\n\n` : ''}${text.trim()}\n\n${content.slice(bodyEnd)}`
 }
 
 const EMPTY_VERB = new RegExp(`^(${DIRECTIONS.join('|')}):$`)

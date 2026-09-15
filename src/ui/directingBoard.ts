@@ -25,6 +25,10 @@ export interface DirectingBoardDeps {
   askRoom: (question: string) => Promise<boolean>
   change: (text: string) => Promise<boolean>
   revise: (turn: RepliedTurn) => Promise<void>
+  /** Answers whether the proposal’s new words reached the hold. */
+  editProposal: (proposal: string, text: string) => Promise<boolean>
+  /** Reruns downstream of every edited proposal. */
+  rerun: () => Promise<void>
   openMenu: (event: MouseEvent) => void
   /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
   watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
@@ -43,8 +47,11 @@ export class DirectingBoard {
   private tab: string | undefined
   private readonly unclamped = new Set<string>()
   private readonly boxes = new TypingBoxes(() => this.draw(this.state))
-  /** The reply each run is being revised from, while its rerun goes. */
-  private readonly revising = new Map<string, RepliedTurn>()
+  /** What each run is being rerun from while its rerun goes: its edits, or a reply. */
+  private readonly rerunning = new Map<string, RepliedTurn | 'edits'>()
+  /** Each proposal being edited, by its box key, and the words so far. */
+  private readonly editing = new Map<string, string>()
+  private readonly saving = new Set<string>()
   private releases: (() => void)[] = []
   private body: HTMLElement | undefined
 
@@ -101,6 +108,7 @@ export class DirectingBoard {
     tabs.setAttribute('role', 'tablist')
     this.tabButton(tabs, 'Run', undefined, !proposal)
     for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal)
+    this.rerunBar(body, hold)
 
     if (!proposal) {
       if (hold.verdict) this.markdown(this.section(body, 'Verdict'), hold.verdict)
@@ -120,7 +128,9 @@ export class DirectingBoard {
 
     const top = this.section(body)
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
-    this.proposalText(top, proposal.name, proposal.text)
+    const editKey = boxKey(hold.runId, `edit ${proposal.name}`)
+    if (this.editing.has(editKey)) this.editor(top, editKey, proposal.name)
+    else this.proposalText(top, hold.runId, proposal.name, proposal.text)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
     this.chat(this.section(body, `Chat with ${proposal.name}`), hold, proposal.name)
@@ -164,23 +174,34 @@ export class DirectingBoard {
     return turn
   }
 
-  /** While a run's rerun goes, no other reply of it can start one. */
+  /** While a run's rerun goes, nothing else of it can start one. */
   private reviseButton(el: HTMLElement, runId: string, turn: RepliedTurn): void {
-    const going = this.revising.get(runId)
-    const label = going && sameTurn(going, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
+    const going = this.rerunning.get(runId)
+    const label = going && going !== 'edits' && sameTurn(going, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = going !== undefined
-    button.addEventListener('click', () => void this.revise(runId, turn))
+    button.addEventListener('click', () => void this.startRerun(runId, turn, () => this.deps.revise(turn)))
   }
 
-  private async revise(runId: string, turn: RepliedTurn): Promise<void> {
-    if (this.revising.has(runId)) return
-    this.revising.set(runId, turn)
+  private rerunBar(body: HTMLElement, hold: HoldReading): void {
+    const edited = hold.proposals.filter(one => one.edited).map(one => one.name)
+    if (edited.length === 0) return
+    const bar = this.add(body, 'div', `${CLS}-rerun`)
+    this.add(bar, 'span', `${CLS}-faint`, `Edited: ${edited.join(', ')}`)
+    const going = this.rerunning.get(hold.runId)
+    const button = this.button(bar, going === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', 'mod-cta')
+    button.disabled = going !== undefined
+    button.addEventListener('click', () => void this.startRerun(hold.runId, 'edits', () => this.deps.rerun()))
+  }
+
+  private async startRerun(runId: string, from: RepliedTurn | 'edits', rerun: () => Promise<void>): Promise<void> {
+    if (this.rerunning.has(runId)) return
+    this.rerunning.set(runId, from)
     this.draw(this.state)
     try {
-      await this.deps.revise(turn)
+      await rerun()
     } finally {
-      this.revising.delete(runId)
+      this.rerunning.delete(runId)
       this.draw(this.state)
     }
   }
@@ -230,13 +251,20 @@ export class DirectingBoard {
     option.value = value
   }
 
-  private proposalText(el: HTMLElement, name: string, text: string): void {
+  private proposalText(el: HTMLElement, runId: string, name: string, text: string): void {
     const shown = this.add(el, 'div', `${CLS}-proposal`)
     this.markdown(shown, text || '*This proposal is empty.*')
     const whole = this.unclamped.has(name)
     shown.classList.toggle('is-clamped', !whole)
-    const toggle = this.button(el, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
+    const actions = this.add(el, 'div', `${CLS}-proposal-actions`)
+    const toggle = this.button(actions, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
     toggle.hidden = !whole
+    const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
+    edit.disabled = this.rerunning.has(runId)
+    edit.addEventListener('click', () => {
+      this.editing.set(boxKey(runId, `edit ${name}`), text)
+      this.draw(this.state)
+    })
     toggle.addEventListener('click', () => {
       if (whole) this.unclamped.delete(name)
       else this.unclamped.add(name)
@@ -249,6 +277,37 @@ export class DirectingBoard {
         toggle.hidden = !overflowing
       }),
     )
+  }
+
+  /** Enter starts a new line: a proposal runs to many. */
+  private editor(el: HTMLElement, key: string, name: string): void {
+    const editor = this.add(el, 'div', `${CLS}-editor`)
+    const input = this.add(editor, 'textarea')
+    input.value = this.editing.get(key) ?? ''
+    input.rows = 12
+    input.dataset.box = key
+    input.addEventListener('input', () => void this.editing.set(key, input.value))
+    const row = this.add(editor, 'div', `${CLS}-editor-actions`)
+    const save = this.button(row, 'Save', 'mod-cta')
+    save.disabled = this.saving.has(key)
+    save.addEventListener('click', () => void this.save(key, name))
+    this.button(row, 'Cancel', '').addEventListener('click', () => {
+      this.editing.delete(key)
+      this.draw(this.state)
+    })
+  }
+
+  private async save(key: string, name: string): Promise<void> {
+    const text = this.editing.get(key)
+    if (text === undefined || this.saving.has(key)) return
+    this.saving.add(key)
+    this.draw(this.state)
+    try {
+      if (await this.deps.editProposal(name, text)) this.editing.delete(key)
+    } finally {
+      this.saving.delete(key)
+      this.draw(this.state)
+    }
   }
 
   private directionSoFar(el: HTMLElement, lines: string[]): void {

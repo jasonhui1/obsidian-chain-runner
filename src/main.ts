@@ -215,6 +215,12 @@ export default class ChainRunnerPlugin extends Plugin {
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
     })
+    const rerun = new RerunDownstream({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
     const holds = new HoldActions({
       app: this.app,
       notify: message => new Notice(message),
@@ -222,6 +228,7 @@ export default class ChainRunnerPlugin extends Plugin {
       write: runId => directInPanel.write(runId),
       chat,
       room: askRoom,
+      rerun,
     })
     this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
     const directFromDrawing = new DirectFromDrawing({
@@ -341,13 +348,6 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'resume-hold',
       name: 'Resume this hold',
       callback: () => void resume.start(),
-    })
-
-    const rerun = new RerunDownstream({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
     })
 
     this.addCommand({

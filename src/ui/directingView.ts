@@ -46,6 +46,18 @@ export class DirectingView extends ItemView {
 
   /** Shows a run's hold, on a proposal's tab when one is named. */
   async show(runId: string, proposal?: string): Promise<void> {
+    const state = await this.moveTo(runId)
+    if (state) this.board().open(state, proposal)
+  }
+
+  /** A rerun moves the hold to the run it landed on; the panel follows, on the tab it was on, unless it has moved on. */
+  private async follow(from: string, landed: string | undefined): Promise<void> {
+    const state = landed && from === this.runId && (await this.moveTo(landed))
+    if (state) this.board().draw(state)
+  }
+
+  /** Listens to `runId`'s hold, and reads it; `undefined` when a later move overtook this one. */
+  private async moveTo(runId: string): Promise<DirectingState | undefined> {
     const read = ++this.latestRead
     if (runId !== this.runId) {
       this.stopListening?.()
@@ -53,7 +65,7 @@ export class DirectingView extends ItemView {
       this.stopListening = this.holds.onChange(runId, () => void this.refresh())
     }
     const state = await this.read(runId)
-    if (read === this.latestRead) this.board().open(state, proposal)
+    return read === this.latestRead ? state : undefined
   }
 
   private async refresh(): Promise<void> {
@@ -83,11 +95,14 @@ export class DirectingView extends ItemView {
       chat: (proposal, message) => this.written(runId => this.holds.chat(runId, proposal, message)),
       askRoom: question => this.written(runId => this.holds.askRoom(runId, question)),
       change: text => this.written(runId => this.holds.change(runId, text)),
+      editProposal: (proposal, text) => this.written(runId => this.holds.editProposal(runId, proposal, text)),
       revise: async turn => {
         const runId = this.runId
-        const landed = runId && (await this.holds.revise(runId, turn))
-        // A rerun moves the hold to the run it landed on.
-        if (landed) await this.show(landed, turn.name)
+        if (runId) await this.follow(runId, await this.holds.revise(runId, turn))
+      },
+      rerun: async () => {
+        const runId = this.runId
+        if (runId) await this.follow(runId, await this.holds.rerun(runId))
       },
       openMenu: event =>
         this.onRun(runId =>

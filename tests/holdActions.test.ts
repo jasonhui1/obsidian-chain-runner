@@ -3,6 +3,8 @@ import { HoldActions } from '@/ui/holdActions'
 import { HoldNotes } from '@/ui/holdNotes'
 import { AskTheRoom, NOBODY_ANSWERED } from '@/ui/askTheRoom'
 import { ChatWithProposer } from '@/ui/chatWithProposer'
+import { NO_EDITED_PROPOSAL, RerunDownstream } from '@/ui/rerunDownstream'
+import { EngineOfflineError } from '@/engine/transport'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TAbstractFile, TFile } from 'obsidian'
@@ -101,9 +103,13 @@ const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
 
 const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
 
+const GAMEPLAY = '## Core verb\nRotate abilities mid-fight.\n\n## Proposed canon\n- LOCKED: Abilities rotate randomly during active combat.'
+const WORLD = '## The rule\nThe world is a test — and someone is watching.\n\n## Proposed canon\n- LOCKED: The world is a controlled testing environment.'
+
+/** What the run wrote: each proposal as the hold note shows it, unedited. */
 const panels = [
-  panel('gameplay', '## Core verb\nRotate abilities mid-fight.'),
-  panel('world', '## The rule\nThe world is a test.'),
+  panel('gameplay', GAMEPLAY),
+  panel('world', WORLD),
   panel('creative-director', 'A combat trial in a void.', 'join'),
 ]
 
@@ -139,6 +145,7 @@ let framesByAgent: Record<string, RunEvent[]>
 let rerunFrames: RunEvent[]
 let requests: RunRequest[]
 let online: boolean
+let layoutsFetched: number
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -177,7 +184,11 @@ function makeActions(): HoldActions {
   } as unknown as App
   const engine = {
     getRun: (runId: string) => Promise.resolve(theRun(runId)),
-    getLayout: (): Promise<LayoutModel> => Promise.resolve({ kind: 'columns', panels }),
+    getLayout: (): Promise<LayoutModel> => {
+      if (!online) return Promise.reject(new EngineOfflineError('http://localhost:3000'))
+      layoutsFetched++
+      return Promise.resolve({ kind: 'columns', panels })
+    },
     launchRun: async function* (request: RunRequest) {
       requests.push(request)
       yield* request.branchedFromRunId ? rerunFrames : (framesByAgent[request.agentName ?? ''] ?? [])
@@ -192,6 +203,7 @@ function makeActions(): HoldActions {
     write: runId => Promise.resolve(void written.push(runId)),
     chat: new ChatWithProposer({ app, engine, withEngine, notify }),
     room: new AskTheRoom({ app, engine, withEngine, notify }),
+    rerun: new RerunDownstream({ app, engine, withEngine, notify }),
   })
 }
 
@@ -209,6 +221,7 @@ beforeEach(() => {
   rerunFrames = []
   requests = []
   online = true
+  layoutsFetched = 0
 })
 
 describe('read', () => {
@@ -261,6 +274,110 @@ describe('read', () => {
       { text: 'LOCKED: Abilities rotate randomly during active combat.', proposer: 'gameplay', ticked: true },
       { text: 'LOCKED: The world is a test — and someone is watching.', proposer: 'world', ticked: false },
     ])
+  })
+})
+
+describe('read, edited proposals', () => {
+  it('marks no proposal edited while each reads as its run wrote it', async () => {
+    const hold = await makeActions().read(RUN)
+    expect(hold?.proposals.map(proposal => proposal.edited)).toEqual([false, false])
+  })
+
+  it('marks a proposal whose words differ from what its run wrote', async () => {
+    notes[PATH] = HOLD.replace('Rotate abilities mid-fight.', 'Rotate stances.')
+    const hold = await makeActions().read(RUN)
+    expect(hold?.proposals.map(proposal => proposal.edited)).toEqual([true, false])
+  })
+
+  it('marks none edited while the engine cannot say what the run wrote', async () => {
+    online = false
+    notes[PATH] = HOLD.replace('Rotate abilities mid-fight.', 'Rotate stances.')
+    const hold = await makeActions().read(RUN)
+    expect(hold?.proposals.map(proposal => proposal.edited)).toEqual([false, false])
+  })
+
+  it('asks the engine what a run wrote once, however often the hold is read', async () => {
+    const actions = makeActions()
+    await actions.read(RUN)
+    await actions.read(RUN)
+    expect(layoutsFetched).toBe(1)
+  })
+
+  it('asks again once the engine could not say', async () => {
+    const actions = makeActions()
+    online = false
+    await actions.read(RUN)
+    online = true
+    notes[PATH] = HOLD.replace('Rotate abilities mid-fight.', 'Rotate stances.')
+    expect((await actions.read(RUN))?.proposals[0]?.edited).toBe(true)
+  })
+})
+
+describe('editProposal', () => {
+  it('writes the new words in place of the proposal’s, keeping its thinking', async () => {
+    expect(await makeActions().editProposal(RUN, 'gameplay', '## Core verb\nRotate stances.\n')).toBe(true)
+    expect(notes[PATH]).toBe(HOLD.replace(GAMEPLAY, '## Core verb\nRotate stances.'))
+  })
+
+  it('edits the last proposal without touching the Direction after it', async () => {
+    await makeActions().editProposal(RUN, 'world', 'The world is real.')
+    expect(notes[PATH]).toBe(HOLD.replace(WORLD, 'The world is real.'))
+  })
+
+  it('reads the edit back, marked edited', async () => {
+    const actions = makeActions()
+    await actions.editProposal(RUN, 'world', 'The world is real.')
+    expect((await actions.read(RUN))?.proposals[1]).toMatchObject({ text: 'The world is real.', edited: true })
+  })
+
+  it('writes nothing for blank words, or a proposal the hold does not have', async () => {
+    const actions = makeActions()
+    expect(await actions.editProposal(RUN, 'world', ' \n ')).toBe(false)
+    expect(await actions.editProposal(RUN, 'nobody', 'Words.')).toBe(false)
+    expect(notes[PATH]).toBe(HOLD)
+  })
+})
+
+describe('rerun', () => {
+  beforeEach(() => {
+    rerunFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_complete', runId: NEW }]
+  })
+
+  it('reruns downstream from the hold’s run, each edited proposal’s words as its output', async () => {
+    const actions = makeActions()
+    await actions.editProposal(RUN, 'world', 'The world is real.')
+    await actions.rerun(RUN)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.branchedFromRunId).toBe(RUN)
+    expect(requests[0]?.branchOutputs).toContainEqual(output('world', 'The world is real.'))
+    expect(requests[0]?.branchOutputs).toContainEqual(output('gameplay', '## Core verb\nRotate abilities mid-fight.'))
+  })
+
+  it('answers the run the hold now lives under', async () => {
+    const actions = makeActions()
+    await actions.editProposal(RUN, 'world', 'The world is real.')
+    expect(await actions.rerun(RUN)).toBe(NEW)
+    expect(Object.keys(notes)).toEqual([NEW_PATH])
+  })
+
+  it('runs nothing, and says why, when no proposal is edited', async () => {
+    expect(await makeActions().rerun(RUN)).toBeUndefined()
+    expect(requests).toEqual([])
+    expect(notices).toEqual([NO_EDITED_PROPOSAL])
+  })
+
+  it('leaves the hold where it was when the rerun fails', async () => {
+    rerunFrames = [{ type: 'run_start', runId: NEW }, { type: 'error', error: 'the chain broke' }]
+    const actions = makeActions()
+    await actions.editProposal(RUN, 'world', 'The world is real.')
+    expect(await actions.rerun(RUN)).toBeUndefined()
+    expect(Object.keys(notes)).toEqual([PATH])
+    expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
+  })
+
+  it('runs nothing for a run with no hold note', async () => {
+    expect(await makeActions().rerun('2026-09-15-none')).toBeUndefined()
+    expect(requests).toEqual([])
   })
 })
 

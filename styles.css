@@ -836,3 +836,38 @@
   resize: vertical;
   font-size: var(--font-ui-small);
 }
+
+.chain-runner-directing-rerun {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-proposal-actions,
+.chain-runner-directing-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-2-3);
+}
+
+.chain-runner-directing-proposal-actions button.chain-runner-directing-quiet {
+  height: auto;
+  padding: var(--size-2-1) 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-directing-editor textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}

@@ -16,8 +16,8 @@ const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
   chainName: 'creative-director',
   verdict: 'A combat trial in a void.',
   proposals: [
-    { name: 'gameplay', text: 'Rotate abilities mid-fight.', given: ['KEEP'], combinedWith: [] },
-    { name: 'world', text: 'A controlled test.', given: [], combinedWith: [] },
+    { name: 'gameplay', text: 'Rotate abilities mid-fight.', given: ['KEEP'], combinedWith: [], edited: false },
+    { name: 'world', text: 'A controlled test.', given: [], combinedWith: [], edited: false },
   ],
   direction: ['KEEP: gameplay'],
   canon: [
@@ -57,6 +57,8 @@ function board(): DirectingBoard {
     askRoom: question => answered(`ask ${question}`),
     change: text => answered(`change ${text}`),
     revise: turn => answered(`revise ${turn.name} ${turn.reply}`).then(() => {}),
+    editProposal: (proposal, words) => answered(`edit ${proposal} ${words}`),
+    rerun: () => answered('rerun').then(() => {}),
     watchOverflow: (_frame, changed) => {
       changed(overflowing)
       return () => {}
@@ -194,8 +196,8 @@ describe('a proposal tab', () => {
   it('marks a proposal already combined with, and takes that COMBINE back when picked again', () => {
     const combined = hold({
       proposals: [
-        { name: 'gameplay', text: '', given: ['COMBINE'], combinedWith: ['world'] },
-        { name: 'world', text: '', given: ['COMBINE'], combinedWith: ['gameplay'] },
+        { name: 'gameplay', text: '', given: ['COMBINE'], combinedWith: ['world'], edited: false },
+        { name: 'world', text: '', given: ['COMBINE'], combinedWith: ['gameplay'], edited: false },
       ],
     })
     board().open(showing(combined), 'gameplay')
@@ -233,6 +235,111 @@ describe('a proposal tab', () => {
     expect(boxes()[0]!.checked).toBe(false)
     boxes()[0]!.click()
     expect(calls).toEqual(['tick LOCKED: A test. — world true'])
+  })
+})
+
+describe('a proposal tab, editing', () => {
+  const editor = (): HTMLTextAreaElement | null => root.querySelector('.chain-runner-directing-editor textarea')
+
+  it('turns the proposal’s text into an editor holding its words, with Save and Cancel', () => {
+    board().open(showing(), 'world')
+    button('✎ Edit').click()
+    expect(editor()?.value).toBe('A controlled test.')
+    expect(buttons().map(b => b.textContent)).toEqual(expect.arrayContaining(['Save', 'Cancel']))
+    expect(buttons().some(b => b.textContent === '✎ Edit')).toBe(false)
+  })
+
+  it('hands the edited words to the hold actions on Save, and closes the editor once they are kept', async () => {
+    board().open(showing(), 'world')
+    button('✎ Edit').click()
+    type(editor()!, 'A real world.\n\nWith a second line.')
+    button('Save').click()
+    expect(calls).toEqual(['edit world A real world.\n\nWith a second line.'])
+    expect(button('Save').disabled).toBe(true)
+    waiting[0]!(true)
+    await settled()
+    expect(editor()).toBeNull()
+  })
+
+  it('keeps the editor open, with its words, when they could not be kept', async () => {
+    board().open(showing(), 'world')
+    button('✎ Edit').click()
+    type(editor()!, 'A real world.')
+    button('Save').click()
+    waiting[0]!(false)
+    await settled()
+    expect(editor()?.value).toBe('A real world.')
+    expect(button('Save').disabled).toBe(false)
+  })
+
+  it('puts the proposal back as it was on Cancel', () => {
+    board().open(showing(), 'world')
+    button('✎ Edit').click()
+    type(editor()!, 'A real world.')
+    button('Cancel').click()
+    expect(editor()).toBeNull()
+    expect(calls).toEqual([])
+    button('✎ Edit').click()
+    expect(editor()?.value).toBe('A controlled test.')
+  })
+
+  it('starts a new line on Enter, rather than saving', () => {
+    board().open(showing(), 'world')
+    button('✎ Edit').click()
+    expect(press(editor()!, 'Enter').defaultPrevented).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('keeps the words being edited, and the focus, across a redraw', () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    button('✎ Edit').click()
+    type(editor()!, 'half an edit')
+    editor()!.focus()
+    panel.draw(showing())
+    expect(editor()?.value).toBe('half an edit')
+    expect(document.activeElement).toBe(editor())
+  })
+})
+
+describe('rerunning downstream', () => {
+  const edited = hold({
+    proposals: [
+      { name: 'gameplay', text: 'Rotate stances.', given: [], combinedWith: [], edited: true },
+      { name: 'world', text: 'A controlled test.', given: [], combinedWith: [], edited: false },
+    ],
+  })
+
+  it('offers no rerun while no proposal is edited', () => {
+    board().open(showing(), 'world')
+    expect(buttons().some(b => b.textContent === '⟳ Rerun downstream')).toBe(false)
+  })
+
+  it('offers a rerun once a proposal is edited, naming the edited proposals, on any tab', () => {
+    board().open(showing(edited), 'world')
+    expect(button('⟳ Rerun downstream')).toBeDefined()
+    expect(root.querySelector('.chain-runner-directing-rerun')?.textContent).toContain('gameplay')
+    expect(root.querySelector('.chain-runner-directing-rerun')?.textContent).not.toContain('world')
+    button('Run').click()
+    expect(button('⟳ Rerun downstream')).toBeDefined()
+  })
+
+  it('hands the rerun to the hold actions, and starts no other rerun until it is done', async () => {
+    const talked = hold({
+      ...edited,
+      conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }],
+    })
+    board().open(showing(talked), 'world')
+    button('⟳ Rerun downstream').click()
+    expect(calls).toEqual(['rerun'])
+    expect(button('Rerunning…').disabled).toBe(true)
+    expect(button('Use this reply as the revision & rerun').disabled).toBe(true)
+    expect(button('✎ Edit').disabled).toBe(true)
+    button('Rerunning…').click()
+    expect(calls).toEqual(['rerun'])
+    waiting[0]!(true)
+    await settled()
+    expect(button('⟳ Rerun downstream').disabled).toBe(false)
   })
 })
 
