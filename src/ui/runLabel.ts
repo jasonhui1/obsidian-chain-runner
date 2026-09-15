@@ -78,20 +78,13 @@ export function cardProposal(element: SceneShape, frontmatter: NoteFrontmatter):
   return runId && typeof proposal === 'string' ? { runId, proposal } : undefined
 }
 
-/** The run an output note records, by the link a card shows it through. */
-export type NoteRunLookup = (linkpath: string) => string | undefined
-
 /**
  * The run a selection belongs to: a Direct label's, or the run a card's output
  * note records — which is how a run drawn before the label existed is reached.
  */
-export function selectedRunId(selected: readonly SceneShape[], noteRun: NoteRunLookup): string | undefined {
+export function selectedRunId(selected: readonly SceneShape[], frontmatter: NoteFrontmatter): string | undefined {
   for (const element of selected) {
-    const labelled = directLabelRunId(element)
-    if (labelled) return labelled
-    if (element.type !== 'embeddable' && element.type !== 'iframe') continue
-    const linkpath = linkpathOf(element.link)
-    const run = linkpath ? noteRun(linkpath) : undefined
+    const run = directLabelRunId(element) ?? cardProposal(element, frontmatter)?.runId
     if (run) return run
   }
   return undefined

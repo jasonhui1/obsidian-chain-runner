@@ -16,14 +16,19 @@ export class HoldNotes {
     },
   ) {}
 
+  /** Where the run's hold note is, written or not. */
+  pathOf(runId: string): string {
+    return normalizePath(holdNotePath(runId))
+  }
+
   /** The run's hold note, if one has been written. */
   find(runId: string): TFile | undefined {
-    const file = this.deps.app.vault.getAbstractFileByPath(normalizePath(holdNotePath(runId)))
+    const file = this.deps.app.vault.getAbstractFileByPath(this.pathOf(runId))
     return file instanceof TFile ? file : undefined
   }
 
   async write(input: HoldNoteInput): Promise<TFile | undefined> {
-    const path = normalizePath(holdNotePath(input.runId))
+    const path = this.pathOf(input.runId)
     const fresh = holdNoteContent(input)
     return guardWrite(this.deps.notify, 'the hold note', async () => {
       await ensureFolder(this.deps.app, path.slice(0, path.lastIndexOf('/')))

@@ -33,8 +33,8 @@ describe('directLabelRunId', () => {
 })
 
 describe('selectedRunId', () => {
-  const runs: Record<string, string> = { 'Chain Runner/2026-09-15-ubqPU2/Optimist.md': RUN }
-  const noteRun = (linkpath: string) => runs[linkpath]
+  const fronts: Record<string, unknown> = { 'Chain Runner/2026-09-15-ubqPU2/Optimist.md': { run: RUN, output: 'Optimist' } }
+  const noteRun = (linkpath: string) => fronts[linkpath]
 
   const card = (link: string): SceneShape => ({ id: 'card', type: 'embeddable', link })
 

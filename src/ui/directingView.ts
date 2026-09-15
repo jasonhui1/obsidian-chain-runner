@@ -4,13 +4,6 @@ import type { HoldActions } from './holdActions'
 
 export const DIRECTING_VIEW_TYPE = 'chain-runner-directing'
 
-export interface DirectingViewDeps {
-  holds: HoldActions
-  /** Writes the hold for a run that has none, then shows it here. */
-  writeHold: (runId: string) => Promise<void>
-  openHoldNote: (runId: string) => void
-}
-
 /**
  * The directing panel in the right sidebar: one run's hold, read through the
  * hold actions and redrawn whenever it changes. What it draws is `./directingBoard`.
@@ -24,7 +17,7 @@ export class DirectingView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private readonly deps: DirectingViewDeps,
+    private readonly holds: HoldActions,
   ) {
     super(leaf)
   }
@@ -57,7 +50,7 @@ export class DirectingView extends ItemView {
     if (runId !== this.runId) {
       this.stopListening?.()
       this.runId = runId
-      this.stopListening = this.deps.holds.onChange(runId, () => void this.refresh())
+      this.stopListening = this.holds.onChange(runId, () => void this.refresh())
     }
     const state = await this.read(runId)
     if (read === this.latestRead) this.board().open(state, proposal)
@@ -72,7 +65,7 @@ export class DirectingView extends ItemView {
   }
 
   private async read(runId: string): Promise<DirectingState> {
-    const hold = await this.deps.holds.read(runId)
+    const hold = await this.holds.read(runId)
     return hold ? { kind: 'hold', hold } : { kind: 'missing', runId }
   }
 
@@ -83,15 +76,22 @@ export class DirectingView extends ItemView {
         void MarkdownRenderer.render(this.app, text, into, '', host)
         return () => this.removeChild(host)
       },
-      direct: (verb, proposal, other) => this.onRun(runId => this.deps.holds.direct(runId, verb, proposal, other)),
-      tickCanon: (id, ticked) => this.onRun(runId => this.deps.holds.tickCanon(runId, id, ticked)),
-      writeHold: () => this.onRun(runId => this.deps.writeHold(runId)),
+      direct: (verb, proposal, other) => this.onRun(runId => this.holds.direct(runId, verb, proposal, other)),
+      undirect: (verb, proposal, other) => this.onRun(runId => this.holds.undirect(runId, verb, proposal, other)),
+      tickCanon: (id, ticked) => this.onRun(runId => this.holds.tickCanon(runId, id, ticked)),
+      writeHold: () => this.onRun(runId => this.holds.writeHold(runId)),
       openMenu: event =>
         this.onRun(runId =>
           new Menu()
-            .addItem(item => item.setTitle('Open the hold note in a tab').setIcon('file-text').onClick(() => this.deps.openHoldNote(runId)))
+            .addItem(item => item.setTitle('Open the hold note in a tab').setIcon('file-text').onClick(() => void this.holds.openInTab(runId)))
             .showAtMouseEvent(event),
         ),
+      watchOverflow: (frame, changed) => {
+        const observer = new ResizeObserver(() => changed(frame.scrollHeight > frame.clientHeight + 1))
+        observer.observe(frame)
+        if (frame.firstElementChild) observer.observe(frame.firstElementChild)
+        return () => observer.disconnect()
+      },
     }))
   }
 

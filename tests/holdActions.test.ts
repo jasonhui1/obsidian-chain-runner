@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { HoldActions } from '@/ui/holdActions'
+import { HoldNotes } from '@/ui/holdNotes'
 import type { App, TAbstractFile, TFile } from 'obsidian'
 import { TFile as StubFile } from './obsidian'
 
@@ -72,6 +73,8 @@ CANON?
 let notes: Record<string, string>
 let notices: string[]
 let listeners: { name: string; callback: (file: TAbstractFile) => void; removed: boolean }[]
+let written: string[]
+let openedInTab: string[]
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -96,8 +99,17 @@ function makeActions(): HoldActions {
       },
       offref: (ref: { removed: boolean }) => void (ref.removed = true),
     },
+    workspace: {
+      getLeaf: () => ({ openFile: (target: { path: string }) => Promise.resolve(void openedInTab.push(target.path)) }),
+    },
   } as unknown as App
-  return new HoldActions({ app, notify: message => void notices.push(message) })
+  const notify = (message: string): void => void notices.push(message)
+  return new HoldActions({
+    app,
+    notify,
+    notes: new HoldNotes({ app, notify }),
+    write: runId => Promise.resolve(void written.push(runId)),
+  })
 }
 
 function touch(name: string, path: string): void {
@@ -108,6 +120,8 @@ beforeEach(() => {
   notes = { [PATH]: HOLD }
   notices = []
   listeners = []
+  written = []
+  openedInTab = []
 })
 
 describe('read', () => {
@@ -142,6 +156,11 @@ describe('read', () => {
   it('marks the verbs already given to each proposal, COMBINE on both it names', async () => {
     const hold = await makeActions().read(RUN)
     expect(hold?.proposals.map(proposal => proposal.given)).toEqual([['KEEP', 'COMBINE'], ['COMBINE']])
+  })
+
+  it('names who each proposal is already combined with', async () => {
+    const hold = await makeActions().read(RUN)
+    expect(hold?.proposals.map(proposal => proposal.combinedWith)).toEqual([['world'], ['gameplay']])
   })
 
   it('reads the Direction so far, without the empty verbs or the canon checklist', async () => {
@@ -182,6 +201,23 @@ describe('direct', () => {
   })
 })
 
+describe('undirect', () => {
+  it('takes a verb back off a proposal, leaving the rest of the Direction as it was', async () => {
+    await makeActions().undirect(RUN, 'KEEP', 'gameplay')
+    expect(notes[PATH]).toBe(HOLD.replace('KEEP: gameplay\n', ''))
+  })
+
+  it('takes a COMBINE back whichever way round it was written', async () => {
+    await makeActions().undirect(RUN, 'COMBINE', 'gameplay', 'world')
+    expect(notes[PATH]).toBe(HOLD.replace('COMBINE: world + gameplay\n', ''))
+  })
+
+  it('leaves a verb written for another proposal alone', async () => {
+    await makeActions().undirect(RUN, 'KEEP', 'world')
+    expect(notes[PATH]).toBe(HOLD)
+  })
+})
+
 describe('tickCanon', () => {
   it('ticks a canon line on disk, and touches no other', async () => {
     const actions = makeActions()
@@ -200,6 +236,25 @@ describe('tickCanon', () => {
   it('leaves a note whose line is already gone as it was', async () => {
     await makeActions().tickCanon(RUN, 'LOCKED: a line nobody offered. — world', true)
     expect(notes[PATH]).toBe(HOLD)
+  })
+})
+
+describe('writeHold', () => {
+  it('writes the hold for a run', async () => {
+    await makeActions().writeHold('2026-09-15-none')
+    expect(written).toEqual(['2026-09-15-none'])
+  })
+})
+
+describe('openInTab', () => {
+  it('opens the run’s hold note in a tab', async () => {
+    await makeActions().openInTab(RUN)
+    expect(openedInTab).toEqual([PATH])
+  })
+
+  it('opens nothing for a run with no hold note', async () => {
+    await makeActions().openInTab('2026-09-15-none')
+    expect(openedInTab).toEqual([])
   })
 })
 

@@ -170,6 +170,15 @@ describe('direct', () => {
   })
 })
 
+describe('write', () => {
+  it('writes the hold without opening it', async () => {
+    const note = await makeDirectRun().write('2026-09-15-ubqPU2')
+    expect(note?.path).toBe('Maestro/holds/2026-09-15-ubqPU2.md')
+    expect(notes['Maestro/holds/2026-09-15-ubqPU2.md']).toContain('# Hold: run 2026-09-15-ubqPU2')
+    expect(opened).toEqual([])
+  })
+})
+
 describe('openHold', () => {
   const PATH = 'Maestro/holds/2026-09-15-ubqPU2.md'
 

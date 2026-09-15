@@ -203,19 +203,13 @@ export default class ChainRunnerPlugin extends Plugin {
       currentRun: () => undefined,
       open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
     })
-    const holds = new HoldActions({ app: this.app, notify: message => new Notice(message) })
-    this.registerView(
-      DIRECTING_VIEW_TYPE,
-      leaf =>
-        new DirectingView(leaf, {
-          holds,
-          writeHold: runId => directInPanel.direct(runId),
-          openHoldNote: runId => {
-            const note = holdNotes.find(runId)
-            if (note) void this.app.workspace.getLeaf('tab').openFile(note)
-          },
-        }),
-    )
+    const holds = new HoldActions({
+      app: this.app,
+      notify: message => new Notice(message),
+      notes: holdNotes,
+      write: runId => directInPanel.write(runId),
+    })
+    this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
     const directFromDrawing = new DirectFromDrawing({
       surface: {
         unavailable: () => surface.unavailable(),
@@ -223,11 +217,7 @@ export default class ChainRunnerPlugin extends Plugin {
         cardProposal: (element, view) => surface.cardProposal(element, view),
       },
       direct: runId => directInPanel.openHold(runId),
-      // A closed panel opens only on a run that already has a hold, so ordinary card clicks stay quiet.
-      showProposal: async (runId, proposal) => {
-        if (!this.directingPanel() && !holdNotes.find(runId)) return
-        await (await this.openDirectingPanel())?.show(runId, proposal)
-      },
+      showProposal: async (runId, proposal) => void (await this.openDirectingPanel())?.show(runId, proposal),
       notify: message => new Notice(message),
       clickSpot: settled => clicks.onSettled(settled),
     })
@@ -449,12 +439,6 @@ export default class ChainRunnerPlugin extends Plugin {
     if (open.length === 0) await leaf.setViewState({ type: DIRECTING_VIEW_TYPE, active: false })
     await this.app.workspace.revealLeaf(leaf)
     return leaf.view instanceof DirectingView ? leaf.view : undefined
-  }
-
-  /** The directing panel already open, if any — this never opens one. */
-  private directingPanel(): DirectingView | undefined {
-    const view = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)[0]?.view
-    return view instanceof DirectingView ? view : undefined
   }
 
   /** The result view already open, if any — this never opens one of its own. */

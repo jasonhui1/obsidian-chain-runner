@@ -394,11 +394,7 @@ export function createNodeSurface(app: App): NodeSurface {
 
     selectedRun: on => {
       const { ea, view } = bind(on)
-      const frontmatter = noteFrontmatter(app, view)
-      return selectedRunId(selectedElements(ea), linkpath => {
-        const run: unknown = (frontmatter(linkpath) as Record<string, unknown> | undefined)?.['run']
-        return typeof run === 'string' ? run : undefined
-      })
+      return selectedRunId(selectedElements(ea), noteFrontmatter(app, view))
     },
 
     cardProposal: (element, on) => cardProposal(element as SceneShape, noteFrontmatter(app, on)),

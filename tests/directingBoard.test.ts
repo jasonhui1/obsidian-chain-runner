@@ -16,8 +16,8 @@ const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
   chainName: 'creative-director',
   verdict: 'A combat trial in a void.',
   proposals: [
-    { name: 'gameplay', text: 'Rotate abilities mid-fight.', given: ['KEEP'] },
-    { name: 'world', text: 'A controlled test.', given: [] },
+    { name: 'gameplay', text: 'Rotate abilities mid-fight.', given: ['KEEP'], combinedWith: [] },
+    { name: 'world', text: 'A controlled test.', given: [], combinedWith: [] },
   ],
   direction: ['KEEP: gameplay'],
   canon: [
@@ -32,6 +32,7 @@ const showing = (reading: HoldReading = hold()): DirectingState => ({ kind: 'hol
 let root: HTMLElement
 let calls: string[]
 let released: number
+let overflowing: boolean
 
 function board(): DirectingBoard {
   return new DirectingBoard(root, {
@@ -40,9 +41,14 @@ function board(): DirectingBoard {
       return () => void released++
     },
     direct: (verb, proposal, other) => void calls.push(`direct ${verb} ${proposal}${other ? ` ${other}` : ''}`),
+    undirect: (verb, proposal, other) => void calls.push(`undirect ${verb} ${proposal}${other ? ` ${other}` : ''}`),
     tickCanon: (id, ticked) => void calls.push(`tick ${id} ${ticked}`),
     writeHold: () => void calls.push('write hold'),
     openMenu: () => void calls.push('menu'),
+    watchOverflow: (_frame, changed) => {
+      changed(overflowing)
+      return () => {}
+    },
   })
 }
 
@@ -63,6 +69,7 @@ beforeEach(() => {
   document.body.append(root)
   calls = []
   released = 0
+  overflowing = false
 })
 
 describe('header', () => {
@@ -116,6 +123,14 @@ describe('tabs', () => {
     panel.draw(showing())
     expect(released).toBe(1)
   })
+
+  it('shows the top of a tab it switches to', () => {
+    board().open(showing())
+    const body = root.querySelector<HTMLElement>('.chain-runner-directing-body')!
+    body.scrollTop = 200
+    button('world').click()
+    expect(root.querySelector<HTMLElement>('.chain-runner-directing-body')!.scrollTop).toBe(0)
+  })
 })
 
 describe('a proposal tab', () => {
@@ -132,6 +147,12 @@ describe('a proposal tab', () => {
     expect(calls).toEqual(['direct PUSH world'])
   })
 
+  it('takes back a verb already given, rather than giving it twice', () => {
+    board().open(showing(), 'gameplay')
+    button('KEEP').click()
+    expect(calls).toEqual(['undirect KEEP gameplay'])
+  })
+
   it('combines with whichever other proposal is picked', () => {
     board().open(showing(), 'gameplay')
     const combine = root.querySelector<HTMLSelectElement>('.chain-runner-directing-verbs select')!
@@ -141,24 +162,40 @@ describe('a proposal tab', () => {
     expect(calls).toEqual(['direct COMBINE gameplay world'])
   })
 
+  it('marks a proposal already combined with, and takes that COMBINE back when picked again', () => {
+    const combined = hold({
+      proposals: [
+        { name: 'gameplay', text: '', given: ['COMBINE'], combinedWith: ['world'] },
+        { name: 'world', text: '', given: ['COMBINE'], combinedWith: ['gameplay'] },
+      ],
+    })
+    board().open(showing(combined), 'gameplay')
+    const combine = root.querySelector<HTMLSelectElement>('.chain-runner-directing-verbs select')!
+    expect(combine.options[1]!.textContent).toBe('✓ world')
+    combine.value = 'world'
+    combine.dispatchEvent(new Event('change'))
+    expect(calls).toEqual(['undirect COMBINE gameplay world'])
+  })
+
   it('shows the proposal’s text', () => {
     board().open(showing(), 'world')
     expect(text()).toContain('A controlled test.')
   })
 
-  it('clamps a long proposal until asked for the whole of it', () => {
-    const long = hold({ proposals: [{ name: 'gameplay', text: 'word '.repeat(400), given: [] }] })
-    board().open(showing(long), 'gameplay')
+  it('offers the whole proposal once its text is cut off, and shows all of it when asked', () => {
+    overflowing = true
+    board().open(showing(), 'gameplay')
     expect(root.querySelector('.is-clamped')).not.toBeNull()
+    expect(button('Show the whole proposal').hidden).toBe(false)
     button('Show the whole proposal').click()
     expect(root.querySelector('.is-clamped')).toBeNull()
-    expect(button('Show less')).toBeDefined()
+    expect(button('Show less').hidden).toBe(false)
   })
 
-  it('does not clamp a short one', () => {
+  it('offers nothing when none of the text is cut off', () => {
     board().open(showing(), 'world')
-    expect(root.querySelector('.is-clamped')).toBeNull()
-    expect(buttons().some(b => b.textContent === 'Show the whole proposal')).toBe(false)
+    expect(button('Show the whole proposal').hidden).toBe(true)
+    expect(root.querySelector('.is-overflowing')).toBeNull()
   })
 
   it('lists only that proposal’s canon lines, and hands a tick to the hold actions', () => {

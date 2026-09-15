@@ -1,28 +1,24 @@
-import { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldReading } from './holdActions'
+import { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldProposal, type HoldReading } from './holdActions'
 
-/**
- * The directing panel's elements: a Run tab and one tab per proposal. Plain DOM
- * and no Obsidian; every button is handed to the deps, and what the hold says
- * arrives as data from the hold actions.
- */
+/** The directing panel's elements: a Run tab, and a tab per proposal. Plain DOM; every button is handed to the deps. */
 
 export interface DirectingBoardDeps {
   /** Renders markdown into an empty element, returning what releases the render. */
   renderMarkdown: (text: string, into: HTMLElement) => () => void
   direct: (verb: DirectionVerb, proposal: string, other?: string) => void
+  undirect: (verb: DirectionVerb, proposal: string, other?: string) => void
   tickCanon: (id: string, ticked: boolean) => void
   /** Writes the hold for a run that has none. */
   writeHold: () => void
   openMenu: (event: MouseEvent) => void
+  /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
+  watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
 }
 
 export type DirectingState =
   | { kind: 'idle' }
   | { kind: 'missing'; runId: string }
   | { kind: 'hold'; hold: HoldReading }
-
-/** Longer than this, a proposal is clamped until the reader asks for the whole of it. */
-const CLAMP_CHARS = 600
 
 const CLS = 'chain-runner-directing'
 
@@ -41,10 +37,8 @@ export class DirectingBoard {
 
   /** Shows a run afresh, on the named proposal's tab or else the Run tab. */
   open(state: DirectingState, proposal?: string): void {
-    this.tab = proposal
     this.unclamped.clear()
-    this.draw(state)
-    if (this.body) this.body.scrollTop = 0
+    this.showTab(state, proposal)
   }
 
   /** Redraws what the hold now says, keeping the reader's tab and scroll. */
@@ -67,7 +61,7 @@ export class DirectingBoard {
   private header(): void {
     const header = this.add(this.root, 'div', `${CLS}-header`)
     const title = this.add(header, 'div', `${CLS}-title`)
-    const runId = this.state.kind === 'hold' ? this.state.hold.runId : this.state.kind === 'missing' ? this.state.runId : undefined
+    const runId = runIdOf(this.state)
     this.add(title, 'span', '', this.state.kind === 'hold' ? this.state.hold.chainName : 'Directing')
     if (runId) this.add(title, 'span', `${CLS}-faint`, ` · ${runId.split('-').pop() ?? runId}`).title = `run ${runId}`
     if (this.state.kind !== 'hold') return
@@ -97,7 +91,7 @@ export class DirectingBoard {
     }
 
     const top = this.section(body)
-    this.verbs(top, proposal.name, proposal.given, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
+    this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
     this.proposalText(top, proposal.name, proposal.text)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
@@ -107,33 +101,39 @@ export class DirectingBoard {
     const tab = this.button(tabs, label, selected ? 'is-selected' : '')
     tab.setAttribute('role', 'tab')
     tab.setAttribute('aria-selected', String(selected))
-    tab.addEventListener('click', () => {
-      this.tab = proposal
-      this.draw(this.state)
-      if (this.body) this.body.scrollTop = 0
-    })
+    tab.addEventListener('click', () => this.showTab(this.state, proposal))
   }
 
-  private verbs(el: HTMLElement, name: string, given: DirectionVerb[], others: string[]): void {
+  private showTab(state: DirectingState, proposal: string | undefined): void {
+    this.tab = proposal
+    this.draw(state)
+    if (this.body) this.body.scrollTop = 0
+  }
+
+  /** A verb already given is taken back when pressed again. */
+  private verbs(el: HTMLElement, proposal: HoldProposal, others: string[]): void {
     const row = this.add(el, 'div', `${CLS}-verbs`)
     for (const verb of DIRECTION_VERBS) {
       if (verb === 'COMBINE') {
-        this.combine(row, name, given.includes(verb), others)
+        this.combine(row, proposal, others)
         continue
       }
-      const button = this.button(row, verb, given.includes(verb) ? 'is-given' : '')
-      button.setAttribute('aria-pressed', String(given.includes(verb)))
-      button.addEventListener('click', () => this.deps.direct(verb, name))
+      const given = proposal.given.includes(verb)
+      const button = this.button(row, verb, given ? 'is-given' : '')
+      button.setAttribute('aria-pressed', String(given))
+      button.addEventListener('click', () => (given ? this.deps.undirect : this.deps.direct)(verb, proposal.name))
     }
   }
 
-  private combine(row: HTMLElement, name: string, given: boolean, others: string[]): void {
-    const select = this.add(row, 'select', given ? 'dropdown is-given' : 'dropdown')
+  private combine(row: HTMLElement, proposal: HoldProposal, others: string[]): void {
+    const select = this.add(row, 'select', proposal.combinedWith.length > 0 ? 'dropdown is-given' : 'dropdown')
     select.disabled = others.length === 0
     this.option(select, '', 'COMBINE…')
-    for (const other of others) this.option(select, other, `+ ${other}`)
+    for (const other of others) this.option(select, other, `${proposal.combinedWith.includes(other) ? '✓' : '+'} ${other}`)
     select.addEventListener('change', () => {
-      if (select.value) this.deps.direct('COMBINE', name, select.value)
+      const other = select.value
+      if (!other) return
+      ;(proposal.combinedWith.includes(other) ? this.deps.undirect : this.deps.direct)('COMBINE', proposal.name, other)
     })
   }
 
@@ -145,14 +145,22 @@ export class DirectingBoard {
   private proposalText(el: HTMLElement, name: string, text: string): void {
     const shown = this.add(el, 'div', `${CLS}-proposal`)
     this.markdown(shown, text || '*This proposal is empty.*')
-    if (text.length <= CLAMP_CHARS) return
     const whole = this.unclamped.has(name)
     shown.classList.toggle('is-clamped', !whole)
-    this.button(el, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`).addEventListener('click', () => {
+    const toggle = this.button(el, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
+    toggle.hidden = !whole
+    toggle.addEventListener('click', () => {
       if (whole) this.unclamped.delete(name)
       else this.unclamped.add(name)
       this.draw(this.state)
     })
+    if (whole) return
+    this.releases.push(
+      this.deps.watchOverflow(shown, overflowing => {
+        shown.classList.toggle('is-overflowing', overflowing)
+        toggle.hidden = !overflowing
+      }),
+    )
   }
 
   private directionSoFar(el: HTMLElement, lines: string[]): void {
@@ -200,4 +208,9 @@ export class DirectingBoard {
     parent.append(el)
     return el
   }
+}
+
+function runIdOf(state: DirectingState): string | undefined {
+  if (state.kind === 'hold') return state.hold.runId
+  return state.kind === 'missing' ? state.runId : undefined
 }

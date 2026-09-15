@@ -334,6 +334,8 @@ export interface HoldProposal {
   text: string
   /** The verbs a Direction line already gives it. */
   given: DirectionVerb[]
+  /** The proposals a COMBINE line already joins it with. */
+  combinedWith: string[]
 }
 
 export interface CanonChoice {
@@ -355,7 +357,11 @@ export function readHold(content: string): HoldReading | undefined {
   return {
     ...heading,
     ...(verdict ? { verdict } : {}),
-    proposals: proposalsIn(content).map(proposal => ({ ...proposal, given: verbsGiven(lines, proposal.name) })),
+    proposals: proposalsIn(content).map(proposal => ({
+      ...proposal,
+      given: verbsGiven(lines, proposal.name),
+      combinedWith: combinedWith(lines, proposal.name),
+    })),
     direction: lines,
     canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
   }
@@ -390,12 +396,24 @@ function directionLines(direction: string): string[] {
 
 const GIVEN_LINE = new RegExp(`^(${DIRECTION_VERBS.join('|')}):\\s*(.+)$`)
 
-function verbsGiven(lines: string[], name: string): DirectionVerb[] {
-  const given = lines
+/** Each verb line naming `name`, as its verb and every proposal it names. */
+function linesNaming(lines: string[], name: string): { verb: DirectionVerb; named: string[] }[] {
+  return lines
     .map(line => GIVEN_LINE.exec(line))
-    .filter((match): match is RegExpExecArray => match !== null && match[2].split(' + ').some(named => named.trim() === name))
-    .map(match => match[1] as DirectionVerb)
-  return [...new Set(given)]
+    .filter((match): match is RegExpExecArray => match !== null)
+    .map(match => ({ verb: match[1] as DirectionVerb, named: match[2].split(' + ').map(named => named.trim()) }))
+    .filter(line => line.named.includes(name))
+}
+
+function verbsGiven(lines: string[], name: string): DirectionVerb[] {
+  return [...new Set(linesNaming(lines, name).map(line => line.verb))]
+}
+
+function combinedWith(lines: string[], name: string): string[] {
+  const others = linesNaming(lines, name)
+    .filter(line => line.verb === 'COMBINE')
+    .flatMap(line => line.named.filter(named => named !== name))
+  return [...new Set(others)]
 }
 
 function canonChoice(entry: CanonEntry): CanonChoice {
@@ -418,6 +436,22 @@ export function tickCanonLine(content: string, id: string, ticked: boolean): str
     .split('\n')
     .map(line => (CANON_LINE.exec(line.trim())?.[2] === id ? `- [${ticked ? 'x' : ' '}] ${id}` : line))
   return content.slice(0, block.start) + lines.join('\n') + content.slice(block.end)
+}
+
+/** The Direction with every line reading exactly one of `lines` taken out; the rest left as written. */
+export function removeDirectionLines(content: string, lines: string[]): string {
+  const match = DIRECTION_HEADING.exec(content)
+  if (!match) return content
+  const bodyStart = afterLine(content, match.index)
+  const heading = /^#{1,6}[ \t]+.*$/gm
+  heading.lastIndex = bodyStart
+  const bodyEnd = heading.exec(content)?.index ?? content.length
+  const body = content
+    .slice(bodyStart, bodyEnd)
+    .split('\n')
+    .filter(line => !lines.includes(line.trim()))
+    .join('\n')
+  return content.slice(0, bodyStart) + body + content.slice(bodyEnd)
 }
 
 const RESUMED_HEADING = /^##\s+Resumed\s*$/m
