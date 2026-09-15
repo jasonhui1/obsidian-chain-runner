@@ -25,7 +25,7 @@ const VARIANTS = ['A — Run sheet', 'B — Proposal focus', 'C — Conversation
 const ROOM = '__room__'
 
 export class DirectingPanelPrototype extends ItemView {
-  private variant = 0
+  private variant = 1
   private runId: string | undefined
   private selected: string | undefined
   private readonly holds = new Map<string, PrototypeHold>()
@@ -112,6 +112,7 @@ export class DirectingPanelPrototype extends ItemView {
     const scroll = root.querySelector('.crp-body')?.scrollTop ?? 0
     root.empty()
     root.addClass('crp')
+    this.switcher(root)
     this.header(root)
     const body = root.createDiv({ cls: 'crp-body' })
     const hold = this.hold
@@ -126,7 +127,6 @@ export class DirectingPanelPrototype extends ItemView {
       if (this.variant === 2) this.conversation(body, hold, reading)
     }
     if (hold && this.drawer) this.drawerView(root, hold)
-    this.switcher(root)
     body.scrollTop = scroll
     if (this.focusKey) root.querySelector<HTMLElement>(`[data-key="${CSS.escape(this.focusKey)}"]`)?.focus()
   }
