@@ -28,19 +28,23 @@ export async function fetchRun(engine: EngineClient, runId: string): Promise<Fet
   return { run, layout }
 }
 
-/**
- * Runs `request`, then refreshes the hold note with the run it lands on.
- * `beforeRefresh` edits the freshly re-read note first — the one hook a
- * chat-driven revise needs, to mark its `revise` line done before folding.
- */
+export interface RerunAndRefreshHooks {
+  /** Edits the freshly re-read note before folding — a chat-driven revise's way to mark its `revise` line done. */
+  beforeRefresh?: (content: string, newRunId: string) => string
+  /** True when the freshly re-read note's proposals no longer match what the request was built from — the refresh would discard them, so it is skipped instead. */
+  proposalsStale?: (current: string) => boolean
+}
+
+/** Runs `request`, then refreshes the hold note with the run it lands on. */
 export async function rerunAndRefresh(
   deps: RerunAndRefreshDeps,
   file: TFile,
   heading: { runId: string; chainName: string },
   request: RunRequest,
-  beforeRefresh: (content: string, newRunId: string) => string = content => content,
+  hooks: RerunAndRefreshHooks = {},
 ): Promise<void> {
   const { app, engine, notify } = deps
+  const beforeRefresh = hooks.beforeRefresh ?? (content => content)
   const outcome = await deps.withEngine(() => runHeadless(engine, request))
   if (!outcome) return
   const newRunId = outcome.runId
@@ -58,6 +62,10 @@ export async function rerunAndRefresh(
   const wrote = await guardWrite(notify, 'the hold note', async () => {
     // Read again: the human may have written in the note while the rerun went.
     const current = await app.vault.cachedRead(file)
+    if (hooks.proposalsStale?.(current)) {
+      notify(`Reran as run ${newRunId}, but proposals changed meanwhile — note left as is`)
+      return false
+    }
     const refreshed = refreshHoldNote(beforeRefresh(current, newRunId), {
       runId: landed.run.runId,
       chainName: heading.chainName,

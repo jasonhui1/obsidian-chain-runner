@@ -102,6 +102,6 @@ export class ChatWithProposer {
       return
     }
 
-    await rerunAndRefresh(this.deps, file, heading, request, markRevised)
+    await rerunAndRefresh(this.deps, file, heading, request, { beforeRefresh: markRevised })
   }
 }

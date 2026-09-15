@@ -33,19 +33,27 @@ export class RerunDownstream {
 
     const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
     if (!source) return
+    const panels = source.layout.panels
 
-    const edits = proposalEdits(content, source.layout.panels)
+    const edits = proposalEdits(content, panels)
     if (Object.keys(edits).length === 0) {
       notify(NO_EDITED_PROPOSAL)
       return
     }
     const canon = await readIfPresent(app, normalizePath(CANON_PATH))
-    const request = rerunRequest(source.run, source.layout.panels, edits, canon)
+    const request = rerunRequest(source.run, panels, edits, canon)
     if (!request) {
       notify(`Run ${heading.runId} carries no graph to rerun from`)
       return
     }
 
-    await rerunAndRefresh(this.deps, file, heading, request)
+    await rerunAndRefresh(this.deps, file, heading, request, {
+      proposalsStale: current => !sameEdits(proposalEdits(current, panels), edits),
+    })
   }
+}
+
+function sameEdits(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  return [...keys].every(key => a[key] === b[key])
 }

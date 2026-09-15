@@ -177,4 +177,22 @@ describe('start', () => {
     await pending
     expect(notes[HOLD_PATH]).toContain('written mid-run')
   })
+
+  it('leaves the note as is, and says so, when a proposal changed while the rerun was going', async () => {
+    runFrames = [{ type: 'run_start', runId: NEW }]
+    const pending = makeRerun().start()
+    const midRun = edited().replace('Halo is a burden.', 'Halo is a leash.')
+    notes[HOLD_PATH] = midRun
+    await pending
+    expect(notes[HOLD_PATH]).toBe(midRun)
+    expect(notices).toEqual([`Reran as run ${NEW}, but proposals changed meanwhile — note left as is`])
+  })
+
+  it('also skips the refresh when an edited proposal was reverted back to its original text mid-run — that too differs from what was sent', async () => {
+    runFrames = [{ type: 'run_start', runId: NEW }]
+    const pending = makeRerun().start()
+    notes[HOLD_PATH] = written()
+    await pending
+    expect(notices).toEqual([`Reran as run ${NEW}, but proposals changed meanwhile — note left as is`])
+  })
 })
