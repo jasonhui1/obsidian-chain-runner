@@ -66,6 +66,7 @@ function makeSurface(): NodeSurface {
     },
     selectedProposal: () => undefined,
     selectedRun: () => undefined,
+    cardProposal: () => undefined,
     placeProposals: async () => {},
     editProposal: async () => false,
     unavailable: () => unavailable,

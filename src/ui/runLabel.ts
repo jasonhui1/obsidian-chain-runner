@@ -1,5 +1,6 @@
 import { LINK_BLUE } from './ink'
 import { linkpathOf, type Box, type SceneShape } from './nodeScene'
+import { sourceRunId } from '../run/provenance'
 import { FRAME_PADDING } from '../run/runFrame'
 
 /**
@@ -56,6 +57,18 @@ export function directLabelRunId(element: { customData?: unknown }): string | un
   if (typeof stamp !== 'object' || stamp === null) return undefined
   const runId = (stamp as Record<string, unknown>)['runId']
   return typeof runId === 'string' ? runId : undefined
+}
+
+/** A card's output note's frontmatter, by the link the card shows it through. */
+export type NoteFrontmatter = (linkpath: string) => unknown
+
+/** The run and proposal a card's output note records, or `undefined` for anything but such a card. */
+export function cardProposal(element: SceneShape, frontmatter: NoteFrontmatter): { runId: string; proposal: string } | undefined {
+  if (element.type !== 'embeddable' && element.type !== 'iframe') return undefined
+  const linkpath = linkpathOf(element.link)
+  const front = linkpath ? frontmatter(linkpath) : undefined
+  const runId = sourceRunId(front)
+  return runId ? { runId, proposal: (front as { output: string }).output } : undefined
 }
 
 /** The run an output note records, by the link a card shows it through. */

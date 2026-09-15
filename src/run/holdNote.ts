@@ -144,8 +144,8 @@ interface CanonEntry {
 const CANON_LINE = /^-\s*\[([ xX])\]\s*(.+)$/
 
 /** The CANON? checklist in `content`, if it has one — its entries, and where the heading through its last line sits. */
-function canonBlock(content: string): { entries: CanonEntry[]; start: number; end: number } | undefined {
-  const start = lineAt(content, 'CANON?', 0)
+function canonBlock(content: string, from = 0): { entries: CanonEntry[]; start: number; end: number } | undefined {
+  const start = lineAt(content, 'CANON?', from)
   if (start === -1) return undefined
 
   const entries: CanonEntry[] = []
@@ -314,6 +314,110 @@ export function appendDirectionLine(content: string, line: string): string {
   const body = content.slice(bodyStart, bodyEnd).replace(/\s+$/, '')
   const newBody = `${body === '' ? '' : `${body}\n`}${line}\n`
   return `${content.slice(0, bodyStart)}${newBody}\n${content.slice(bodyEnd).replace(/^\s+/, '')}`
+}
+
+/** A hold as the directing panel reads it: plain data, no note sections. */
+export interface HoldReading {
+  runId: string
+  chainName: string
+  /** The join panel's text; absent when the run did not converge. */
+  verdict?: string
+  proposals: HoldProposal[]
+  /** The Direction's lines so far, minus the empty verb template and the canon checklist. */
+  direction: string[]
+  canon: CanonChoice[]
+}
+
+export interface HoldProposal {
+  name: string
+  /** The proposal's words, its thinking fold left out. */
+  text: string
+  /** The verbs a Direction line already gives it. */
+  given: DirectionVerb[]
+}
+
+export interface CanonChoice {
+  /** What `tickCanonLine` finds the line by. */
+  id: string
+  /** The line's words, without who offered it. */
+  text: string
+  proposer: string
+  ticked: boolean
+}
+
+/** A hold note read whole; `undefined` for a note that is not one. */
+export function readHold(content: string): HoldReading | undefined {
+  const heading = holdHeading(content)
+  const direction = directionBlock(content)
+  if (!heading || direction === undefined) return undefined
+  const lines = directionLines(direction)
+  const verdict = bodyUnder(content, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim()
+  return {
+    ...heading,
+    ...(verdict ? { verdict } : {}),
+    proposals: proposalsIn(content).map(proposal => ({ ...proposal, given: verbsGiven(lines, proposal.name) })),
+    direction: lines,
+    canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
+  }
+}
+
+/**
+ * Each `### ` proposal under Proposals, up to the next one or Direction. A
+ * proposer writes its own sections as `## `, so those stay inside it.
+ */
+function proposalsIn(content: string): { name: string; text: string }[] {
+  const proposalsAt = lineAt(content, PROPOSALS, 0)
+  if (proposalsAt === -1) return []
+  const directionAt = lineAt(content, DIRECTION, proposalsAt)
+  const body = content.slice(afterLine(content, proposalsAt), directionAt === -1 ? content.length : directionAt)
+  return body
+    .split(/^### /m)
+    .slice(1)
+    .map(chunk => {
+      const newline = afterLine(chunk, 0)
+      return { name: chunk.slice(0, newline).trim(), text: chunk.slice(newline).replace(THINKING_FOLD, '').trim() }
+    })
+}
+
+const EMPTY_VERB = new RegExp(`^(${DIRECTIONS.join('|')}):$`)
+
+function directionLines(direction: string): string[] {
+  return direction
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '' && line !== 'CANON?' && !EMPTY_VERB.test(line) && !CANON_LINE.test(line))
+}
+
+const GIVEN_LINE = new RegExp(`^(${DIRECTION_VERBS.join('|')}):\\s*(.+)$`)
+
+function verbsGiven(lines: string[], name: string): DirectionVerb[] {
+  const given = lines
+    .map(line => GIVEN_LINE.exec(line))
+    .filter((match): match is RegExpExecArray => match !== null && match[2].split(' + ').some(named => named.trim() === name))
+    .map(match => match[1] as DirectionVerb)
+  return [...new Set(given)]
+}
+
+function canonChoice(entry: CanonEntry): CanonChoice {
+  const at = entry.text.lastIndexOf(' — ')
+  return {
+    id: entry.text,
+    text: at === -1 ? entry.text : entry.text.slice(0, at),
+    proposer: at === -1 ? '' : entry.text.slice(at + 3),
+    ticked: entry.ticked,
+  }
+}
+
+/** The canon line `id` ticked or unticked in place; unchanged when the note no longer offers it. */
+export function tickCanonLine(content: string, id: string, ticked: boolean): string {
+  const directionAt = DIRECTION_HEADING.exec(content)?.index
+  const block = directionAt === undefined ? undefined : canonBlock(content, directionAt)
+  if (!block) return content
+  const lines = content
+    .slice(block.start, block.end)
+    .split('\n')
+    .map(line => (CANON_LINE.exec(line.trim())?.[2] === id ? `- [${ticked ? 'x' : ' '}] ${id}` : line))
+  return content.slice(0, block.start) + lines.join('\n') + content.slice(block.end)
 }
 
 const RESUMED_HEADING = /^##\s+Resumed\s*$/m

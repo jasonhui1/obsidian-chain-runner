@@ -1,16 +1,14 @@
-import { normalizePath, Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian'
+import { Notice, Plugin, type WorkspaceLeaf } from 'obsidian'
 import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
-import { DirectingPanelPrototype, DIRECTING_VIEW_TYPE } from './prototype/directingPanel.prototype'
-import { pitchOf } from './prototype/holdActions.prototype'
-import { holdNotePath } from './run/holdNote'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
 import { AskTheRoom } from './ui/askTheRoom'
 import { ChatWithProposer } from './ui/chatWithProposer'
+import { DirectingView, DIRECTING_VIEW_TYPE } from './ui/directingView'
 import { createDirectionButtons } from './ui/directionButtons'
 import {
   createDrawingSurface,
@@ -24,11 +22,11 @@ import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
 import { DirectRun } from './ui/directRun'
+import { HoldActions } from './ui/holdActions'
 import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
-import { linkpathOf } from './ui/nodeScene'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
@@ -196,43 +194,40 @@ export default class ChainRunnerPlugin extends Plugin {
       currentRun: () => this.activeResultView()?.currentResult(),
       open: note => this.app.workspace.getLeaf('tab').openFile(note),
     })
-    // PROTOTYPE (#35): directing goes to the sidebar panel instead of a new tab.
-    const writeHoldQuietly = new DirectRun({
+    // From the drawing, a hold opens in the directing panel rather than a tab.
+    const directInPanel = new DirectRun({
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       holdNotes,
       currentRun: () => undefined,
-      open: async () => {},
+      open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
     })
-    const holdFile = (runId: string): TFile | undefined => {
-      const file = this.app.vault.getAbstractFileByPath(normalizePath(holdNotePath(runId)))
-      return file instanceof TFile ? file : undefined
-    }
+    const holds = new HoldActions({ app: this.app, notify: message => new Notice(message) })
     this.registerView(
       DIRECTING_VIEW_TYPE,
       leaf =>
-        new DirectingPanelPrototype(leaf, {
-          loadNote: async runId => {
-            const file = holdFile(runId)
-            return file ? this.app.vault.cachedRead(file) : undefined
-          },
-          writeHold: runId => writeHoldQuietly.direct(runId),
-          fetchPitch: async runId => {
-            const run = await this.engine.getRun(runId).catch(() => undefined)
-            const last = run?.agentOutputs[run.agentOutputs.length - 1]?.output
-            return last ? pitchOf(last) : undefined
-          },
-          chainNames: async () => (await this.engine.listChains().catch(() => [])).map(chain => chain.name),
-          openNote: runId => {
-            const file = holdFile(runId)
-            if (file) void this.app.workspace.getLeaf('tab').openFile(file)
+        new DirectingView(leaf, {
+          holds,
+          writeHold: runId => directInPanel.direct(runId),
+          openHoldNote: runId => {
+            const note = holdNotes.find(runId)
+            if (note) void this.app.workspace.getLeaf('tab').openFile(note)
           },
         }),
     )
     const directFromDrawing = new DirectFromDrawing({
-      surface: { unavailable: () => surface.unavailable(), selectedRun: () => surface.selectedRun() },
-      direct: async runId => void (await this.openDirectingPanel())?.point(runId),
+      surface: {
+        unavailable: () => surface.unavailable(),
+        selectedRun: () => surface.selectedRun(),
+        cardProposal: (element, view) => surface.cardProposal(element, view),
+      },
+      direct: runId => directInPanel.openHold(runId),
+      // A closed panel opens only on a run that already has a hold, so ordinary card clicks stay quiet.
+      showProposal: async (runId, proposal) => {
+        if (!this.directingPanel() && !holdNotes.find(runId)) return
+        await (await this.openDirectingPanel())?.show(runId, proposal)
+      },
       notify: message => new Notice(message),
       clickSpot: settled => clicks.onSettled(settled),
     })
@@ -259,8 +254,7 @@ export default class ChainRunnerPlugin extends Plugin {
       removeSelectionHook = registerSelectionHook(this.app, {
         clicked: (element, view) => {
           nodes.handleSelection(element, view)
-          directFromDrawing.handleSelection(element)
-          this.pointDirectingPanelAtCard(element, view)
+          directFromDrawing.handleSelection(element, view)
         },
         editing: (element, view) => nodes.handleTextEdit(element, view),
       })
@@ -320,8 +314,8 @@ export default class ChainRunnerPlugin extends Plugin {
     })
 
     this.addCommand({
-      id: 'open-directing-panel-prototype',
-      name: 'Open directing panel (prototype)',
+      id: 'open-directing-panel',
+      name: 'Open the directing panel',
       callback: () => void this.openDirectingPanel(),
     })
 
@@ -447,31 +441,20 @@ export default class ChainRunnerPlugin extends Plugin {
     return leaf.view instanceof RunResultView ? leaf.view : undefined
   }
 
-  /** PROTOTYPE (#35): the directing panel in the right sidebar, opened or brought to the front. */
-  private async openDirectingPanel(): Promise<DirectingPanelPrototype | undefined> {
+  /** The directing panel in the right sidebar, opened or brought to the front. */
+  private async openDirectingPanel(): Promise<DirectingView | undefined> {
     const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)
     const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
     if (!leaf) return undefined
     if (open.length === 0) await leaf.setViewState({ type: DIRECTING_VIEW_TYPE, active: false })
     await this.app.workspace.revealLeaf(leaf)
-    return leaf.view instanceof DirectingPanelPrototype ? leaf.view : undefined
+    return leaf.view instanceof DirectingView ? leaf.view : undefined
   }
 
-  /** PROTOTYPE (#35): a click on a run's card points an open directing panel at that run and proposal. */
-  private pointDirectingPanelAtCard(clicked: unknown, view: unknown): void {
-    const element = clicked as { type?: string; link?: string | null }
-    if (element.type !== 'embeddable' && element.type !== 'iframe') return
-    const linkpath = linkpathOf(element.link)
-    const drawing = (view as { file?: TFile }).file?.path ?? ''
-    const note = linkpath ? this.app.metadataCache.getFirstLinkpathDest(linkpath, drawing) : null
-    const front = note ? this.app.metadataCache.getFileCache(note)?.frontmatter : undefined
-    const runId: unknown = front?.['run']
-    if (typeof runId !== 'string') return
-    // A closed panel opens only for a run that already has a hold, so ordinary card clicks stay quiet.
-    const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)[0]?.view
-    if (!(open instanceof DirectingPanelPrototype) && !this.app.vault.getAbstractFileByPath(normalizePath(holdNotePath(runId)))) return
-    const output: unknown = front?.['output']
-    void this.openDirectingPanel().then(panel => panel?.point(runId, typeof output === 'string' ? output : undefined))
+  /** The directing panel already open, if any — this never opens one. */
+  private directingPanel(): DirectingView | undefined {
+    const view = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)[0]?.view
+    return view instanceof DirectingView ? view : undefined
   }
 
   /** The result view already open, if any — this never opens one of its own. */

@@ -19,7 +19,8 @@ export interface DirectRunDeps {
   holdNotes: HoldNotes
   /** The run on screen, if any — this command has no run of its own to pick from. */
   currentRun: () => RunResult | undefined
-  open: (note: TFile) => Promise<void>
+  /** Shows the hold once it is written. */
+  open: (note: TFile, runId: string) => Promise<void>
 }
 
 export class DirectRun {
@@ -50,6 +51,13 @@ export class DirectRun {
     })
     if (!file) return
     this.deps.notify(`Wrote the hold note for run ${runId}`)
-    await this.deps.open(file)
+    await this.deps.open(file, runId)
+  }
+
+  /** Opens the run's hold, writing it first only when there is none. */
+  async openHold(runId: string): Promise<void> {
+    const held = this.deps.holdNotes.find(runId)
+    if (held) await this.deps.open(held, runId)
+    else await this.direct(runId)
   }
 }

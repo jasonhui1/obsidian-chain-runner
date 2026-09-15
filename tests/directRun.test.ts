@@ -32,6 +32,7 @@ let agentOutputs: AgentOutput[]
 let online: boolean
 let requestedRunIds: string[]
 let opened: string[]
+let openedRuns: string[]
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -85,8 +86,9 @@ function makeDirectRun(): DirectRun {
     notify: message => void notices.push(message),
     holdNotes: new HoldNotes({ app, notify: message => void notices.push(message) }),
     currentRun: () => current,
-    open: note => {
+    open: (note, runId) => {
       opened.push(note.path)
+      openedRuns.push(runId)
       return Promise.resolve()
     },
   })
@@ -110,6 +112,7 @@ beforeEach(() => {
   online = true
   requestedRunIds = []
   opened = []
+  openedRuns = []
 })
 
 describe('start', () => {
@@ -164,5 +167,24 @@ describe('direct', () => {
     await makeDirectRun().direct('2026-09-15-ubqPU2')
     expect(notes['Maestro/holds/2026-09-15-ubqPU2.md']).toContain('# Hold: run 2026-09-15-ubqPU2 · creative-director')
     expect(opened).toEqual(['Maestro/holds/2026-09-15-ubqPU2.md'])
+  })
+})
+
+describe('openHold', () => {
+  const PATH = 'Maestro/holds/2026-09-15-ubqPU2.md'
+
+  it('opens a hold already written, without asking the engine for anything', async () => {
+    notes[PATH] = '# Hold: run 2026-09-15-ubqPU2 · creative-director\n\n## Direction\nKEEP: character-director\n'
+    online = false
+    await makeDirectRun().openHold('2026-09-15-ubqPU2')
+    expect(openedRuns).toEqual(['2026-09-15-ubqPU2'])
+    expect(requestedRunIds).toEqual([])
+    expect(notes[PATH]).toContain('KEEP: character-director')
+  })
+
+  it('writes the hold first when there is none, then opens it', async () => {
+    await makeDirectRun().openHold('2026-09-15-ubqPU2')
+    expect(notes[PATH]).toContain('# Hold: run 2026-09-15-ubqPU2')
+    expect(openedRuns).toEqual(['2026-09-15-ubqPU2'])
   })
 })

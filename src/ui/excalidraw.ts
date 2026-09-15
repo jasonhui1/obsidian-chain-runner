@@ -37,7 +37,7 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
-import { buildDirectLabel, selectedRunId } from './runLabel'
+import { buildDirectLabel, cardProposal, selectedRunId, type NoteFrontmatter } from './runLabel'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary } from '../engine/types'
@@ -252,6 +252,8 @@ export interface NodeSurface {
   placeProposals(proposals: readonly PlacedProposal[], source: BlockReading, on?: DrawingView): Promise<void>
   /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
   selectedRun(on?: DrawingView): string | undefined
+  /** The run and proposal a card on the drawing shows, by its output note. */
+  cardProposal(element: unknown, on: DrawingView): { runId: string; proposal: string } | undefined
   /** The proposal the reader has selected, for the commands that decide one. */
   selectedProposal(on?: DrawingView): ProposalData | undefined
   /** The one node element the reader has selected, for the gestures the hook cannot see. */
@@ -392,13 +394,14 @@ export function createNodeSurface(app: App): NodeSurface {
 
     selectedRun: on => {
       const { ea, view } = bind(on)
-      const drawing = drawingPath(view)
+      const frontmatter = noteFrontmatter(app, view)
       return selectedRunId(selectedElements(ea), linkpath => {
-        const note = app.metadataCache.getFirstLinkpathDest(linkpath, drawing)
-        const run: unknown = note ? app.metadataCache.getFileCache(note)?.frontmatter?.['run'] : undefined
+        const run: unknown = (frontmatter(linkpath) as Record<string, unknown> | undefined)?.['run']
         return typeof run === 'string' ? run : undefined
       })
     },
+
+    cardProposal: (element, on) => cardProposal(element as SceneShape, noteFrontmatter(app, on)),
 
     selectedProposal: on => {
       const { ea } = bind(on)
@@ -617,6 +620,15 @@ async function write(
 /** The drawing a view is showing, as a vault path; `''` when it has no file. */
 function drawingPath(view: DrawingView): string {
   return (view as { file?: TFile }).file?.path ?? ''
+}
+
+/** A linked note's frontmatter, resolving the link from the drawing it sits on. */
+function noteFrontmatter(app: App, view: DrawingView): NoteFrontmatter {
+  const drawing = drawingPath(view)
+  return linkpath => {
+    const note = app.metadataCache.getFirstLinkpathDest(linkpath, drawing)
+    return note ? app.metadataCache.getFileCache(note)?.frontmatter : undefined
+  }
 }
 
 /** Why Excalidraw cannot be used right now, or `undefined` when it can. */

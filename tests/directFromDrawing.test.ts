@@ -9,6 +9,8 @@ const RUN = '2026-09-15-ubqPU2'
 const label = buildDirectLabel({ x: 0, y: 0, width: 1000, height: 400 }, RUN)
 
 let directed: string[]
+let shown: { runId: string; proposal: string }[]
+let cards: Map<unknown, { runId: string; proposal: string }>
 let notices: string[]
 let selected: string | undefined
 let unavailable: string | undefined
@@ -19,9 +21,14 @@ function make(): DirectFromDrawing {
     surface: {
       unavailable: () => unavailable,
       selectedRun: () => selected,
+      cardProposal: element => cards.get(element),
     },
     direct: runId => {
       directed.push(runId)
+      return Promise.resolve()
+    },
+    showProposal: (runId, proposal) => {
+      shown.push({ runId, proposal })
       return Promise.resolve()
     },
     notify: message => void notices.push(message),
@@ -31,6 +38,8 @@ function make(): DirectFromDrawing {
 
 beforeEach(() => {
   directed = []
+  shown = []
+  cards = new Map()
   notices = []
   selected = undefined
   unavailable = undefined
@@ -64,6 +73,23 @@ describe('handleSelection', () => {
   it('ignores every other element', () => {
     make().handleSelection({})
     expect(directed).toEqual([])
+    expect(shown).toEqual([])
+  })
+
+  it('shows the proposal a clicked card belongs to', () => {
+    const card = {}
+    cards.set(card, { runId: RUN, proposal: 'gameplay' })
+    make().handleSelection(card)
+    expect(shown).toEqual([{ runId: RUN, proposal: 'gameplay' }])
+    expect(directed).toEqual([])
+  })
+
+  it('shows nothing when a card was dragged, not clicked', () => {
+    const card = {}
+    cards.set(card, { runId: RUN, proposal: 'gameplay' })
+    settleWith = undefined
+    make().handleSelection(card)
+    expect(shown).toEqual([])
   })
 })
 
@@ -95,8 +121,10 @@ describe('directSelected', () => {
         selectedRun: () => {
           throw new Error('Open the Excalidraw drawing as its own tab to do that.')
         },
+        cardProposal: () => undefined,
       },
       direct: () => Promise.resolve(),
+      showProposal: () => Promise.resolve(),
       notify: message => void notices.push(message),
       clickSpot: () => {},
     })
