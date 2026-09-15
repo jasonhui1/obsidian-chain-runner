@@ -1,8 +1,11 @@
-import { Notice, Plugin, type WorkspaceLeaf } from 'obsidian'
+import { normalizePath, Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian'
 import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
+import { DirectingPanelPrototype, DIRECTING_VIEW_TYPE } from './prototype/directingPanel.prototype'
+import { pitchOf } from './prototype/holdActions.prototype'
+import { holdNotePath } from './run/holdNote'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
@@ -25,6 +28,7 @@ import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
+import { linkpathOf } from './ui/nodeScene'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
@@ -192,9 +196,43 @@ export default class ChainRunnerPlugin extends Plugin {
       currentRun: () => this.activeResultView()?.currentResult(),
       open: note => this.app.workspace.getLeaf('tab').openFile(note),
     })
+    // PROTOTYPE (#35): directing goes to the sidebar panel instead of a new tab.
+    const writeHoldQuietly = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => undefined,
+      open: async () => {},
+    })
+    const holdFile = (runId: string): TFile | undefined => {
+      const file = this.app.vault.getAbstractFileByPath(normalizePath(holdNotePath(runId)))
+      return file instanceof TFile ? file : undefined
+    }
+    this.registerView(
+      DIRECTING_VIEW_TYPE,
+      leaf =>
+        new DirectingPanelPrototype(leaf, {
+          loadNote: async runId => {
+            const file = holdFile(runId)
+            return file ? this.app.vault.cachedRead(file) : undefined
+          },
+          writeHold: runId => writeHoldQuietly.direct(runId),
+          fetchPitch: async runId => {
+            const run = await this.engine.getRun(runId).catch(() => undefined)
+            const last = run?.agentOutputs[run.agentOutputs.length - 1]?.output
+            return last ? pitchOf(last) : undefined
+          },
+          chainNames: async () => (await this.engine.listChains().catch(() => [])).map(chain => chain.name),
+          openNote: runId => {
+            const file = holdFile(runId)
+            if (file) void this.app.workspace.getLeaf('tab').openFile(file)
+          },
+        }),
+    )
     const directFromDrawing = new DirectFromDrawing({
       surface: { unavailable: () => surface.unavailable(), selectedRun: () => surface.selectedRun() },
-      direct: runId => directRun.direct(runId),
+      direct: async runId => void (await this.openDirectingPanel())?.point(runId),
       notify: message => new Notice(message),
       clickSpot: settled => clicks.onSettled(settled),
     })
@@ -222,6 +260,7 @@ export default class ChainRunnerPlugin extends Plugin {
         clicked: (element, view) => {
           nodes.handleSelection(element, view)
           directFromDrawing.handleSelection(element)
+          this.pointDirectingPanelAtCard(element, view)
         },
         editing: (element, view) => nodes.handleTextEdit(element, view),
       })
@@ -278,6 +317,12 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'direct-this-run',
       name: 'Direct this run',
       callback: () => void directRun.start(),
+    })
+
+    this.addCommand({
+      id: 'open-directing-panel-prototype',
+      name: 'Open directing panel (prototype)',
+      callback: () => void this.openDirectingPanel(),
     })
 
     this.addCommand({
@@ -400,6 +445,30 @@ export default class ChainRunnerPlugin extends Plugin {
     if (open.length === 0) await leaf.setViewState({ type: RESULT_VIEW_TYPE, active: false })
     await this.app.workspace.revealLeaf(leaf)
     return leaf.view instanceof RunResultView ? leaf.view : undefined
+  }
+
+  /** PROTOTYPE (#35): the directing panel in the right sidebar, opened or brought to the front. */
+  private async openDirectingPanel(): Promise<DirectingPanelPrototype | undefined> {
+    const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)
+    const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
+    if (!leaf) return undefined
+    if (open.length === 0) await leaf.setViewState({ type: DIRECTING_VIEW_TYPE, active: false })
+    await this.app.workspace.revealLeaf(leaf)
+    return leaf.view instanceof DirectingPanelPrototype ? leaf.view : undefined
+  }
+
+  /** PROTOTYPE (#35): a click on a run's card points an open directing panel at that run and proposal. */
+  private pointDirectingPanelAtCard(clicked: unknown, view: unknown): void {
+    const element = clicked as { type?: string; link?: string | null }
+    const panel = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)[0]?.view
+    if (!(panel instanceof DirectingPanelPrototype)) return
+    if (element.type !== 'embeddable' && element.type !== 'iframe') return
+    const linkpath = linkpathOf(element.link)
+    const drawing = (view as { file?: TFile }).file?.path ?? ''
+    const note = linkpath ? this.app.metadataCache.getFirstLinkpathDest(linkpath, drawing) : null
+    const front = note ? this.app.metadataCache.getFileCache(note)?.frontmatter : undefined
+    if (typeof front?.['run'] !== 'string') return
+    void panel.point(front['run'], typeof front['output'] === 'string' ? front['output'] : undefined)
   }
 
   /** The result view already open, if any — this never opens one of its own. */

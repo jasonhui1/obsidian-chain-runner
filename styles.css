@@ -605,3 +605,47 @@
   position: absolute;
   margin: 0;
 }
+
+/* ── PROTOTYPE (#35): the directing panel — throwaway ──────────────────────── */
+
+.crp { display: flex; flex-direction: column; height: 100%; padding: 0 !important; }
+.crp-header { padding: var(--size-4-2) var(--size-4-3); border-bottom: 1px solid var(--background-modifier-border); }
+.crp-title { font-weight: var(--font-semibold); }
+.crp-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.crp-proto { margin: var(--size-2-2) 0; font-size: var(--font-ui-smaller); color: var(--text-warning); letter-spacing: 0.04em; }
+.crp-body { flex: 1; overflow-y: auto; padding: var(--size-4-2) var(--size-4-3) var(--size-4-8); }
+.crp-empty { color: var(--text-muted); padding: var(--size-4-4) 0; }
+.crp-heading { margin: var(--size-4-4) 0 var(--size-2-3); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+.crp-row { display: flex; flex-wrap: wrap; gap: var(--size-2-2); align-items: center; margin: var(--size-2-2) 0; }
+.crp-input input { flex: 1; min-width: 0; }
+.crp button.crp-quiet { background: none; box-shadow: none; color: var(--text-muted); }
+.crp button.is-on { background: var(--interactive-accent); color: var(--text-on-accent); }
+.crp-verbs { display: flex; flex-wrap: wrap; gap: 4px; margin: var(--size-2-2) 0; }
+.crp-verbs button, .crp-verbs select { font-size: var(--font-ui-smaller); padding: 2px 8px; height: auto; }
+.crp-verbs-big button { font-size: var(--font-ui-small); padding: 6px 12px; }
+.crp-card { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: var(--size-2-3) var(--size-4-2); margin-bottom: var(--size-2-3); }
+.crp-card.is-selected { border-color: var(--interactive-accent); box-shadow: 0 0 0 1px var(--interactive-accent); }
+.crp-card > summary { cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.crp-name { font-weight: var(--font-semibold); }
+.crp-chip { font-size: 10px; padding: 0 6px; border-radius: 8px; background: var(--interactive-accent); color: var(--text-on-accent); }
+.crp-fold { margin: var(--size-2-2) 0; }
+.crp-fold > summary { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-small); }
+.crp-text { font-size: var(--font-ui-small); max-height: 24em; overflow-y: auto; }
+.crp-edit textarea { width: 100%; min-height: 16em; font-size: var(--font-ui-small); }
+.crp-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--size-4-2); }
+.crp-big { font-size: var(--font-ui-large); font-weight: var(--font-bold); margin-top: var(--size-4-2); }
+.crp-tray { position: sticky; bottom: calc(-1 * var(--size-4-8)); background: var(--background-secondary); border-top: 1px solid var(--background-modifier-border); padding: var(--size-4-2); margin: var(--size-4-4) calc(-1 * var(--size-4-3)) 0; }
+.crp-thread, .crp-timeline { display: flex; flex-direction: column; gap: var(--size-2-3); }
+.crp-bubble { font-size: var(--font-ui-small); border-radius: var(--radius-m); padding: var(--size-2-3) var(--size-4-2); background: var(--background-secondary); white-space: pre-wrap; }
+.crp-bubble.crp-direction, .crp-bubble.crp-canon, .crp-bubble.crp-edit, .crp-bubble.crp-rerun { background: none; color: var(--text-muted); padding: 0 var(--size-4-2); font-size: var(--font-ui-smaller); }
+.crp-waiting { color: var(--text-faint); font-style: italic; }
+.crp-me { color: var(--text-accent); }
+.crp-them { margin-top: var(--size-2-2); }
+.crp-pitch { border-left: 3px solid var(--interactive-accent); padding-left: var(--size-4-2); margin: var(--size-2-3) 0; font-size: var(--font-ui-small); }
+.crp-canon { display: flex; gap: 6px; align-items: flex-start; font-size: var(--font-ui-small); margin: 2px 0; }
+.crp-directions { margin: 0; padding-left: 1.2em; font-size: var(--font-ui-small); }
+.crp-composer { position: sticky; bottom: calc(-1 * var(--size-4-8)); background: var(--background-secondary); border-top: 1px solid var(--background-modifier-border); padding: var(--size-4-2); margin: var(--size-4-4) calc(-1 * var(--size-4-3)) 0; }
+.crp-drawer { max-height: 40%; overflow: auto; border-top: 1px solid var(--background-modifier-border); background: var(--background-primary-alt); }
+.crp-drawer pre { margin: 0; padding: var(--size-4-2); font-size: 11px; white-space: pre-wrap; }
+.crp-switcher { display: flex; justify-content: center; align-items: center; gap: var(--size-4-2); padding: 6px; background: var(--text-normal); color: var(--background-primary); font-size: var(--font-ui-smaller); }
+.crp-switcher button { background: none; box-shadow: none; color: inherit; }
