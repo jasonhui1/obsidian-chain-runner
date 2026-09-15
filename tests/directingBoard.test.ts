@@ -36,6 +36,8 @@ let released: number
 let overflowing: boolean
 /** Each call still waiting on the hold actions, answered by the test. */
 let waiting: ((done: boolean) => void)[]
+let chainNames: string[]
+let chainsAsked: number
 
 const answered = (call: string): Promise<boolean> => {
   calls.push(call)
@@ -59,6 +61,12 @@ function board(): DirectingBoard {
     revise: turn => answered(`revise ${turn.name} ${turn.reply}`).then(() => {}),
     editProposal: (proposal, words) => answered(`edit ${proposal} ${words}`),
     rerun: () => answered('rerun').then(() => {}),
+    sideQuest: (proposal, chain) => answered(`quest ${proposal} ${chain}`),
+    chains: () => {
+      chainsAsked++
+      return Promise.resolve(chainNames)
+    },
+    runUrl: runId => `http://engine/history/${runId}`,
     watchOverflow: (_frame, changed) => {
       changed(overflowing)
       return () => {}
@@ -85,7 +93,7 @@ const type = (box: HTMLTextAreaElement, words: string): void => {
   box.value = words
   box.dispatchEvent(new Event('input'))
 }
-const press = (box: HTMLTextAreaElement, key: string, shiftKey = false): KeyboardEvent => {
+const press = (box: HTMLElement, key: string, shiftKey = false): KeyboardEvent => {
   const event = new KeyboardEvent('keydown', { key, shiftKey, cancelable: true })
   box.dispatchEvent(event)
   return event
@@ -101,6 +109,8 @@ beforeEach(() => {
   released = 0
   overflowing = false
   waiting = []
+  chainNames = []
+  chainsAsked = 0
 })
 
 describe('header', () => {
@@ -508,6 +518,93 @@ describe('a proposal tab, chatting', () => {
     expect(composer('Message gameplay…').value).toBe('')
     button('world').click()
     expect(composer('Message world…').value).toBe('for world')
+  })
+})
+
+describe('a proposal tab, side quests', () => {
+  const quested = hold({
+    conversation: [
+      { kind: 'quest', name: 'world', chainName: 'combat lab', runId: '2026-09-16-quest1', result: 'The test becomes an arena.' },
+      { kind: 'quest', name: 'gameplay', chainName: 'combat lab', runId: '2026-09-16-quest2', result: 'Rotation lands.' },
+      { kind: 'quest', name: 'world', chainName: 'develop-direction' },
+    ],
+  })
+  const chainBox = (): HTMLInputElement => {
+    const found = root.querySelector<HTMLInputElement>('input[placeholder="Chain to send it through…"]')
+    if (!found) throw new Error('no chain box')
+    return found
+  }
+  const typeChain = (words: string): void => {
+    chainBox().value = words
+    chainBox().dispatchEvent(new Event('input'))
+  }
+  const quests = (): Element[] => Array.from(root.querySelectorAll('.chain-runner-directing-quests .chain-runner-directing-turn'))
+
+  it('shows only this proposal’s side quests: the chain, its result, and a link to its run', () => {
+    board().open(showing(quested), 'world')
+    expect(quests()).toHaveLength(2)
+    expect(quests()[0]?.textContent).toContain('combat lab')
+    expect(quests()[0]?.textContent).toContain('The test becomes an arena.')
+    const link = quests()[0]?.querySelector('a')
+    expect(link?.getAttribute('href')).toBe('http://engine/history/2026-09-16-quest1')
+    expect(link?.textContent).toContain('quest1')
+    expect(quests()[1]?.textContent).toContain('No result')
+    expect(text()).not.toContain('Rotation lands.')
+  })
+
+  it('offers the engine’s chains to pick from', async () => {
+    chainNames = ['combat lab', 'develop-direction']
+    board().open(showing(), 'world')
+    await settled()
+    const list = root.querySelector<HTMLDataListElement>(`datalist#${chainBox().getAttribute('list')}`)
+    expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab', 'develop-direction'])
+  })
+
+  it('asks the engine for its chains once they are known, however often it redraws', async () => {
+    chainNames = ['combat lab']
+    const panel = board()
+    panel.open(showing(), 'world')
+    await settled()
+    panel.draw(showing())
+    button('gameplay').click()
+    expect(chainsAsked).toBe(1)
+  })
+
+  it('takes a typed chain when the engine offers none', async () => {
+    board().open(showing(), 'world')
+    await settled()
+    typeChain('combat lab')
+    press(chainBox(), 'Enter')
+    expect(calls).toEqual(['quest world combat lab'])
+  })
+
+  it('hands the chain to the hold actions, for this proposal, and says the quest is going until it is done', async () => {
+    board().open(showing(), 'world')
+    typeChain('combat lab')
+    button('Go').click()
+    expect(calls).toEqual(['quest world combat lab'])
+    expect(root.querySelector('.chain-runner-directing-quests')?.textContent).toContain('combat lab is running…')
+    expect(button('Go').disabled).toBe(true)
+    waiting[0]!(true)
+    await settled()
+    expect(text()).not.toContain('is running…')
+  })
+
+  it('says an edit still open is not what a quest sends', () => {
+    board().open(showing(), 'world')
+    expect(text()).not.toContain('Sends the proposal as last saved')
+    button('✎ Edit').click()
+    expect(text()).toContain('Sends the proposal as last saved')
+  })
+
+  it('keeps a chain being typed, and the focus, across a redraw', () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    typeChain('comb')
+    chainBox().focus()
+    panel.draw(showing())
+    expect(chainBox().value).toBe('comb')
+    expect(document.activeElement).toBe(chainBox())
   })
 })
 

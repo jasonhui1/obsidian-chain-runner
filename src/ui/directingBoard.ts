@@ -29,6 +29,11 @@ export interface DirectingBoardDeps {
   editProposal: (proposal: string, text: string) => Promise<boolean>
   /** Reruns downstream of every edited proposal. */
   rerun: () => Promise<void>
+  /** Answers whether the side quest's result reached the hold. */
+  sideQuest: (proposal: string, chain: string) => Promise<boolean>
+  /** The chains a side quest can go through; none while the engine cannot say. */
+  chains: () => Promise<string[]>
+  runUrl: (runId: string) => string | undefined
   openMenu: (event: MouseEvent) => void
   /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
   watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
@@ -52,6 +57,9 @@ export class DirectingBoard {
   /** Each proposal being edited, by `editKey`, and the words so far. */
   private readonly editing = new Map<string, string>()
   private readonly saving = new Set<string>()
+  /** The engine's chains, once it has named any. */
+  private chains: string[] = []
+  private askingChains = false
   private releases: (() => void)[] = []
   private body: HTMLElement | undefined
 
@@ -134,6 +142,56 @@ export class DirectingBoard {
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
     this.chat(this.section(body, `Chat with ${proposal.name}`), hold, proposal.name)
+    this.sideQuests(this.section(body, 'Side quest'), hold, proposal.name)
+  }
+
+  private sideQuests(el: HTMLElement, hold: HoldReading, name: string): void {
+    el.classList.add(`${CLS}-quests`)
+    const key = boxKey(hold.runId, `quest ${name}`)
+    for (const quest of hold.conversation) {
+      if (quest.kind !== 'quest' || quest.name !== name) continue
+      const shown = this.turn(el, `Sent through ${quest.chainName}`)
+      if (quest.runId === undefined) {
+        this.add(shown, 'div', `${CLS}-faint`, 'No result')
+        continue
+      }
+      this.markdown(shown, quest.result || '*The run gave no result.*')
+      this.runLink(shown, quest.runId)
+    }
+    const pending = this.boxes.waiting(key)
+    if (pending !== undefined) this.add(this.turn(el, `Sent through ${pending}`), 'div', `${CLS}-faint`, `${pending} is running…`)
+    if (this.editing.has(editKey(hold.runId, name))) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
+    this.boxes.draw(el, {
+      key,
+      placeholder: 'Chain to send it through…',
+      label: 'Go',
+      choices: this.knownChains(),
+      send: chain => this.deps.sideQuest(name, chain),
+    })
+  }
+
+  private runLink(el: HTMLElement, runId: string): void {
+    const link = this.add(el, 'a', `${CLS}-run-link`, `→ run ${shortId(runId)}`)
+    link.title = `run ${runId}`
+    const url = this.deps.runUrl(runId)
+    if (!url) return
+    link.href = url
+    link.target = '_blank'
+    link.rel = 'noopener'
+  }
+
+  /** What the engine has named so far; asked again on a later draw while it has named none, since it may have been offline. */
+  private knownChains(): string[] {
+    if (this.chains.length === 0 && !this.askingChains) {
+      this.askingChains = true
+      void this.deps.chains().then(names => {
+        this.askingChains = false
+        if (names.length === 0) return
+        this.chains = names
+        this.draw(this.state)
+      })
+    }
+    return this.chains
   }
 
   private chat(el: HTMLElement, hold: HoldReading, name: string): void {

@@ -76,7 +76,8 @@ export function locatedTriggers<T>(content: string, pattern: RegExp, fields: (ma
     i++
     const insertAt = offset
     const replyLines: string[] = []
-    while (i < lines.length && lines[i].startsWith('> ')) {
+    // A bare `>` is a blank line whose trailing space an editor trimmed.
+    while (i < lines.length && (lines[i].startsWith('> ') || lines[i].trimEnd() === '>')) {
       replyLines.push(lines[i].slice(2))
       offset += lines[i].length + 1
       i++

@@ -104,6 +104,9 @@ export class DirectingView extends ItemView {
         const runId = this.runId
         if (runId) await this.follow(runId, await this.holds.rerun(runId))
       },
+      sideQuest: (proposal, chain) => this.written(runId => this.holds.sideQuest(runId, proposal, chain)),
+      chains: () => this.holds.chains(),
+      runUrl: runId => this.holds.runUrl(runId),
       openMenu: event =>
         this.onRun(runId =>
           new Menu()

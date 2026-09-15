@@ -4,6 +4,7 @@ import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
 import type { RerunDownstream } from './rerunDownstream'
 import type { RunPanels } from './runPanels'
+import type { SideQuest } from './sideQuest'
 import { guardWrite } from './vaultWrite'
 import { appendRoomQuestion } from '../run/askRoom'
 import { appendChatTurn, markTurnRevised, type ChatTurn } from '../run/chat'
@@ -19,6 +20,7 @@ import {
   type HoldHeading,
   type HoldReading,
 } from '../run/holdNote'
+import { appendSideQuest } from '../run/sideQuest'
 
 /**
  * Hold actions: everything the directing panel reads from a hold or does to it,
@@ -44,6 +46,7 @@ export interface HoldActionsDeps {
   chat: ChatWithProposer
   room: AskTheRoom
   rerun: RerunDownstream
+  quest: SideQuest
   /** What each run wrote, which tells an edited proposal from one left as it was. */
   panels: RunPanels
 }
@@ -88,8 +91,7 @@ export class HoldActions {
       return false
     }
     const found = await this.holdFile(runId)
-    const exists = found && readHold(found.content, [])?.proposals.some(one => one.name === proposal)
-    return exists === true && this.edit(runId, content => rewriteProposal(content, proposal, text))
+    return found !== undefined && hasProposal(found.content, proposal) && this.edit(runId, content => rewriteProposal(content, proposal, text))
   }
 
   /** The edited proposals rerun downstream; answers the run the hold now lives under. */
@@ -118,6 +120,25 @@ export class HoldActions {
     if (asked === '' || !this.deps.notes.find(runId)) return false
     const answers = await this.deps.room.answers(runId, asked)
     return answers !== undefined && this.edit(runId, content => appendRoomQuestion(content, asked, answers))
+  }
+
+  /** A proposal, as the hold has it, sent through another chain; the result kept with it. Whether both were written. */
+  async sideQuest(runId: string, proposal: string, chain: string): Promise<boolean> {
+    const quest = { name: proposal, chainName: oneLine(chain) }
+    const found = await this.holdFile(runId)
+    if (quest.chainName === '' || !found || !hasProposal(found.content, proposal)) return false
+    const run = await this.deps.quest.send(found.content, quest)
+    return run !== undefined && this.edit(runId, content => appendSideQuest(content, quest, run))
+  }
+
+  /** The chains a side quest can go through; none while the engine cannot say. */
+  chains(): Promise<string[]> {
+    return this.deps.quest.chains()
+  }
+
+  /** Where a run is shown on the engine, as it is set now. */
+  runUrl(runId: string): string | undefined {
+    return this.deps.quest.runUrl(runId)
   }
 
   /** A reply made its proposal's revision and rerun downstream; answers the run the hold now lives under. */
@@ -166,6 +187,10 @@ export class HoldActions {
     })
     return wrote === true
   }
+}
+
+function hasProposal(content: string, name: string): boolean {
+  return readHold(content, [])?.proposals.some(one => one.name === name) === true
 }
 
 /** The note keeps each message, question and change on a line of its own. */

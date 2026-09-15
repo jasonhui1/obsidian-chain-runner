@@ -830,11 +830,25 @@
   margin-top: var(--size-4-3);
 }
 
-.chain-runner-directing-box textarea {
+.chain-runner-directing-box textarea,
+.chain-runner-directing-box input {
   flex: 1;
   min-width: 0;
-  resize: vertical;
   font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-box textarea {
+  resize: vertical;
+}
+
+.chain-runner-directing-quests .chain-runner-directing-said::before {
+  content: none;
+}
+
+.chain-runner-directing-run-link {
+  display: inline-block;
+  margin-top: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
 }
 
 .chain-runner-directing-rerun {

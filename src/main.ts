@@ -222,6 +222,13 @@ export default class ChainRunnerPlugin extends Plugin {
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
     })
+    const sideQuest = new SideQuest({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
     const holds = new HoldActions({
       app: this.app,
       notify: message => new Notice(message),
@@ -230,6 +237,7 @@ export default class ChainRunnerPlugin extends Plugin {
       chat,
       room: askRoom,
       rerun,
+      quest: sideQuest,
       panels: new RunPanels(this.engine),
     })
     this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
@@ -368,14 +376,6 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'ask-the-room',
       name: 'Ask the room',
       callback: () => void askRoom.start(),
-    })
-
-    const sideQuest = new SideQuest({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      engineUrl: () => this.settings.engineUrl,
     })
 
     this.addCommand({

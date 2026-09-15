@@ -6,6 +6,7 @@ import { ChatWithProposer } from '@/ui/chatWithProposer'
 import { NO_EDITED_PROPOSAL, RerunDownstream } from '@/ui/rerunDownstream'
 import { EngineOfflineError } from '@/engine/transport'
 import { RunPanels } from '@/ui/runPanels'
+import { SideQuest } from '@/ui/sideQuest'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TAbstractFile, TFile } from 'obsidian'
@@ -86,6 +87,12 @@ ask the room: too much Nier?
 > **world:**
 > No.
 
+side quest: @world combat-lab
+> → [run 2026-09-14-quest](http://localhost:4000/history/2026-09-14-quest)
+> The test becomes an arena.
+>
+> Every fight is graded.
+
 @world why a test?
 > Someone is watching.
 `
@@ -140,6 +147,18 @@ const answer = (agentName: string, text: string): RunEvent[] => [
   { type: 'agent_done', agentName, nodeId: agentName, step: 0, output: output(agentName, text) },
 ]
 
+const QUEST = '2026-09-16-quest1'
+const ENGINE_URL = 'http://localhost:4000'
+
+const questRun: RunMeta = {
+  runId: QUEST,
+  chainName: 'combat lab',
+  seedPrompt: '',
+  startedAt: '',
+  status: 'complete',
+  agentOutputs: [output('sparring', 'A first pass.'), output('combat-report', 'Rotation lands as a rhythm.\n\nKeep it.')],
+}
+
 let notes: Record<string, string>
 let notices: string[]
 let listeners: { name: string; callback: (file: TAbstractFile) => void; removed: boolean }[]
@@ -147,6 +166,7 @@ let written: string[]
 let openedInTab: string[]
 let framesByAgent: Record<string, RunEvent[]>
 let rerunFrames: RunEvent[]
+let chainFrames: RunEvent[]
 let requests: RunRequest[]
 let online: boolean
 let layoutsFetched: number
@@ -187,7 +207,11 @@ function makeActions(): HoldActions {
     },
   } as unknown as App
   const engine = {
-    getRun: (runId: string) => Promise.resolve(theRun(runId)),
+    getRun: (runId: string) => Promise.resolve(runId === QUEST ? questRun : theRun(runId)),
+    listChains: () =>
+      online
+        ? Promise.resolve([{ slug: 'combat-lab', name: 'combat lab' }, { slug: 'develop', name: 'develop-direction' }])
+        : Promise.reject(new EngineOfflineError(ENGINE_URL)),
     getLayout: (): Promise<LayoutModel> => {
       if (!online) return Promise.reject(new EngineOfflineError('http://localhost:3000'))
       layoutsFetched++
@@ -195,7 +219,9 @@ function makeActions(): HoldActions {
     },
     launchRun: async function* (request: RunRequest) {
       requests.push(request)
-      yield* request.branchedFromRunId ? rerunFrames : (framesByAgent[request.agentName ?? ''] ?? [])
+      if (request.branchedFromRunId) yield* rerunFrames
+      else if (request.agentName) yield* framesByAgent[request.agentName] ?? []
+      else yield* chainFrames
     },
   } as unknown as EngineClient
   const notify = (message: string): void => void notices.push(message)
@@ -208,6 +234,7 @@ function makeActions(): HoldActions {
     chat: new ChatWithProposer({ app, engine, withEngine, notify }),
     room: new AskTheRoom({ app, engine, withEngine, notify }),
     rerun: new RerunDownstream({ app, engine, withEngine, notify }),
+    quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
     panels: new RunPanels(engine),
   })
 }
@@ -224,6 +251,7 @@ beforeEach(() => {
   openedInTab = []
   framesByAgent = {}
   rerunFrames = []
+  chainFrames = []
   requests = []
   online = true
   layoutsFetched = 0
@@ -461,8 +489,14 @@ describe('read, the conversation', () => {
     expect(hold?.conversation).toEqual([
       { kind: 'chat', name: 'gameplay', message: 'make it cost something', reply: 'Each rotation burns a charge.', revisedAs: '2026-09-14-old' },
       { kind: 'room', question: 'too much Nier?', answers: [{ name: 'gameplay', answer: 'A bit.' }, { name: 'world', answer: 'No.' }] },
+      { kind: 'quest', name: 'world', chainName: 'combat-lab', runId: '2026-09-14-quest', result: 'The test becomes an arena.\n\nEvery fight is graded.' },
       { kind: 'chat', name: 'world', message: 'why a test?', reply: 'Someone is watching.' },
     ])
+  })
+
+  it('reads a side quest typed into the note that has no result yet', async () => {
+    notes[PATH] = HOLD + 'side quest: @gameplay combat-lab\n'
+    expect((await makeActions().read(RUN))?.conversation.at(-1)).toEqual({ kind: 'quest', name: 'gameplay', chainName: 'combat-lab' })
   })
 
   it('reads a message still waiting for its reply', async () => {
@@ -624,6 +658,78 @@ describe('change', () => {
   it('writes nothing for a blank change', async () => {
     expect(await makeActions().change(RUN, '  ')).toBe(false)
     expect(notes[PATH]).toBe(HOLD)
+  })
+})
+
+describe('sideQuest', () => {
+  beforeEach(() => {
+    chainFrames = [{ type: 'run_start', runId: QUEST }, { type: 'run_complete', runId: QUEST }]
+  })
+
+  it('runs the chain on the proposal alone, as the hold has it', async () => {
+    await makeActions().sideQuest(RUN, 'gameplay', 'combat lab')
+    expect(requests).toEqual([{ chainName: 'combat lab', seedPrompt: GAMEPLAY }])
+  })
+
+  it('sends a proposal’s edit rather than what its run wrote', async () => {
+    const actions = makeActions()
+    await actions.editProposal(RUN, 'world', 'The world is real.')
+    await actions.sideQuest(RUN, 'world', 'combat lab')
+    expect(requests[0]?.seedPrompt).toBe('The world is real.')
+  })
+
+  it('writes the quest, its run and its result at the end of the Conversation, where the read finds them', async () => {
+    const actions = makeActions()
+    expect(await actions.sideQuest(RUN, 'gameplay', 'combat lab')).toBe(true)
+    expect(notes[PATH]).toBe(
+      `${HOLD}\nside quest: @gameplay combat lab\n> → [run ${QUEST}](${ENGINE_URL}/history/${QUEST})\n> Rotation lands as a rhythm.\n> \n> Keep it.\n`,
+    )
+    expect((await actions.read(RUN))?.conversation.at(-1)).toEqual({
+      kind: 'quest',
+      name: 'gameplay',
+      chainName: 'combat lab',
+      runId: QUEST,
+      result: 'Rotation lands as a rhythm.\n\nKeep it.',
+    })
+  })
+
+  it('writes nothing, and says why, when the run failed', async () => {
+    chainFrames = [{ type: 'run_start', runId: QUEST }, { type: 'error', error: 'the model refused' }]
+    expect(await makeActions().sideQuest(RUN, 'gameplay', 'combat lab')).toBe(false)
+    expect(notes[PATH]).toBe(HOLD)
+    expect(notices).toEqual([`Side quest run ${QUEST} failed: the model refused`])
+  })
+
+  it('writes nothing when the engine is offline', async () => {
+    online = false
+    expect(await makeActions().sideQuest(RUN, 'gameplay', 'combat lab')).toBe(false)
+    expect(notes[PATH]).toBe(HOLD)
+  })
+
+  it('sends nothing for a blank chain, a proposal the hold does not have, or a run with no hold note', async () => {
+    const actions = makeActions()
+    expect(await actions.sideQuest(RUN, 'gameplay', '  ')).toBe(false)
+    expect(await actions.sideQuest(RUN, 'nobody', 'combat lab')).toBe(false)
+    expect(await actions.sideQuest('2026-09-15-none', 'gameplay', 'combat lab')).toBe(false)
+    expect(requests).toEqual([])
+  })
+})
+
+describe('chains', () => {
+  it('names the chains on the engine', async () => {
+    expect(await makeActions().chains()).toEqual(['combat lab', 'develop-direction'])
+  })
+
+  it('names none, and says nothing, while the engine is offline', async () => {
+    online = false
+    expect(await makeActions().chains()).toEqual([])
+    expect(notices).toEqual([])
+  })
+})
+
+describe('runUrl', () => {
+  it('links a run on the engine as it is set now', () => {
+    expect(makeActions().runUrl(QUEST)).toBe(`${ENGINE_URL}/history/${QUEST}`)
   })
 })
 

@@ -11,7 +11,11 @@ export interface TypingBox {
   label: string
   /** Answers whether what was typed reached the hold. */
   send: (text: string) => Promise<boolean>
+  /** Suggestions to pick from, which make the box one line; anything typed still sends. */
+  choices?: string[]
 }
+
+let lists = 0
 
 export class TypingBoxes {
   private readonly drafts = new Map<string, string>()
@@ -28,9 +32,8 @@ export class TypingBoxes {
     const doc = el.ownerDocument
     const row = el.appendChild(doc.createElement('div'))
     row.className = 'chain-runner-directing-box'
-    const input = row.appendChild(doc.createElement('textarea'))
+    const input = box.choices === undefined ? this.textarea(row) : this.chooser(row, box.choices)
     input.placeholder = box.placeholder
-    input.rows = 2
     input.dataset.box = box.key
     input.value = this.drafts.get(box.key) ?? ''
     const button = row.appendChild(doc.createElement('button'))
@@ -38,9 +41,10 @@ export class TypingBoxes {
     button.textContent = box.label
     button.disabled = this.sending.has(box.key)
 
-    input.addEventListener('input', () => void this.drafts.set(box.key, input.value))
+    const field: HTMLElement = input
+    field.addEventListener('input', () => void this.drafts.set(box.key, input.value))
     // The hold keeps each message on one line, so Enter always sends.
-    input.addEventListener('keydown', event => {
+    field.addEventListener('keydown', event => {
       if (event.key !== 'Enter' || event.isComposing) return
       event.preventDefault()
       void this.send(box)
@@ -50,14 +54,32 @@ export class TypingBoxes {
 
   /** Call before a redraw empties `root`; what it returns puts the reader back in the box they were typing in. */
   keepTyping(root: HTMLElement): () => void {
-    const active = root.ownerDocument.activeElement
-    if (active?.tagName !== 'TEXTAREA' || !root.contains(active)) return () => {}
-    const { dataset, selectionStart, selectionEnd } = active as HTMLTextAreaElement
+    const active = root.ownerDocument.activeElement as TypedInto | null
+    const key = active?.dataset?.box
+    if (!active || key === undefined || !root.contains(active)) return () => {}
+    const { selectionStart, selectionEnd } = active
     return () => {
-      const input = Array.from(root.querySelectorAll('textarea')).find(box => box.dataset.box === dataset.box)
+      const input = Array.from(root.querySelectorAll<TypedInto>('[data-box]')).find(box => box.dataset.box === key)
       input?.focus()
       input?.setSelectionRange(selectionStart, selectionEnd)
     }
+  }
+
+  private textarea(row: HTMLElement): HTMLTextAreaElement {
+    const input = row.appendChild(row.ownerDocument.createElement('textarea'))
+    input.rows = 2
+    return input
+  }
+
+  private chooser(row: HTMLElement, choices: string[]): HTMLInputElement {
+    const doc = row.ownerDocument
+    const input = row.appendChild(doc.createElement('input'))
+    input.type = 'text'
+    const list = row.appendChild(doc.createElement('datalist'))
+    list.id = `chain-runner-directing-choices-${++lists}`
+    for (const choice of choices) list.appendChild(doc.createElement('option')).value = choice
+    input.setAttribute('list', list.id)
+    return input
   }
 
   private async send(box: TypingBox): Promise<void> {
@@ -76,3 +98,5 @@ export class TypingBoxes {
     }
   }
 }
+
+type TypedInto = HTMLInputElement | HTMLTextAreaElement
