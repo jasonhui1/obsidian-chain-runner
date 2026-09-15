@@ -166,6 +166,7 @@ function makeRun(): NodeRun {
   const surface: NodeSurface = {
     selection: () => undefined,
     selectedProposal: () => undefined,
+    selectedRun: () => undefined,
     selectedNode: () => undefined,
     reflow: () => Promise.resolve(false),
     placeProposals: async () => {},

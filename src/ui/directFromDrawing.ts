@@ -1,0 +1,61 @@
+import { directLabelRunId } from './runLabel'
+import { UNREACHABLE_DRAWING } from './onDrawing'
+import type { Point } from './panelSpot'
+
+/** Directing a run from the drawing: a click on its frame's `✎ Direct`, or the palette on a selected card. */
+
+export const SELECT_A_RUN = 'Select a card from a run on the drawing to direct that run.'
+
+export interface DirectFromDrawingDeps {
+  surface: {
+    unavailable(): string | undefined
+    /** The run the selection belongs to; throws when the drawing cannot be reached. */
+    selectedRun(): string | undefined
+  }
+  direct: (runId: string) => Promise<void>
+  notify: (message: string) => void
+  /** Where the press behind a selection settled, or `undefined` for a drag (ADR-0010). */
+  clickSpot: (settled: (spot: Point | undefined) => void) => void
+}
+
+export class DirectFromDrawing {
+  constructor(private readonly deps: DirectFromDrawingDeps) {}
+
+  /** Ctrl/Cmd+click on the label. `true` passes on a link that is not ours. */
+  handleLinkClick(element: { customData?: unknown }): boolean {
+    const runId = directLabelRunId(element)
+    if (!runId) return true
+    void this.deps.direct(runId)
+    return false
+  }
+
+  /** A plain click on the label, once the press is known not to be a drag. */
+  handleSelection(element: { customData?: unknown }): void {
+    const runId = directLabelRunId(element)
+    if (!runId) return
+    this.deps.clickSpot(spot => {
+      if (spot) void this.deps.direct(runId)
+    })
+  }
+
+  /** The palette command, on whatever card of a run is selected. */
+  async directSelected(): Promise<void> {
+    const unavailable = this.deps.surface.unavailable()
+    if (unavailable) {
+      this.deps.notify(unavailable)
+      return
+    }
+    let runId: string | undefined
+    try {
+      runId = this.deps.surface.selectedRun()
+    } catch (error) {
+      this.deps.notify(error instanceof Error ? error.message : UNREACHABLE_DRAWING)
+      return
+    }
+    if (!runId) {
+      this.deps.notify(SELECT_A_RUN)
+      return
+    }
+    await this.deps.direct(runId)
+  }
+}

@@ -37,6 +37,7 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
+import { buildDirectLabel, selectedRunId } from './runLabel'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary } from '../engine/types'
@@ -249,6 +250,8 @@ export interface NodeSurface {
   selection(on?: DrawingView): BlockReading | undefined
   /** Draws a run's proposals greyed and dashed, each connected back to `source`. */
   placeProposals(proposals: readonly PlacedProposal[], source: BlockReading, on?: DrawingView): Promise<void>
+  /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
+  selectedRun(on?: DrawingView): string | undefined
   /** The proposal the reader has selected, for the commands that decide one. */
   selectedProposal(on?: DrawingView): ProposalData | undefined
   /** The one node element the reader has selected, for the gestures the hook cannot see. */
@@ -387,6 +390,16 @@ export function createNodeSurface(app: App): NodeSurface {
       return only && chainNodeData(only) ? only : undefined
     },
 
+    selectedRun: on => {
+      const { ea, view } = bind(on)
+      const drawing = drawingPath(view)
+      return selectedRunId(selectedElements(ea), linkpath => {
+        const note = app.metadataCache.getFirstLinkpathDest(linkpath, drawing)
+        const run: unknown = note ? app.metadataCache.getFileCache(note)?.frontmatter?.['run'] : undefined
+        return typeof run === 'string' ? run : undefined
+      })
+    },
+
     selectedProposal: on => {
       const { ea } = bind(on)
       for (const element of selectedElements(ea)) {
@@ -489,6 +502,17 @@ export function createNodeSurface(app: App): NodeSurface {
         if (element && frameId) element.frameId = frameId
       }
       ea.style.strokeWidth = PLAIN_STROKE
+
+      const label = buildDirectLabel(frame.box, frame.runId)
+      ea.style.strokeColor = label.strokeColor
+      ea.style.fontSize = label.fontSize
+      const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
+      if (made) {
+        made.link = label.link
+        made.customData = label.customData
+        if (frameId) made.frameId = frameId
+      }
+      ea.style.strokeColor = ACCEPTED_STROKE
       // Not repositioned to the cursor: the coordinates are the node's own.
       await ea.addElementsToView(false, true)
       return frameId !== undefined

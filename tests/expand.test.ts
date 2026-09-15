@@ -127,6 +127,7 @@ function makeExpand(): Expand {
     placeRun: () => Promise.resolve(true),
     selection: () => block,
     selectedProposal: () => selectedProposal,
+    selectedRun: () => undefined,
     placeProposals: (proposals, source) => {
       placed.push({ proposals, sourceId: source.id })
       return Promise.resolve()

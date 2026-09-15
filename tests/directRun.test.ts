@@ -31,6 +31,7 @@ let layout: LayoutModel
 let agentOutputs: AgentOutput[]
 let online: boolean
 let requestedRunIds: string[]
+let opened: string[]
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -84,6 +85,10 @@ function makeDirectRun(): DirectRun {
     notify: message => void notices.push(message),
     holdNotes: new HoldNotes({ app, notify: message => void notices.push(message) }),
     currentRun: () => current,
+    open: note => {
+      opened.push(note.path)
+      return Promise.resolve()
+    },
   })
 }
 
@@ -104,6 +109,7 @@ beforeEach(() => {
   ]
   online = true
   requestedRunIds = []
+  opened = []
 })
 
 describe('start', () => {
@@ -139,9 +145,24 @@ describe('start', () => {
     expect(content).toContain('Considered a crown first.')
   })
 
+  it('opens the hold note it wrote', async () => {
+    await makeDirectRun().start()
+    expect(opened).toEqual(['Maestro/holds/2026-09-15-Ab3dE1.md'])
+  })
+
   it('writes nothing when the engine is offline', async () => {
     online = false
     await makeDirectRun().start()
     expect(notes).toEqual({})
+    expect(opened).toEqual([])
+  })
+})
+
+describe('direct', () => {
+  it('directs a run by its id alone, with no run on screen, titled by the chain the engine recorded', async () => {
+    current = undefined
+    await makeDirectRun().direct('2026-09-15-ubqPU2')
+    expect(notes['Maestro/holds/2026-09-15-ubqPU2.md']).toContain('# Hold: run 2026-09-15-ubqPU2 · creative-director')
+    expect(opened).toEqual(['Maestro/holds/2026-09-15-ubqPU2.md'])
   })
 })

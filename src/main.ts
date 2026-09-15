@@ -19,6 +19,7 @@ import {
 } from './ui/excalidraw'
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
+import { DirectFromDrawing } from './ui/directFromDrawing'
 import { DirectRun } from './ui/directRun'
 import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
@@ -182,6 +183,22 @@ export default class ChainRunnerPlugin extends Plugin {
     // An expansion outlives the command that started it; unloading the plugin ends it.
     this.register(() => expand.stop())
 
+    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
+    const directRun = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => this.activeResultView()?.currentResult(),
+      open: note => this.app.workspace.getLeaf('tab').openFile(note),
+    })
+    const directFromDrawing = new DirectFromDrawing({
+      surface: { unavailable: () => surface.unavailable(), selectedRun: () => surface.selectedRun() },
+      direct: runId => directRun.direct(runId),
+      notify: message => new Notice(message),
+      clickSpot: settled => clicks.onSettled(settled),
+    })
+
     // The hook lives on Excalidraw's plugin instance, which may not be loaded
     // yet; the disposer is registered now so an unload before layout-ready wins.
     let removeLinkHook: (() => void) | undefined
@@ -197,12 +214,15 @@ export default class ChainRunnerPlugin extends Plugin {
       // Each handler claims its own links and passes on what is not its; a
       // proposal's labels and a chain node's lines never overlap.
       removeLinkHook = registerLinkHook(this.app, (element, view) =>
-        [expand, nodes].every(handler => handler.handleLinkClick(element, view)),
+        [expand, nodes, directFromDrawing].every(handler => handler.handleLinkClick(element, view)),
       )
-      // A plain click reaches only the node; a proposal's decisions stay on the
-      // link hook, where nothing is written without the reader saying so.
+      // A plain click reaches a node and a run's Direct label; a proposal's
+      // decisions stay on the link hook, where nothing is written without the reader saying so.
       removeSelectionHook = registerSelectionHook(this.app, {
-        clicked: (element, view) => nodes.handleSelection(element, view),
+        clicked: (element, view) => {
+          nodes.handleSelection(element, view)
+          directFromDrawing.handleSelection(element)
+        },
         editing: (element, view) => nodes.handleTextEdit(element, view),
       })
       // The toolbar button is a file in the vault, and Excalidraw names the folder.
@@ -254,19 +274,16 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void this.markLines(marks),
     })
 
-    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
-    const directRun = new DirectRun({
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      holdNotes,
-      currentRun: () => this.activeResultView()?.currentResult(),
-    })
-
     this.addCommand({
       id: 'direct-this-run',
       name: 'Direct this run',
       callback: () => void directRun.start(),
+    })
+
+    this.addCommand({
+      id: 'direct-selected-run',
+      name: 'Direct the selected run',
+      callback: () => void directFromDrawing.directSelected(),
     })
 
     const resume = new Resume({

@@ -1,3 +1,4 @@
+import type { TFile } from 'obsidian'
 import type { HoldNotes } from './holdNotes'
 import type { EngineClient } from '../engine/client'
 import { thoughtsByNode } from '../run/holdNote'
@@ -18,6 +19,7 @@ export interface DirectRunDeps {
   holdNotes: HoldNotes
   /** The run on screen, if any — this command has no run of its own to pick from. */
   currentRun: () => RunResult | undefined
+  open: (note: TFile) => Promise<void>
 }
 
 export class DirectRun {
@@ -29,8 +31,11 @@ export class DirectRun {
       this.deps.notify(NO_RUN_TO_DIRECT)
       return
     }
-    const { runId, chainName } = result
+    await this.direct(result.runId, result.chainName)
+  }
 
+  /** Writes and opens the hold note for a run; without a chain name, the one the engine recorded. */
+  async direct(runId: string, chainName?: string): Promise<void> {
     const fetched = await this.deps.withEngine(async () => {
       const [layout, run] = await Promise.all([this.deps.engine.getLayout(runId), this.deps.engine.getRun(runId)])
       return { layout, run }
@@ -39,10 +44,12 @@ export class DirectRun {
 
     const file = await this.deps.holdNotes.write({
       runId,
-      chainName,
+      chainName: chainName ?? fetched.run.chainName,
       panels: fetched.layout.panels,
       thoughts: thoughtsByNode(fetched.run.agentOutputs),
     })
-    if (file) this.deps.notify(`Wrote the hold note for run ${runId}`)
+    if (!file) return
+    this.deps.notify(`Wrote the hold note for run ${runId}`)
+    await this.deps.open(file)
   }
 }

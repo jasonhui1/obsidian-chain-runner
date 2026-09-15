@@ -65,6 +65,7 @@ function makeSurface(): NodeSurface {
       return Promise.resolve(true)
     },
     selectedProposal: () => undefined,
+    selectedRun: () => undefined,
     placeProposals: async () => {},
     editProposal: async () => false,
     unavailable: () => unavailable,
