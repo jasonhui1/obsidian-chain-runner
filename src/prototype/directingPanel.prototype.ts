@@ -62,20 +62,8 @@ export class DirectingPanelPrototype extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
-    this.keepTyping()
     void this.deps.chainNames().then(names => (this.chains = names))
     this.draw()
-  }
-
-  /** Key presses into the panel's text boxes arrive cancelled beside a drawing; a cancelled key is typed by hand (docs/agents/excalidraw.md). */
-  private keepTyping(): void {
-    const panel = this.contentEl
-    this.registerDomEvent(panel, 'keydown', event => {
-      const field = event.target
-      if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return
-      event.stopPropagation()
-      if (event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.altKey) typeInto(field, event.key)
-    })
   }
 
   /** Points the panel at a run and, when a card was clicked, its proposal. */
@@ -142,7 +130,9 @@ export class DirectingPanelPrototype extends ItemView {
     badge.title = 'Nothing is saved; replies are canned'
     const more = this.button(titleRow, '⋯', () => {}, 'crp-more')
     more.setAttribute('aria-label', 'More')
-    more.onclick = event => this.moreMenu(this.hold ? this.runId : undefined).showAtMouseEvent(event)
+    more.onclick = (event): void => {
+      this.moreMenu(this.hold ? this.runId : undefined).showAtMouseEvent(event)
+    }
   }
 
   private moreMenu(runId: string | undefined): Menu {
@@ -294,7 +284,11 @@ export class DirectingPanelPrototype extends ItemView {
     select.createEl('option', { text: 'the room', value: ROOM })
     for (const p of reading.proposals) select.createEl('option', { text: p.name, value: p.name })
     select.value = this.to
-    select.onchange = () => ((this.to = select.value), (this.questing = false), this.draw())
+    select.onchange = (): void => {
+      this.to = select.value
+      this.questing = false
+      this.draw()
+    }
 
     const name = this.to === ROOM ? undefined : this.to
     if (name) {
@@ -366,7 +360,9 @@ export class DirectingPanelPrototype extends ItemView {
     const stored = this.folds.get(`${this.variant}:${key}`)
     fold.open = stored ?? open
     fold.createEl('summary', { text: summary })
-    fold.ontoggle = () => this.folds.set(`${this.variant}:${key}`, fold.open)
+    fold.ontoggle = (): void => {
+      this.folds.set(`${this.variant}:${key}`, fold.open)
+    }
     return fold
   }
 
@@ -379,7 +375,9 @@ export class DirectingPanelPrototype extends ItemView {
         const select = row.createEl('select', { cls: 'crp-combine' })
         select.createEl('option', { text: 'COMBINE…', value: '' })
         for (const other of others) select.createEl('option', { text: `+ ${other}`, value: other })
-        select.onchange = () => select.value && hold.direct('COMBINE', name, select.value)
+        select.onchange = (): void => {
+          if (select.value) hold.direct('COMBINE', name, select.value)
+        }
         continue
       }
       this.button(row, verb, () => hold.direct(verb as DirectionVerb, name), applied.has(verb) ? 'is-on' : '')
@@ -394,7 +392,9 @@ export class DirectingPanelPrototype extends ItemView {
       const area = box.createEl('textarea')
       area.dataset.key = key
       area.value = this.drafts.get(key) ?? text
-      area.oninput = () => this.drafts.set(key, area.value)
+      area.oninput = (): void => {
+        this.drafts.set(key, area.value)
+      }
       const row = box.createDiv({ cls: 'crp-row' })
       this.button(row, 'Save edit', () => {
         this.editing.delete(name)
@@ -466,7 +466,7 @@ export class DirectingPanelPrototype extends ItemView {
       const label = el.createEl('label', { cls: 'crp-canon' })
       const box = label.createEl('input', { type: 'checkbox' })
       box.checked = line.ticked
-      box.onchange = () => hold.tickCanon(line.text, box.checked)
+      box.onchange = (): void => hold.tickCanon(line.text, box.checked)
       label.createSpan({ text: line.line })
     }
   }
@@ -498,14 +498,18 @@ export class DirectingPanelPrototype extends ItemView {
     input.dataset.key = key
     input.value = this.drafts.get(key) ?? ''
     input.disabled = this.busy.has(key)
-    input.oninput = () => this.drafts.set(key, input.value)
+    input.oninput = (): void => {
+      this.drafts.set(key, input.value)
+    }
     const send = (): void => {
       const text = input.value.trim()
       if (!text || this.busy.has(key)) return
       this.drafts.delete(key)
       void this.run(key, () => submit(text))
     }
-    input.onkeydown = event => event.key === 'Enter' && send()
+    input.onkeydown = (event): void => {
+      if (event.key === 'Enter') send()
+    }
     this.button(row, 'Send', send)
   }
 
@@ -527,7 +531,7 @@ export class DirectingPanelPrototype extends ItemView {
 
   private button(el: HTMLElement, text: string, onClick: () => unknown, cls = ''): HTMLButtonElement {
     const button = el.createEl('button', { text, cls })
-    button.onclick = event => {
+    button.onclick = (event): void => {
       event.preventDefault()
       onClick()
     }
@@ -545,21 +549,4 @@ function appliedVerbs(reading: HoldReading, name: string): string[] {
     .map(line => /^([A-Z]+): (.+)$/.exec(line))
     .filter((m): m is RegExpExecArray => !!m && m[2].split(' + ').includes(name))
     .map(m => m[1])
-}
-
-/** A key press the text box never got, applied as the browser would have. */
-function typeInto(field: HTMLInputElement | HTMLTextAreaElement, key: string): void {
-  const start = field.selectionStart ?? field.value.length
-  const end = field.selectionEnd ?? start
-  const caret = (at: number): void => field.setSelectionRange(at, at)
-  if (key.length === 1) field.setRangeText(key, start, end, 'end')
-  else if (key === 'Enter' && field instanceof HTMLTextAreaElement) field.setRangeText('\n', start, end, 'end')
-  else if (key === 'Backspace') field.setRangeText('', start === end ? Math.max(0, start - 1) : start, end, 'end')
-  else if (key === 'Delete') field.setRangeText('', start, start === end ? start + 1 : end, 'end')
-  else if (key === 'ArrowLeft') return caret(Math.max(0, start - 1))
-  else if (key === 'ArrowRight') return caret(Math.min(field.value.length, end + 1))
-  else if (key === 'Home') return caret(0)
-  else if (key === 'End') return caret(field.value.length)
-  else return
-  field.dispatchEvent(new Event('input', { bubbles: true }))
 }
