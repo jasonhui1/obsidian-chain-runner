@@ -150,6 +150,62 @@ describe('mergeHoldNote', () => {
   })
 })
 
+describe('mergeHoldNote CANON? refresh', () => {
+  const proposalWith = (lines: string[]) =>
+    panel({ text: `Silhouette text.\n\n## Proposed canon\n${lines.map(line => `- ${line}`).join('\n')}` })
+  const tick = (content: string, line: string) =>
+    content.replace(`- [ ] ${line} — character-director`, `- [x] ${line} — character-director`)
+
+  it('keeps a tick on a line the new proposals still offer', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['halo = crown', 'silver, not gold'])] }))
+    const previous = tick(fresh, 'halo = crown')
+    expect(mergeHoldNote(fresh, previous)).toContain('- [x] halo = crown — character-director')
+  })
+
+  it('adds a new line unticked', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['halo = crown', 'silver, not gold'])] }))
+    const previous = holdNoteContent(input({ panels: [proposalWith(['halo = crown'])] }))
+    expect(mergeHoldNote(fresh, previous)).toContain('- [ ] silver, not gold — character-director')
+  })
+
+  it('drops an unticked line no proposal offers any more', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['silver, not gold'])] }))
+    const previous = holdNoteContent(input({ panels: [proposalWith(['halo = crown', 'silver, not gold'])] }))
+    expect(mergeHoldNote(fresh, previous)).not.toContain('halo = crown')
+  })
+
+  it('keeps a ticked line no proposal offers any more', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['silver, not gold'])] }))
+    const stale = holdNoteContent(input({ panels: [proposalWith(['halo = crown', 'silver, not gold'])] }))
+    const previous = tick(stale, 'halo = crown')
+    expect(mergeHoldNote(fresh, previous)).toContain('- [x] halo = crown — character-director')
+  })
+
+  it('introduces a checklist the previous note had none of', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['halo = crown'])] }))
+    const previous = holdNoteContent(input())
+    const merged = mergeHoldNote(fresh, previous)
+    expect(merged).toContain('CANON?')
+    expect(merged).toContain('- [ ] halo = crown — character-director')
+  })
+
+  it('leaves KEEP/CHANGE lines and free text in Direction untouched', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['halo = crown'])] }))
+    const previous = tick(fresh, 'halo = crown').replace('KEEP:\n', 'KEEP: fast combat\n')
+    const merged = mergeHoldNote(fresh, previous)
+    expect(merged).toContain('KEEP: fast combat')
+    expect(merged).toContain('- [x] halo = crown — character-director')
+  })
+
+  it('keeps a Conversation the human already started, canon and all', () => {
+    const fresh = holdNoteContent(input({ panels: [proposalWith(['halo = crown'])] }))
+    const previous = tick(fresh, 'halo = crown').replace('## Conversation\n', '## Conversation\n@gameplay-director defend this.\n')
+    const merged = mergeHoldNote(fresh, previous)
+    expect(merged).toContain('@gameplay-director defend this.')
+    expect(merged).toContain('- [x] halo = crown — character-director')
+  })
+})
+
 describe('directionBlock', () => {
   it('answers undefined for a note with no Direction heading at all', () => {
     expect(directionBlock('just some words')).toBeUndefined()

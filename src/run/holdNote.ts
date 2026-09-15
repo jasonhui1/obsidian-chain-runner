@@ -125,13 +125,98 @@ function directionOnward(content: string): string | undefined {
 
 /**
  * A fresh note, with a previous write's Direction and everything after it kept
- * in place — so directing a run twice never clobbers what the human wrote.
+ * in place — so directing a run twice never clobbers what the human wrote,
+ * except the CANON? checklist, which is rebuilt from the fresh note's proposals.
  */
 export function mergeHoldNote(fresh: string, previous: string | undefined): string {
   const kept = previous === undefined ? undefined : directionOnward(previous)
   if (kept === undefined) return fresh
   const match = DIRECTION_HEADING.exec(fresh)
-  return match ? fresh.slice(0, match.index) + kept : fresh
+  return match ? fresh.slice(0, match.index) + mergedDirection(fresh, kept) : fresh
+}
+
+interface CanonEntry {
+  ticked: boolean
+  /** The checklist line minus its `- [ ]`/`- [x]` marker — proposal text and attribution together. */
+  text: string
+}
+
+const CANON_LINE = /^-\s*\[([ xX])\]\s*(.+)$/
+
+/** The CANON? checklist in `content`, if it has one — its entries, and where the heading through its last line sits. */
+function canonBlock(content: string): { entries: CanonEntry[]; start: number; end: number } | undefined {
+  const start = lineAt(content, 'CANON?', 0)
+  if (start === -1) return undefined
+
+  const entries: CanonEntry[] = []
+  let at = afterLine(content, start)
+  let end = at
+  for (;;) {
+    const stop = lineEndAt(content, at)
+    const match = CANON_LINE.exec(content.slice(at, stop).trim())
+    if (!match) break
+    entries.push({ ticked: match[1].toLowerCase() === 'x', text: match[2] })
+    end = stop + 1
+    if (stop === content.length) break
+    at = stop + 1
+  }
+  return { entries, start, end }
+}
+
+/** Where the line starting at `at` ends, not including its newline. */
+function lineEndAt(content: string, at: number): number {
+  const newline = content.indexOf('\n', at)
+  return newline === -1 ? content.length : newline
+}
+
+/**
+ * `fresh`'s lines, ticked where `previous` had them ticked, plus any of
+ * `previous`'s ticked lines no longer offered.
+ */
+function mergeCanonEntries(fresh: CanonEntry[], previous: CanonEntry[]): CanonEntry[] {
+  const previousByText = new Map(previous.map(entry => [entry.text, entry]))
+  const merged = fresh.map(entry => ({ text: entry.text, ticked: previousByText.get(entry.text)?.ticked ?? false }))
+  const mergedTexts = new Set(merged.map(entry => entry.text))
+  const orphanedTicks = previous.filter(entry => entry.ticked && !mergedTexts.has(entry.text))
+  return [...merged, ...orphanedTicks]
+}
+
+function canonBlockText(entries: CanonEntry[]): string {
+  return ['CANON?', ...entries.map(entry => `- [${entry.ticked ? 'x' : ' '}] ${entry.text}`), ''].join('\n')
+}
+
+/** `kept`'s Direction, its CANON? checklist rebuilt from `fresh`'s proposals; everything else left as the human wrote it. */
+function mergedDirection(fresh: string, kept: string): string {
+  const freshEntries = canonBlock(fresh)?.entries ?? []
+  const previousBlock = canonBlock(kept)
+  const merged = mergeCanonEntries(freshEntries, previousBlock?.entries ?? [])
+
+  if (previousBlock) return replaceCanonBlock(kept, previousBlock, merged)
+  return merged.length === 0 ? kept : appendCanonBlock(kept, merged)
+}
+
+function replaceCanonBlock(kept: string, block: { start: number; end: number }, entries: CanonEntry[]): string {
+  if (entries.length === 0) return kept.slice(0, block.start) + kept.slice(afterOptionalBlankLine(kept, block.end))
+  return kept.slice(0, block.start) + canonBlockText(entries) + kept.slice(block.end)
+}
+
+/** `at`, skipped past one blank line if the line starting there is empty. */
+function afterOptionalBlankLine(content: string, at: number): number {
+  return content.slice(at, lineEndAt(content, at)) === '' ? afterLine(content, at) : at
+}
+
+/** A CANON? checklist appended at the end of `kept`'s Direction body, ahead of whatever heading follows it — for a note that had none yet. */
+function appendCanonBlock(kept: string, entries: CanonEntry[]): string {
+  const bodyStart = afterLine(kept, 0)
+  const heading = /^#{1,6}[ \t]+.*$/gm
+  heading.lastIndex = bodyStart
+  const next = heading.exec(kept)
+  const bodyEnd = next ? next.index : kept.length
+
+  const body = kept.slice(bodyStart, bodyEnd).replace(/\s+$/, '')
+  const block = canonBlockText(entries).replace(/\n$/, '')
+  const newBody = `${body === '' ? '' : `${body}\n\n`}${block}\n`
+  return `${kept.slice(0, bodyStart)}${newBody}\n${kept.slice(bodyEnd).replace(/^\s+/, '')}`
 }
 
 /**
