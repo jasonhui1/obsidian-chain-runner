@@ -98,14 +98,14 @@ export class DirectingView extends ItemView {
       askRoom: question => this.written(runId => this.holds.askRoom(runId, question)),
       change: text => this.written(runId => this.holds.change(runId, text)),
       editProposal: (proposal, text) => this.written(runId => this.holds.editProposal(runId, proposal, text)),
-      revise: async (turn, onStep) => {
+      revise: async (turn, onProgress) => {
         const runId = this.runId
-        if (runId) await this.follow(runId, await this.holds.revise(runId, turn, onStep))
+        if (runId) await this.follow(runId, await this.holds.revise(runId, turn, onProgress))
       },
       resume: runId => this.holds.resume(runId),
-      rerun: async onStep => {
+      rerun: async onProgress => {
         const runId = this.runId
-        if (runId) await this.follow(runId, await this.holds.rerun(runId, onStep))
+        if (runId) await this.follow(runId, await this.holds.rerun(runId, onProgress))
       },
       sideQuest: (proposal, chain) => this.written(runId => this.holds.sideQuest(runId, proposal, chain)),
       chains: () => this.holds.chains(),

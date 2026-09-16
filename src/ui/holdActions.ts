@@ -2,7 +2,7 @@ import type { App, TAbstractFile, TFile } from 'obsidian'
 import type { AskTheRoom } from './askTheRoom'
 import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
-import type { OnRerunStep } from './rerunAndRefresh'
+import type { OnRerunProgress } from './rerunAndRefresh'
 import type { RerunDownstream } from './rerunDownstream'
 import type { Resume, ResumeResult } from './resume'
 import type { RunPanels } from './runPanels'
@@ -35,7 +35,7 @@ export type { ConversationEntry } from '../run/conversation'
 export { sameTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
 export { canonNote, type CanonOutcome, type ResumeResult } from './resume'
-export type { OnRerunStep, RerunStep } from './rerunAndRefresh'
+export type { OnRerunProgress, RerunProgress, RerunStep } from './rerunAndRefresh'
 
 /** A chat reply that can become its proposal's revision. */
 export type RepliedTurn = Required<ChatTurn>
@@ -102,9 +102,9 @@ export class HoldActions {
   }
 
   /** The edited proposals rerun downstream; answers the run the hold now lives under. */
-  async rerun(runId: string, onStep?: OnRerunStep): Promise<string | undefined> {
+  async rerun(runId: string, onProgress?: OnRerunProgress): Promise<string | undefined> {
     const found = await this.holdFile(runId)
-    return found && this.deps.rerun.rerun(found.file, found.content, onStep)
+    return found && this.deps.rerun.rerun(found.file, found.content, onProgress)
   }
 
   /** A free-text CHANGE line in the Direction; whether it was written. */
@@ -159,10 +159,10 @@ export class HoldActions {
   }
 
   /** A reply made its proposal's revision and rerun downstream; answers the run the hold now lives under. */
-  async revise(runId: string, turn: RepliedTurn, onStep?: OnRerunStep): Promise<string | undefined> {
+  async revise(runId: string, turn: RepliedTurn, onProgress?: OnRerunProgress): Promise<string | undefined> {
     const found = await this.holdFile(runId)
     const mark = (content: string, newRunId: string): string => markTurnRevised(content, turn, newRunId)
-    return found && this.deps.chat.revise(found.file, found.heading, turn, mark, onStep)
+    return found && this.deps.chat.revise(found.file, found.heading, turn, mark, onProgress)
   }
 
   /** Writes the hold for a run that has none. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { descendants, rerunRequest } from '@/run/rerun'
+import { descendants, rerunRequest, rerunningPanels } from '@/run/rerun'
 import type { AgentOutput, LayoutPanel, RunGraph, RunMeta } from '@/engine/types'
 
 /**
@@ -56,6 +56,26 @@ describe('descendants', () => {
 
   it('reaches no sibling that only shares an upstream', () => {
     expect(descendants(graph, 'gameplay-director').has('world-director')).toBe(false)
+  })
+})
+
+describe('rerunningPanels', () => {
+  const relay = [panel('gameplay-director'), panel('world-director'), { ...panel('creative-director'), emphasis: 'join' as const }]
+  const relayGraph: RunGraph = {
+    edges: [
+      { fromNode: 'gameplay-director', toNode: 'world-director' },
+      { fromNode: 'world-director', toNode: 'creative-director' },
+    ],
+  }
+  const relayRun = run({ graph: relayGraph, agentOutputs: relay.map(one => output(one.node)) })
+
+  it('names the panels whose node has no output to replay', () => {
+    const request = rerunRequest(relayRun, relay, { 'gameplay-director': 'Halo is a burden.' }, undefined)
+    expect(rerunningPanels(relay, request!).map(one => one.name)).toEqual(['world-director', 'creative-director'])
+  })
+
+  it('names none when every node is replayed', () => {
+    expect(rerunningPanels(relay, { seedPrompt: '', branchOutputs: relayRun.agentOutputs })).toEqual([])
   })
 })
 

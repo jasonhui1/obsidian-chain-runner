@@ -17,6 +17,12 @@ export function descendants(graph: RunGraph, nodeId: string): Set<string> {
   return reached
 }
 
+/** The panels a rerun writes again: those whose node has no output to replay. */
+export function rerunningPanels(panels: LayoutPanel[], request: RunRequest): LayoutPanel[] {
+  const replayed = new Set(request.branchOutputs?.map(output => output.nodeId))
+  return panels.filter(panel => !replayed.has(panel.node))
+}
+
 /**
  * Replays every output outside the revised nodes' descendants, plus each
  * revision (keyed by node id) as its node's output — omitted, it would regenerate.

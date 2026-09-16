@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { HoldActions, PROPOSAL_HEADING, type RerunStep } from '@/ui/holdActions'
+import { HoldActions, PROPOSAL_HEADING, type RerunProgress } from '@/ui/holdActions'
 import { HoldNotes } from '@/ui/holdNotes'
 import { AskTheRoom, NOBODY_ANSWERED } from '@/ui/askTheRoom'
 import { ChatWithProposer } from '@/ui/chatWithProposer'
@@ -438,7 +438,7 @@ describe('rerun', () => {
     expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
   })
 
-  it('reports each step the engine starts, named as its card is, and whether it writes the verdict', async () => {
+  it('says what it writes again, then each step the engine starts, named as its card is', async () => {
     rerunFrames = [
       { type: 'run_start', runId: NEW },
       { type: 'agent_start', agentName: 'critic', nodeId: 'scratch', step: 0 },
@@ -447,11 +447,13 @@ describe('rerun', () => {
     ]
     const actions = makeActions()
     await actions.editProposal(RUN, 'world', 'The world is real.')
-    const steps: RerunStep[] = []
-    await actions.rerun(RUN, step => steps.push(step))
-    expect(steps).toEqual([
-      { name: 'critic', writesVerdict: false },
-      { name: 'creative-director', writesVerdict: true },
+    const heard: RerunProgress[] = []
+    await actions.rerun(RUN, progress => heard.push(progress))
+    const plan = { verdict: true, proposals: [] }
+    expect(heard).toEqual([
+      plan,
+      { ...plan, step: { name: 'critic', writesVerdict: false } },
+      { ...plan, step: { name: 'creative-director', writesVerdict: true } },
     ])
   })
 
@@ -627,15 +629,15 @@ describe('revise', () => {
     expect(Object.keys(notes)).toEqual([NEW_PATH])
   })
 
-  it('reports each step the engine starts', async () => {
+  it('says what it writes again, and each step the engine starts', async () => {
     rerunFrames = [
       { type: 'run_start', runId: NEW },
       { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 },
       { type: 'run_complete', runId: NEW },
     ]
-    const steps: RerunStep[] = []
-    await makeActions().revise(RUN, turn, step => steps.push(step))
-    expect(steps).toEqual([{ name: 'creative-director', writesVerdict: true }])
+    const heard: RerunProgress[] = []
+    await makeActions().revise(RUN, turn, progress => heard.push(progress))
+    expect(heard.at(-1)).toEqual({ verdict: true, proposals: [], step: { name: 'creative-director', writesVerdict: true } })
   })
 
   it('leaves the hold where it was when the rerun fails', async () => {

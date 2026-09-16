@@ -1,6 +1,6 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { readIfPresent } from './vaultWrite'
-import { fetchRun, rerunAndRefresh, type OnRerunStep } from './rerunAndRefresh'
+import { fetchRun, rerunAndRefresh, type OnRerunProgress } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { holdHeading, proposalEdits } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
@@ -28,7 +28,7 @@ export class RerunDownstream {
   }
 
   /** Reruns downstream of the edited proposals in `content`, the hold note's as read; answers the run the note now lives under. */
-  async rerun(file: TFile, content: string, onStep?: OnRerunStep): Promise<string | undefined> {
+  async rerun(file: TFile, content: string, onProgress?: OnRerunProgress): Promise<string | undefined> {
     const { app, engine, notify } = this.deps
     const heading = holdHeading(content)
     if (!heading) {
@@ -53,7 +53,7 @@ export class RerunDownstream {
 
     return rerunAndRefresh(this.deps, file, heading, panels, request, {
       proposalsStale: current => !sameEdits(proposalEdits(current, panels), edits),
-      onStep,
+      onProgress,
     })
   }
 }

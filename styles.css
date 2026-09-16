@@ -872,7 +872,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.chain-runner-directing-verdict.is-stale {
+.chain-runner-directing-verdict.is-stale,
+.chain-runner-directing-proposal.is-stale {
   opacity: 0.5;
 }
 

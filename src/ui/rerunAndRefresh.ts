@@ -1,7 +1,8 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { holdNotePath, refreshHoldNote, thoughtsByNode, verdictPanel, type HoldHeading } from '../run/holdNote'
+import { holdNotePath, proposerPanels, refreshHoldNote, thoughtsByNode, verdictPanel, type HoldHeading } from '../run/holdNote'
+import { rerunningPanels } from '../run/rerun'
 import type { EngineClient } from '../engine/client'
 import type { AgentStartEvent, LayoutModel, LayoutPanel, RunMeta, RunRequest } from '../engine/types'
 
@@ -34,14 +35,21 @@ export interface RerunStep {
   writesVerdict: boolean
 }
 
-export type OnRerunStep = (step: RerunStep) => void
+/** What a rerun writes again — the verdict, and proposals by name — and the step it is on, once it has started one. */
+export interface RerunProgress {
+  verdict: boolean
+  proposals: string[]
+  step?: RerunStep
+}
+
+export type OnRerunProgress = (progress: RerunProgress) => void
 
 export interface RerunAndRefreshHooks {
   /** Edits the freshly re-read note before folding — a chat-driven revise's way to mark its `revise` line done. */
   beforeRefresh?: (content: string, newRunId: string) => string
   /** True when the freshly re-read note's proposals no longer match what the request was built from — the refresh would discard them, so it is skipped instead. */
   proposalsStale?: (current: string) => boolean
-  onStep?: OnRerunStep | undefined
+  onProgress?: OnRerunProgress | undefined
 }
 
 /** Runs `request` from a run shown as `panels`, then refreshes the hold note with the run it lands on and renames it to that run; answers that run once the note is under it. */
@@ -56,9 +64,12 @@ export async function rerunAndRefresh(
   const { app, engine, notify } = deps
   const beforeRefresh = hooks.beforeRefresh ?? (content => content)
   const verdictNode = verdictPanel(panels)?.node
+  const rerunning = rerunningPanels(panels, request)
+  const plan = { verdict: rerunning.some(panel => panel.node === verdictNode), proposals: proposerPanels(rerunning).map(panel => panel.name) }
+  hooks.onProgress?.(plan)
   const onStart = ({ agentName, nodeId }: AgentStartEvent): void => {
     const name = panels.find(panel => panel.node === nodeId)?.name ?? agentName
-    hooks.onStep?.({ name, writesVerdict: nodeId === verdictNode })
+    hooks.onProgress?.({ ...plan, step: { name, writesVerdict: nodeId === verdictNode } })
   }
   const outcome = await deps.withEngine(() => runHeadless(engine, request, onStart))
   if (!outcome) return undefined

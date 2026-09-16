@@ -7,8 +7,8 @@ import {
   type HoldProposal,
   type HoldReading,
   type RepliedTurn,
-  type OnRerunStep,
-  type RerunStep,
+  type OnRerunProgress,
+  type RerunProgress,
   type ResumeResult,
   sameTurn,
 } from './holdActions'
@@ -29,12 +29,12 @@ export interface DirectingBoardDeps {
   chat: (proposal: string, message: string) => Promise<boolean>
   askRoom: (question: string) => Promise<boolean>
   change: (text: string) => Promise<boolean>
-  /** Each rerun tells `onStep` the step the engine has started. */
-  revise: (turn: RepliedTurn, onStep: OnRerunStep) => Promise<void>
+  /** Each rerun tells `onProgress` what it writes again, and each step the engine starts. */
+  revise: (turn: RepliedTurn, onProgress: OnRerunProgress) => Promise<void>
   /** Answers whether the proposal’s new words reached the hold. */
   editProposal: (proposal: string, text: string) => Promise<boolean>
   /** Reruns downstream of every edited proposal. */
-  rerun: (onStep: OnRerunStep) => Promise<void>
+  rerun: (onProgress: OnRerunProgress) => Promise<void>
   /** Runs the hold's Direction as develop-direction; `undefined` when nothing ran. */
   resume: (runId: string) => Promise<ResumeResult | undefined>
   /** Answers whether the side quest's result reached the hold. */
@@ -140,7 +140,9 @@ export class DirectingBoard {
     this.tabButton(tabs, 'Run', undefined, !proposal)
     for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal)
     this.rerunBar(body, hold)
-    if (proposal) this.progress(body, hold.runId)
+    const going = this.rerunning.get(hold.runId)
+    const rewritten = proposal !== undefined && going?.progress?.proposals.includes(proposal.name) === true
+    if (going && rewritten) this.progress(body, going)
 
     if (!proposal) {
       this.pitch(body, hold.runId)
@@ -164,7 +166,7 @@ export class DirectingBoard {
     const key = editKey(hold.runId, proposal.name)
     const edit = this.edits.get(key)
     if (edit) this.drawEditor(top, key, proposal.name, edit)
-    else this.proposalText(top, hold.runId, proposal.name, proposal.text)
+    else this.proposalText(top, hold.runId, proposal.name, proposal.text, rewritten)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
     this.chat(this.section(body, `Chat with ${proposal.name}`), hold, proposal.name)
@@ -257,7 +259,7 @@ export class DirectingBoard {
     const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = !this.canRerun(hold)
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, onStep => this.deps.revise(turn, onStep)))
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, onProgress => this.deps.revise(turn, onProgress)))
   }
 
   /** What the last resume landed on, shown where the Run tab opens. A failed run says so in the bar instead. */
@@ -316,7 +318,7 @@ export class DirectingBoard {
     const going = this.rerunning.get(hold.runId)?.from
     const button = this.button(bar, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', 'mod-cta')
     button.disabled = !this.canRerun(hold)
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, onStep => this.deps.rerun(onStep)))
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, onProgress => this.deps.rerun(onProgress)))
   }
 
   /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
@@ -328,23 +330,27 @@ export class DirectingBoard {
     return hold.proposals.some(one => this.edits.has(editKey(hold.runId, one.name)))
   }
 
-  /** The old verdict stays, greyed, under what the rerun is doing, until the run it lands on replaces it. */
+  /**
+   * A rerun that writes the verdict again greys the old one under what it is doing,
+   * until the run it lands on replaces it. Until it says, it is taken to.
+   */
   private verdict(body: HTMLElement, hold: HoldReading): void {
-    const going = this.rerunning.has(hold.runId)
-    if (!hold.verdict && !going) return
+    const going = this.rerunning.get(hold.runId)
+    const rewriting = going !== undefined && going.progress?.verdict !== false
+    if (!hold.verdict && !rewriting) return
     const section = this.section(body, 'Verdict')
-    this.progress(section, hold.runId)
+    if (rewriting) this.progress(section, going)
     if (!hold.verdict) return
-    const old = this.add(section, 'div', going ? `${CLS}-verdict is-stale` : `${CLS}-verdict`)
+    const old = this.add(section, 'div', `${CLS}-verdict`)
+    old.classList.toggle('is-stale', going?.progress?.verdict === true)
     this.markdown(old, hold.verdict)
   }
 
-  /** The step the run's rerun is on, and how long it has gone; nothing while none goes. */
-  private progress(el: HTMLElement, runId: string): void {
-    const going = this.rerunning.get(runId)
-    if (!going) return
+  /** The step a rerun is on, and how long it has gone. */
+  private progress(el: HTMLElement, going: Rerun): void {
     const line = this.add(el, 'div', `${CLS}-progress`)
-    const doing = !going.step ? 'Starting the rerun' : `${going.step.name} ${going.step.writesVerdict ? 'is writing a new verdict' : 'is running'}`
+    const step = going.progress?.step
+    const doing = !step ? 'Starting the rerun' : `${step.name} ${step.writesVerdict ? 'is writing a new verdict' : 'is running'}`
     const show = (): void => {
       line.textContent = `⟳ ${doing}… ${elapsed(this.deps.now() - going.startedAt)}`
     }
@@ -352,19 +358,19 @@ export class DirectingBoard {
     this.releases.push(this.deps.every(1000, show))
   }
 
-  private async startRerun(hold: HoldReading, from: RerunFrom, rerun: (onStep: OnRerunStep) => Promise<void>): Promise<void> {
+  private async startRerun(hold: HoldReading, from: RerunFrom, rerun: (onProgress: OnRerunProgress) => Promise<void>): Promise<void> {
     const runId = hold.runId
     if (!this.canRerun(hold)) return
     const going: Rerun = { from, startedAt: this.deps.now() }
     this.rerunning.set(runId, going)
     this.draw(this.state)
-    const onStep = (step: RerunStep): void => {
+    const onProgress = (progress: RerunProgress): void => {
       if (this.rerunning.get(runId) !== going) return
-      going.step = step
+      going.progress = progress
       this.draw(this.state)
     }
     try {
-      await rerun(onStep)
+      await rerun(onProgress)
     } finally {
       this.rerunning.delete(runId)
       this.draw(this.state)
@@ -417,8 +423,10 @@ export class DirectingBoard {
     option.value = value
   }
 
-  private proposalText(el: HTMLElement, runId: string, name: string, text: string): void {
+  /** A `stale` proposal is being written again, so it is shown greyed. */
+  private proposalText(el: HTMLElement, runId: string, name: string, text: string, stale: boolean): void {
     const shown = this.add(el, 'div', `${CLS}-proposal`)
+    shown.classList.toggle('is-stale', stale)
     this.markdown(shown, text || '*This proposal is empty.*')
     const whole = this.unclamped.has(name)
     shown.classList.toggle('is-clamped', !whole)
@@ -539,11 +547,11 @@ type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>
 
 type RerunFrom = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn }
 
-/** A rerun going: what it was started from, when, and the step the engine is on. */
+/** A rerun going: what it was started from, when, and how it is getting on once it has said. */
 interface Rerun {
   from: RerunFrom
   startedAt: number
-  step?: RerunStep
+  progress?: RerunProgress
 }
 
 /** A resume from the panel: going, landed, or stopped before it ran. */
