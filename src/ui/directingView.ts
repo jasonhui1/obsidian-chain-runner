@@ -42,6 +42,7 @@ export class DirectingView extends ItemView {
   override async onClose(): Promise<void> {
     this.stopListening?.()
     this.stopListening = this.runId = undefined
+    this.made?.close()
     this.made?.draw({ kind: 'idle' })
   }
 

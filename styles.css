@@ -976,6 +976,11 @@
   color: var(--text-faint);
 }
 
+/* Both classes together is a list's own marker, rather than the line it opens. */
+.chain-runner-md-list.chain-runner-md-mark {
+  color: var(--list-marker-color);
+}
+
 .chain-runner-directing-footer {
   display: flex;
   flex-direction: column;

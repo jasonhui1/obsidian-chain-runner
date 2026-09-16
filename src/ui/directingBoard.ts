@@ -63,11 +63,8 @@ export class DirectingBoard {
   private readonly rerunning = new Map<string, RerunFrom>()
   /** Each run's resume, while it goes and once it has landed. */
   private readonly resumes = new Map<string, ResumeShown>()
-  /** Each proposal being edited, by `editKey`, and the editor holding the words. */
-  private readonly editing = new Map<string, ProposalEditor>()
-  /** How each open editor tells its Save button the words changed; redrawn with it. */
-  private readonly savers = new Map<string, () => void>()
-  private readonly saving = new Set<string>()
+  /** Each proposal being edited, by `editKey`. */
+  private readonly edits = new Map<string, OpenEdit>()
   /** The chains the engine named when a tab was last opened. */
   private chains: string[] = []
   private releases: (() => void)[] = []
@@ -84,11 +81,16 @@ export class DirectingBoard {
     this.showTab(state, proposal)
   }
 
+  /** Lets go of every open editor; the panel is going away. */
+  close(): void {
+    for (const key of [...this.edits.keys()]) this.closeEdit(key)
+  }
+
   /** Redraws what the hold now says, keeping the reader's tab and scroll. */
   draw(state: DirectingState): void {
     this.state = state
     const scroll = this.body?.scrollTop ?? 0
-    const typing = [...this.editing.values()].find(editor => editor.hasFocus())
+    const typing = [...this.edits.values()].find(edit => edit.editor.hasFocus())
     const keepTyping = this.boxes.keepTyping(this.root)
     this.releases.forEach(release => release())
     this.releases = []
@@ -105,7 +107,7 @@ export class DirectingBoard {
     }
     body.scrollTop = scroll
     keepTyping()
-    typing?.focus()
+    typing?.editor.focus()
   }
 
   private header(): void {
@@ -153,8 +155,8 @@ export class DirectingBoard {
     const top = this.section(body)
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
     const key = editKey(hold.runId, proposal.name)
-    const editing = this.editing.get(key)
-    if (editing) this.editor(top, key, proposal.name, editing)
+    const edit = this.edits.get(key)
+    if (edit) this.drawEditor(top, key, proposal.name, edit)
     else this.proposalText(top, hold.runId, proposal.name, proposal.text)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
@@ -177,7 +179,7 @@ export class DirectingBoard {
     }
     const pending = this.boxes.waiting(key)
     if (pending !== undefined) this.add(this.turn(el, `Sent through ${pending}`), 'div', `${CLS}-faint`, `${pending} is running…`)
-    if (this.editing.has(editKey(hold.runId, name))) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
+    if (this.edits.has(editKey(hold.runId, name))) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
     this.boxes.draw(el, {
       key,
       placeholder: 'Chain to send it through…',
@@ -316,7 +318,7 @@ export class DirectingBoard {
   }
 
   private editOpen(hold: HoldReading): boolean {
-    return hold.proposals.some(one => this.editing.has(editKey(hold.runId, one.name)))
+    return hold.proposals.some(one => this.edits.has(editKey(hold.runId, one.name)))
   }
 
   private async startRerun(hold: HoldReading, from: RerunFrom, rerun: () => Promise<void>): Promise<void> {
@@ -390,7 +392,8 @@ export class DirectingBoard {
     edit.disabled = this.rerunning.has(runId)
     edit.addEventListener('click', () => {
       const key = editKey(runId, name)
-      this.editing.set(key, this.deps.openEditor(text, () => this.savers.get(key)?.()))
+      const open: OpenEdit = { editor: this.deps.openEditor(text, () => open.refreshSave()), saving: false, refreshSave: () => {} }
+      this.edits.set(key, open)
       this.draw(this.state)
     })
     toggle.addEventListener('click', () => {
@@ -408,14 +411,14 @@ export class DirectingBoard {
   }
 
   /** The editor outlives the redraw, so it is put back rather than made again. */
-  private editor(el: HTMLElement, key: string, name: string, editing: ProposalEditor): void {
+  private drawEditor(el: HTMLElement, key: string, name: string, edit: OpenEdit): void {
     const frame = this.add(el, 'div', `${CLS}-editor`)
-    frame.append(editing.el)
+    frame.append(edit.editor.el)
     const row = this.add(frame, 'div', `${CLS}-editor-actions`)
     const save = this.button(row, 'Save', 'mod-cta')
-    const savable = (): boolean => !this.saving.has(key) && editing.text().trim() !== ''
+    const savable = (): boolean => !edit.saving && edit.editor.text().trim() !== ''
     save.disabled = !savable()
-    this.savers.set(key, () => void (save.disabled = !savable()))
+    edit.refreshSave = () => void (save.disabled = !savable())
     save.addEventListener('click', () => void this.save(key, name))
     this.button(row, 'Cancel', '').addEventListener('click', () => {
       this.closeEdit(key)
@@ -424,20 +427,19 @@ export class DirectingBoard {
   }
 
   private closeEdit(key: string): void {
-    this.editing.get(key)?.destroy()
-    this.editing.delete(key)
-    this.savers.delete(key)
+    this.edits.get(key)?.editor.destroy()
+    this.edits.delete(key)
   }
 
   private async save(key: string, name: string): Promise<void> {
-    const editing = this.editing.get(key)
-    if (!editing || this.saving.has(key)) return
-    this.saving.add(key)
+    const edit = this.edits.get(key)
+    if (!edit || edit.saving) return
+    edit.saving = true
     this.draw(this.state)
     try {
-      if (await this.deps.editProposal(name, editing.text())) this.closeEdit(key)
+      if (await this.deps.editProposal(name, edit.editor.text())) this.closeEdit(key)
     } finally {
-      this.saving.delete(key)
+      edit.saving = false
       this.draw(this.state)
     }
   }
@@ -487,6 +489,13 @@ export class DirectingBoard {
     parent.append(el)
     return el
   }
+}
+
+/** A proposal being edited: the live editor, whether its words are on their way to the hold, and how its Save button hears about a change. */
+interface OpenEdit {
+  editor: ProposalEditor
+  saving: boolean
+  refreshSave: () => void
 }
 
 type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>

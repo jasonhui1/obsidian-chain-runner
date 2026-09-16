@@ -383,6 +383,16 @@ describe('a proposal tab, editing', () => {
     expect(editors[0]!.destroyed).toBe(false)
     expect(editors).toHaveLength(1)
   })
+
+  it('lets go of every open editor when the panel goes away', () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    open()
+    panel.close()
+    panel.draw({ kind: 'idle' })
+    expect(editors[0]!.destroyed).toBe(true)
+    expect(editor()).toBeNull()
+  })
 })
 
 describe('rerunning downstream', () => {

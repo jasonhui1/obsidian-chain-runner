@@ -20,11 +20,21 @@ const open = (text: string): ReturnType<typeof markdownEditor> => {
 const marked = (cls: string): string[] =>
   Array.from(host.querySelectorAll(`.${cls}`)).map(el => el.textContent ?? '')
 
+const view = (editor: { el: HTMLElement }): EditorView => {
+  const found = EditorView.findFromDOM(editor.el)
+  if (!found) throw new Error('the editor has no view')
+  return found
+}
+
+/** Presses a key on the editor's text, the way the reader's keys reach it. */
+const press = (editor: { el: HTMLElement }, key: string, ctrlKey = false): void => {
+  view(editor).contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true }))
+}
+
 /** Types over everything in the editor, the way the reader's keys reach it. */
 const retype = (editor: { el: HTMLElement }, words: string): void => {
-  const view = EditorView.findFromDOM(editor.el)
-  if (!view) throw new Error('the editor has no view')
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: words } })
+  const on = view(editor)
+  on.dispatch({ changes: { from: 0, to: on.state.doc.length, insert: words } })
 }
 
 beforeEach(() => {
@@ -75,9 +85,26 @@ describe('the proposal editor', () => {
     editor.destroy()
   })
 
-  it('marks a list’s bullet', () => {
+  it('marks a list’s bullet as a list’s own marker', () => {
     const editor = open('- one\n- two\n')
-    expect(marked('chain-runner-md-mark')).toContain('-')
+    const bullets = Array.from(host.querySelectorAll('.chain-runner-md-list.chain-runner-md-mark'))
+    expect(bullets.map(el => el.textContent)).toEqual(['-', '-'])
+    editor.destroy()
+  })
+
+  it('takes Ctrl+Z back to the words before the change', () => {
+    const editor = open('Before.')
+    retype(editor, 'After.')
+    press(editor, 'z', true)
+    expect(editor.text()).toBe('Before.')
+    editor.destroy()
+  })
+
+  it('rubs out a letter on Backspace', () => {
+    const editor = open('Words')
+    view(editor).dispatch({ selection: { anchor: 5 } })
+    press(editor, 'Backspace')
+    expect(editor.text()).toBe('Word')
     editor.destroy()
   })
 
