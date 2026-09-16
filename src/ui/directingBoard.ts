@@ -10,6 +10,7 @@ import {
   type OnRerunProgress,
   type RerunProgress,
   type ResumeResult,
+  rerunDoing,
   sameTurn,
 } from './holdActions'
 import type { ProposalEditor } from './proposalEditor'
@@ -348,10 +349,9 @@ export class DirectingBoard {
   /** The step a rerun is on, and how long it has gone. */
   private progress(el: HTMLElement, going: Rerun): void {
     const line = this.add(el, 'div', `${CLS}-progress`)
-    const step = going.progress?.step
-    const doing = !step ? 'Starting the rerun' : step.writesVerdict ? 'Writing a new verdict' : `${step.name} is running`
+    const doing = rerunDoing(going.progress?.step)
     const show = (): void => {
-      line.textContent = `⟳ ${doing}… ${elapsed(this.deps.now() - going.startedAt)}`
+      line.textContent = `${doing} ${elapsed(this.deps.now() - going.startedAt)}`
     }
     show()
     this.releases.push(this.deps.every(1000, show))

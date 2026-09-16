@@ -1,7 +1,7 @@
 import { LINK_BLUE } from './ink'
 import { linkpathOf, type Box, type SceneShape } from './nodeScene'
-import { sourceRunId } from '../run/provenance'
-import { FRAME_PADDING } from '../run/runFrame'
+import { sourceNote } from '../run/provenance'
+import { FRAME_PADDING, renameRunFrame } from '../run/runFrame'
 
 /**
  * The `✎ Direct` label on a run's frame, and which run a selection on the
@@ -73,9 +73,8 @@ export function cardProposal(element: SceneShape, frontmatter: NoteFrontmatter):
   if (element.type !== 'embeddable' && element.type !== 'iframe') return undefined
   const linkpath = linkpathOf(element.link)
   const front = linkpath ? frontmatter(linkpath) : undefined
-  const runId = sourceRunId(front)
-  const proposal = (front as Record<string, unknown> | undefined)?.['output']
-  return runId && typeof proposal === 'string' ? { runId, proposal } : undefined
+  const note = sourceNote(front)
+  return note && { runId: note.runId, proposal: note.output }
 }
 
 /**
@@ -88,4 +87,50 @@ export function selectedRunId(selected: readonly SceneShape[], frontmatter: Note
     if (run) return run
   }
   return undefined
+}
+
+/** A label directing `runId`, keeping whatever else the element carries. */
+export function relabel(custom: unknown, runId: string): Record<string, unknown> {
+  const rest = typeof custom === 'object' && custom !== null ? (custom as Record<string, unknown>) : {}
+  return { ...rest, [DATA_KEY]: { runId } }
+}
+
+/** An element as a rerun's landing reads it: a frame has a name, and anything may sit in one. */
+export interface FramedShape extends SceneShape {
+  frameId?: string | null
+  name?: string | null
+}
+
+/** What a landed rerun moves on, on one drawing: each card by the output it shows, the labels, and their frames' new names. */
+export interface RerunScene<E> {
+  cards: { element: E; output: string }[]
+  labels: E[]
+  frames: { element: E; name: string }[]
+}
+
+/**
+ * What on a drawing shows any of `from` — the runs a hold was under — for a
+ * rerun that landed as `to`; `undefined` when nothing does.
+ */
+export function rerunScene<E extends FramedShape>(
+  scene: readonly E[],
+  from: readonly string[],
+  to: string,
+  frontmatter: NoteFrontmatter,
+): RerunScene<E> | undefined {
+  const fromRuns = (runId: string | undefined): boolean => runId !== undefined && from.includes(runId)
+  const cards = scene.flatMap(element => {
+    const card = cardProposal(element, frontmatter)
+    return card && fromRuns(card.runId) ? [{ element, output: card.proposal }] : []
+  })
+  const labels = scene.filter(element => fromRuns(directLabelRunId(element)))
+  if (cards.length === 0 && labels.length === 0) return undefined
+
+  const framed = new Set([...cards.map(card => card.element), ...labels].map(element => element.frameId))
+  const frames = scene.flatMap(element => {
+    if (element.type !== 'frame' || !framed.has(element.id)) return []
+    const name = element.name && renameRunFrame(element.name, from, to)
+    return name ? [{ element, name }] : []
+  })
+  return { cards, labels, frames }
 }

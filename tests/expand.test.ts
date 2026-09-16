@@ -128,6 +128,8 @@ function makeExpand(): Expand {
     selection: () => block,
     selectedProposal: () => selectedProposal,
     selectedRun: () => undefined,
+    openViews: () => [],
+    followRerun: () => Promise.resolve(false),
     cardProposal: () => undefined,
     placeProposals: (proposals, source) => {
       placed.push({ proposals, sourceId: source.id })

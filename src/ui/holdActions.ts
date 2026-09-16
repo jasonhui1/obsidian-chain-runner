@@ -35,7 +35,7 @@ export type { ConversationEntry } from '../run/conversation'
 export { sameTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
 export { canonNote, type CanonOutcome, type ResumeResult } from './resume'
-export type { OnRerunProgress, RerunProgress, RerunStep } from '../run/rerunProgress'
+export { rerunDoing, type OnRerunProgress, type RerunProgress, type RerunStep } from '../run/rerunProgress'
 
 /** A chat reply that can become its proposal's revision. */
 export type RepliedTurn = Required<ChatTurn>

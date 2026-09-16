@@ -35,6 +35,19 @@ const SHRINK = 0.82
 /** Below this a panel is a sliver rather than something to read. */
 const MIN_WIDTH = 160
 
+const NAME_SEPARATOR = ' · '
+
+/** A frame's title, as the reader sees it. */
+function runFrameName(chainName: string, runId: string): string {
+  return `${chainName}${NAME_SEPARATOR}${runId}`
+}
+
+/** A title `buildRunFrame` wrote for one of `from`, naming `to` instead; `undefined` for a title the reader chose. */
+export function renameRunFrame(name: string, from: readonly string[], to: string): string | undefined {
+  const old = from.find(runId => name.endsWith(`${NAME_SEPARATOR}${runId}`))
+  return old && runFrameName(name.slice(0, -(NAME_SEPARATOR.length + old.length)), to)
+}
+
 /** The frame for a run, to the right of the node that produced it and top-aligned with it. */
 export function buildRunFrame(input: {
   layout: RunLayout
@@ -49,7 +62,7 @@ export function buildRunFrame(input: {
   const bounds = extent(placed.map(one => one.box))
 
   return {
-    name: `${chainName} · ${runId}`,
+    name: runFrameName(chainName, runId),
     runId,
     box: {
       x: origin.x,

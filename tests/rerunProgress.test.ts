@@ -26,7 +26,7 @@ describe('RerunProgressTracker', () => {
   it('writes again the cards the first frame has waiting, and no card it has filled', () => {
     const tracker = new RerunProgressTracker()
     const heard = tracker.hear(frame(panel('gameplay', 'filled'), panel('world', 'pending'), panel('verdict', 'pending', 'join')))
-    expect(heard).toEqual({ verdict: true, proposals: ['world'] })
+    expect(heard).toEqual({ verdict: true, proposals: ['world'], cards: ['world', 'verdict'] })
   })
 
   it('names the step by its card, or else by its agent, and says whether it writes the verdict', () => {
@@ -39,12 +39,12 @@ describe('RerunProgressTracker', () => {
   it('keeps a card written again once it fills, since what it holds lands only with the run', () => {
     const tracker = new RerunProgressTracker()
     tracker.hear(frame(panel('world', 'pending'), panel('verdict', 'pending', 'join')))
-    expect(tracker.hear(frame(panel('world', 'filled'), panel('verdict', 'pending', 'join')))).toEqual({ verdict: true, proposals: ['world'] })
+    expect(tracker.hear(frame(panel('world', 'filled'), panel('verdict', 'pending', 'join')))).toEqual({ verdict: true, proposals: ['world'], cards: ['world', 'verdict'] })
   })
 
   it('lets go of a card the engine skips', () => {
     const tracker = new RerunProgressTracker()
     tracker.hear(frame(panel('world', 'pending'), panel('verdict', 'pending', 'join')))
-    expect(tracker.hear(frame(panel('world', 'skipped'), panel('verdict', 'pending', 'join')))).toEqual({ verdict: true, proposals: [] })
+    expect(tracker.hear(frame(panel('world', 'skipped'), panel('verdict', 'pending', 'join')))).toEqual({ verdict: true, proposals: [], cards: ['verdict'] })
   })
 })

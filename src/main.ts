@@ -3,6 +3,7 @@ import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
+import { RerunWatch } from './run/rerunWatch'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
@@ -31,6 +32,7 @@ import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
 import { RerunDownstream } from './ui/rerunDownstream'
+import { RerunOnDrawing } from './ui/rerunOnDrawing'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
 import { RunPanels } from './ui/runPanels'
 import { Resume } from './ui/resume'
@@ -81,11 +83,14 @@ export default class ChainRunnerPlugin extends Plugin {
       folder: () => this.settings.outputFolder,
       engineUrl: () => this.settings.engineUrl,
     })
-    // Every rendering of an output note says which run wrote it (ADR-0004).
+    // Every rerun reports here, so the drawing follows one wherever it was started.
+    const reruns = new RerunWatch()
+    // Every rendering of an output note says which run wrote it (ADR-0004), and what a rerun is doing to it.
     this.registerMarkdownPostProcessor(
       createSourceRunHeader({
         engineUrl: () => this.settings.engineUrl,
         exists: runId => this.engine.runExists(runId),
+        reruns,
       }),
     )
     // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
@@ -126,6 +131,9 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => this.quickRun.stop())
 
     const surface = createNodeSurface(this.app)
+    // A rerun that lands moves the cards on every open drawing on to the run it landed as.
+    const onDrawing = new RerunOnDrawing({ surface, notes, notify: message => new Notice(message) })
+    this.register(reruns.onLanding(landing => onDrawing.land(landing)))
     const nodeRun = new NodeRun({
       app: this.app,
       engine: this.engine,
@@ -209,6 +217,7 @@ export default class ChainRunnerPlugin extends Plugin {
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
+      reruns,
     })
     const askRoom = new AskTheRoom({
       app: this.app,
@@ -221,6 +230,7 @@ export default class ChainRunnerPlugin extends Plugin {
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
+      reruns,
     })
     const sideQuest = new SideQuest({
       app: this.app,

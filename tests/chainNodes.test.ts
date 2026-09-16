@@ -66,6 +66,8 @@ function makeSurface(): NodeSurface {
     },
     selectedProposal: () => undefined,
     selectedRun: () => undefined,
+    openViews: () => [],
+    followRerun: () => Promise.resolve(false),
     cardProposal: () => undefined,
     placeProposals: async () => {},
     editProposal: async () => false,

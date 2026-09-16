@@ -1,5 +1,7 @@
 import type { MarkdownPostProcessor } from 'obsidian'
-import { resolveSourceRun, sourceRunId, sourceRunLabel, sourceRunLink, type SourceRun } from '../run/provenance'
+import { resolveSourceRun, sourceNote, sourceRunLabel, sourceRunLink, type SourceRun } from '../run/provenance'
+import { rerunDoing } from '../run/rerunProgress'
+import type { RerunWatch } from '../run/rerunWatch'
 import type { RunExistence } from '../engine/types'
 
 /**
@@ -9,10 +11,13 @@ import type { RunExistence } from '../engine/types'
  */
 
 export const SOURCE_RUN_CLASS = 'chain-runner-source-run'
+/** On the rendering while a rerun writes its card again, which greys the words it will replace. */
+export const RERUNNING_CLASS = 'chain-runner-rerunning'
 
 export interface SourceRunHeaderDeps {
   engineUrl: () => string
   exists: (runId: string) => Promise<RunExistence>
+  reruns: Pick<RerunWatch, 'rewriting' | 'onChange'>
 }
 
 /**
@@ -23,8 +28,9 @@ export interface SourceRunHeaderDeps {
 export function createSourceRunHeader(deps: SourceRunHeaderDeps): MarkdownPostProcessor {
   const exists = remembering(deps)
   return (el, ctx) => {
-    const runId = sourceRunId(ctx.frontmatter)
-    if (!runId) return
+    const note = sourceNote(ctx.frontmatter)
+    if (!note) return
+    const { runId } = note
     // The header is the note's, not this section's, and a post-processor runs
     // per section against an element not yet in the document — so both the
     // container and the one-header rule wait for the rendering to land.
@@ -34,8 +40,25 @@ export function createSourceRunHeader(deps: SourceRunHeaderDeps): MarkdownPostPr
       const engineUrl = deps.engineUrl()
       writeSourceRun(header, sourceRunLink(engineUrl, runId))
       void resolveSourceRun({ runId, engineUrl, exists }).then(source => writeSourceRun(header, source))
+      followReruns(header, runId, note.output, deps.reruns)
     })
   }
+}
+
+/** A line under the header saying what a rerun writing this card again is doing; empty while none is. */
+function followReruns(header: HTMLElement, runId: string, card: string, reruns: SourceRunHeaderDeps['reruns']): void {
+  const line = header.ownerDocument.createElement('div')
+  line.className = `${SOURCE_RUN_CLASS}-rerun`
+  header.after(line)
+  const container = header.parentElement
+  const show = (): void => {
+    const rerun = reruns.rewriting(runId, card)
+    line.textContent = rerun ? rerunDoing(rerun.step) : ''
+    container?.classList.toggle(RERUNNING_CLASS, rerun !== undefined)
+  }
+  show()
+  // Tied to the line, not a section: the header outlives the section that made it.
+  const stop = reruns.onChange(() => (line.isConnected ? show() : stop()))
 }
 
 /** The note's own header element, made if this is the first section to ask for it. */

@@ -31,10 +31,11 @@ reader came for, and the panel already says `writing…` in its own notice.
 ## Decision
 
 **Motion is reserved for state that is still in flight, and expressed as an
-infinite pulse.** Five things qualify: the `running` run status, a `writing…`
+infinite pulse.** Six things qualify: the `running` run status, a `writing…`
 panel notice, the status pill before its first check has answered, the result
 view's *Waiting for the first hop*, and the directing panel's line for a rerun
-that is going (`⟳ … is writing a new verdict… 0:42`, #44). Each breathes on `chain-runner-breathe`, whose restart on a redraw is invisible
+that is going (`⟳ … is writing a new verdict… 0:42`, #44), and the same line
+on a drawing's card that rerun is writing again (#45). Each breathes on `chain-runner-breathe`, whose restart on a redraw is invisible
 precisely because it loops.
 
 **Hover and focus transition**, since those are the only state changes that
@@ -58,6 +59,6 @@ anything case by case — and whatever is added later is covered by default.
 
 **A reader loses nothing by turning motion off.** Every pulsing thing also says
 what it is in words: `running`, `writing…`, the pill's `…`, *Waiting for the
-first hop*, and the rerun line's step and timer. Motion is a
+first hop*, and the rerun line's step (and, in the panel, its timer). Motion is a
 second channel here, never the only one — which is also what makes it safe for a
 reader who cannot perceive it.

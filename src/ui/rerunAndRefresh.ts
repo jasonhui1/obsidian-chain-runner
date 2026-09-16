@@ -1,8 +1,9 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { holdNotePath, refreshHoldNote, thoughtsByNode, type HoldHeading } from '../run/holdNote'
+import { holdNotePath, reranFrom, refreshHoldNote, thoughtsByNode, type HoldHeading } from '../run/holdNote'
 import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
+import type { RerunReport, RerunWatch } from '../run/rerunWatch'
 import type { EngineClient } from '../engine/client'
 import type { LayoutModel, RunMeta, RunRequest } from '../engine/types'
 
@@ -17,6 +18,8 @@ export interface RerunAndRefreshDeps {
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
+  /** Hears every rerun, so the drawing follows one no panel started. */
+  reruns: RerunWatch
 }
 
 export interface FetchedRun {
@@ -45,13 +48,35 @@ export async function rerunAndRefresh(
   request: RunRequest,
   hooks: RerunAndRefreshHooks = {},
 ): Promise<string | undefined> {
+  const from = [heading.runId, ...reranFrom(await deps.app.vault.cachedRead(file))]
+  const report = deps.reruns.begin(from)
+  try {
+    return await rerunReported(deps, { file, heading, request, hooks, report })
+  } finally {
+    report.end()
+  }
+}
+
+/** One rerun under way, as `rerunAndRefresh` reports it. */
+interface ReportedRerun {
+  file: TFile
+  heading: HoldHeading
+  request: RunRequest
+  hooks: RerunAndRefreshHooks
+  report: RerunReport
+}
+
+async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): Promise<string | undefined> {
+  const { file, heading, request, hooks, report } = rerun
   const { app, engine, notify } = deps
   const beforeRefresh = hooks.beforeRefresh ?? (content => content)
   const tracker = new RerunProgressTracker()
   const outcome = await deps.withEngine(() =>
     runHeadless(engine, request, event => {
       const progress = tracker.hear(event)
-      if (progress) hooks.onProgress?.(progress)
+      if (!progress) return
+      hooks.onProgress?.(progress)
+      report.hear(progress)
     }),
   )
   if (!outcome) return undefined
@@ -90,5 +115,6 @@ export async function rerunAndRefresh(
     return { notice: `Reran downstream as run ${newRunId}`, runId: newRunId }
   })
   if (landedAt) notify(landedAt.notice)
+  if (landedAt?.runId) await report.land({ runId: landedAt.runId, chainName: heading.chainName, panels: landed.layout.panels })
   return landedAt?.runId
 }

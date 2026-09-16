@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createSourceRunHeader, SOURCE_RUN_CLASS } from '@/ui/sourceRunHeader'
+import { createSourceRunHeader, RERUNNING_CLASS, SOURCE_RUN_CLASS } from '@/ui/sourceRunHeader'
+import { RerunWatch } from '@/run/rerunWatch'
+import type { RerunProgress } from '@/run/rerunProgress'
 import { SOURCE_RUN, SOURCE_RUN_DELETED } from '@/run/provenance'
 import type { RunExistence } from '@/engine/types'
 import type { MarkdownPostProcessorContext } from 'obsidian'
@@ -16,6 +18,7 @@ const ENGINE_URL = 'http://localhost:3000'
 
 let asked: string[]
 let answer: RunExistence
+let reruns: RerunWatch
 
 /** The frontmatter of an output note, as a post-processor is handed it. */
 const context = (frontmatter: unknown): MarkdownPostProcessorContext =>
@@ -23,7 +26,7 @@ const context = (frontmatter: unknown): MarkdownPostProcessorContext =>
 
 const outputNote = { run: RUN_ID, chain: 'Relay', output: 'Survivor' }
 
-const header = () => createSourceRunHeader({ engineUrl: () => ENGINE_URL, exists: runId => ask(runId) })
+const header = () => createSourceRunHeader({ engineUrl: () => ENGINE_URL, exists: runId => ask(runId), reruns })
 
 function ask(runId: string): Promise<RunExistence> {
   asked.push(runId)
@@ -52,6 +55,7 @@ beforeEach(() => {
   document.body.replaceChildren()
   asked = []
   answer = 'found'
+  reruns = new RerunWatch()
 })
 
 describe('the source-run line', () => {
@@ -123,5 +127,71 @@ describe('the source-run line', () => {
     await settle()
     expect(line(container)).toBeNull()
     expect(asked).toEqual([])
+  })
+})
+
+describe('a card a rerun is writing again', () => {
+  const rewriting = (step?: RerunProgress['step']): RerunProgress => ({
+    verdict: false,
+    proposals: ['Survivor'],
+    cards: ['Survivor'],
+    ...(step ? { step } : {}),
+  })
+  const rerunLine = (container: HTMLElement): string | undefined =>
+    container.querySelector(`.${SOURCE_RUN_CLASS}-rerun`)?.textContent ?? undefined
+
+  it('says what the rerun is doing under the source-run line, and greys the words it will replace', async () => {
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+    reruns.begin([RUN_ID]).hear(rewriting({ name: 'critic', writesVerdict: false }))
+
+    expect(rerunLine(container)).toBe('⟳ critic is running…')
+    expect(line(container)?.nextElementSibling?.textContent).toBe('⟳ critic is running…')
+    expect(container.classList.contains(RERUNNING_CLASS)).toBe(true)
+  })
+
+  it('follows each step, and goes when the rerun ends', async () => {
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+    const rerun = reruns.begin([RUN_ID])
+    rerun.hear(rewriting())
+    expect(rerunLine(container)).toBe('⟳ Starting the rerun…')
+    rerun.hear(rewriting({ name: 'Survivor', writesVerdict: true }))
+    expect(rerunLine(container)).toBe('⟳ Survivor is writing a new verdict…')
+    rerun.end()
+
+    expect(rerunLine(container)).toBe('')
+    expect(container.classList.contains(RERUNNING_CLASS)).toBe(false)
+  })
+
+  it('shows a rerun already going when the card is rendered', async () => {
+    reruns.begin([RUN_ID]).hear(rewriting())
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+    expect(rerunLine(container)).toBe('⟳ Starting the rerun…')
+  })
+
+  it('leaves a card the rerun only replays as it is', async () => {
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context({ ...outputNote, output: 'Optimist' }))
+    await settle()
+    reruns.begin([RUN_ID]).hear(rewriting())
+    expect(rerunLine(container)).toBe('')
+    expect(container.classList.contains(RERUNNING_CLASS)).toBe(false)
+  })
+
+  it('stops listening once the rendering is gone', async () => {
+    const { container, sections } = rendered(1)
+    header()(sections[0]!, context(outputNote))
+    await settle()
+    container.remove()
+    const rerun = reruns.begin([RUN_ID])
+    rerun.hear(rewriting())
+    expect(rerunLine(container)).toBe('')
+    rerun.hear(rewriting())
+    expect(rerunLine(container)).toBe('')
   })
 })

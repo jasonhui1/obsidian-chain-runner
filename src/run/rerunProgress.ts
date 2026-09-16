@@ -12,11 +12,18 @@ export interface RerunStep {
   writesVerdict: boolean
 }
 
-/** What a rerun writes again — the verdict, and proposals by name — and the step it is on, once it has started one. */
+/** What a rerun writes again — the verdict, proposals by name, and every card by name — and the step it is on, once it has started one. */
 export interface RerunProgress {
   verdict: boolean
   proposals: string[]
+  cards: string[]
   step?: RerunStep
+}
+
+/** What a rerun is doing, as a line under the words it will replace. */
+export function rerunDoing(step: RerunStep | undefined): string {
+  const doing = !step ? 'Starting the rerun' : step.writesVerdict ? `${step.name} is writing a new verdict` : `${step.name} is running`
+  return `⟳ ${doing}…`
 }
 
 export type OnRerunProgress = (progress: RerunProgress) => void
@@ -49,6 +56,7 @@ export class RerunProgressTracker {
     return {
       verdict: writing.some(panel => panel === verdictPanel(this.panels)),
       proposals: proposerPanels(writing).map(panel => panel.name),
+      cards: writing.map(panel => panel.name),
       ...(this.step ? { step: this.step } : {}),
     }
   }

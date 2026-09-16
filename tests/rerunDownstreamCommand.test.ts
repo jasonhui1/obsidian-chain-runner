@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NO_EDITED_PROPOSAL, NOT_A_HOLD_NOTE, RerunDownstream } from '@/ui/rerunDownstream'
 import { holdNoteContent } from '@/run/holdNote'
+import { RerunWatch, type RerunLanding } from '@/run/rerunWatch'
+import type { RerunProgress } from '@/run/rerunProgress'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
@@ -71,6 +73,7 @@ let notices: string[]
 let runFrames: RunEvent[]
 let online: boolean
 let requests: RunRequest[]
+let watch: RerunWatch
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -115,7 +118,21 @@ function makeRerun(): RerunDownstream {
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
+    reruns: watch,
   })
+}
+
+/** What the watch heard of a rerun: each card rewritten, as it was heard, and each landing. */
+function watching(): { rewriting: (RerunProgress | undefined)[]; landings: RerunLanding[] } {
+  const heard = { rewriting: [] as (RerunProgress | undefined)[], landings: [] as RerunLanding[] }
+  watch.onChange(() => heard.rewriting.push(watch.rewriting(OLD, 'creative-director')))
+  watch.onLanding(async landing => void heard.landings.push(landing))
+  return heard
+}
+
+const rewritingVerdict: RunEvent = {
+  type: 'layout',
+  model: { kind: 'columns', panels: [{ ...oldPanels[0], state: 'filled' }, { ...oldPanels[1], state: 'filled' }, { ...oldPanels[2], state: 'pending' }] },
 }
 
 beforeEach(() => {
@@ -125,6 +142,7 @@ beforeEach(() => {
   runFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_complete', runId: NEW }]
   online = true
   requests = []
+  watch = new RerunWatch()
 })
 
 describe('start', () => {
@@ -219,5 +237,41 @@ describe('start', () => {
     notes[HOLD_PATH] = written()
     await pending
     expect(notices).toEqual([`Reran as run ${NEW}, but proposals changed meanwhile — note left as is`])
+  })
+})
+
+/** A hold already rerun once, from the run before. */
+const earlierVerdict = ['## Previous verdict', '', '<details>', '<summary>run 2026-09-14-older</summary>', '', 'Old.', '', '</details>', '', '## Proposals'].join('\n')
+
+describe('what the watch hears', () => {
+  it('hears the cards a rerun writes again, with no panel open, and forgets them once it lands', async () => {
+    runFrames = [{ type: 'run_start', runId: NEW }, rewritingVerdict, { type: 'run_complete', runId: NEW }]
+    const heard = watching()
+    await makeRerun().start()
+    expect(heard.rewriting).toEqual([{ verdict: true, proposals: [], cards: ['creative-director'] }, undefined])
+  })
+
+  it('hands over the landing: the runs the hold was under, and the run it moved to', async () => {
+    notes[HOLD_PATH] = edited().replace('## Proposals', earlierVerdict)
+    const heard = watching()
+    await makeRerun().start()
+    expect(heard.landings).toEqual([{ from: [OLD, '2026-09-14-older'], runId: NEW, chainName: 'creative-director', panels: newPanels }])
+  })
+
+  it('hands over no landing when the rerun failed, and forgets its cards', async () => {
+    runFrames = [{ type: 'run_start', runId: NEW }, rewritingVerdict, { type: 'error', error: 'the model refused' }]
+    const heard = watching()
+    await makeRerun().start()
+    expect(heard.landings).toEqual([])
+    expect(heard.rewriting.at(-1)).toBeUndefined()
+  })
+
+  it('hands over no landing when the hold stayed where it was', async () => {
+    runFrames = [{ type: 'run_start', runId: NEW }]
+    const heard = watching()
+    const pending = makeRerun().start()
+    notes[HOLD_PATH] = written()
+    await pending
+    expect(heard.landings).toEqual([])
   })
 })

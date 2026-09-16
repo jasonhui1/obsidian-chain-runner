@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { RerunWatch } from '@/run/rerunWatch'
 import { HoldActions, PROPOSAL_HEADING, type RerunProgress } from '@/ui/holdActions'
 import { HoldNotes } from '@/ui/holdNotes'
 import { AskTheRoom, NOBODY_ANSWERED } from '@/ui/askTheRoom'
@@ -252,14 +253,15 @@ function makeActions(): HoldActions {
   } as unknown as EngineClient
   const notify = (message: string): void => void notices.push(message)
   const withEngine = async <T>(action: () => Promise<T>): Promise<T | undefined> => (online ? action() : undefined)
+  const reruns = new RerunWatch()
   return new HoldActions({
     app,
     notify,
     notes: new HoldNotes({ app, notify }),
     write: runId => Promise.resolve(void written.push(runId)),
-    chat: new ChatWithProposer({ app, engine, withEngine, notify }),
+    chat: new ChatWithProposer({ app, engine, withEngine, notify, reruns }),
     room: new AskTheRoom({ app, engine, withEngine, notify }),
-    rerun: new RerunDownstream({ app, engine, withEngine, notify }),
+    rerun: new RerunDownstream({ app, engine, withEngine, notify, reruns }),
     quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
     resume: new Resume({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
     engineUrl: () => ENGINE_URL,
@@ -457,7 +459,7 @@ describe('rerun', () => {
     await actions.editProposal(RUN, 'world', 'The world is real.')
     const heard: RerunProgress[] = []
     await actions.rerun(RUN, progress => heard.push(progress))
-    const plan = { verdict: true, proposals: [] }
+    const plan = { verdict: true, proposals: [], cards: ['creative-director'] }
     expect(heard).toEqual([
       plan,
       { ...plan, step: { name: 'critic', writesVerdict: false } },
@@ -647,7 +649,7 @@ describe('revise', () => {
     ]
     const heard: RerunProgress[] = []
     await makeActions().revise(RUN, turn, progress => heard.push(progress))
-    expect(heard.at(-1)).toEqual({ verdict: true, proposals: [], step: { name: 'creative-director', writesVerdict: true } })
+    expect(heard.at(-1)).toEqual({ verdict: true, proposals: [], cards: ['creative-director'], step: { name: 'creative-director', writesVerdict: true } })
   })
 
   it('leaves the hold where it was when the rerun fails', async () => {

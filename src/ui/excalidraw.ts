@@ -37,7 +37,7 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
-import { buildDirectLabel, cardProposal, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
+import { buildDirectLabel, cardProposal, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary } from '../engine/types'
@@ -131,6 +131,8 @@ interface SceneElement extends SceneShape {
   isDeleted?: boolean
   /** The words as Excalidraw saves and re-parses them; the third place a text element holds them. */
   rawText?: string
+  /** A frame's title. */
+  name?: string | null
   /** A drag scales this; a re-cut puts it back to the size the node was designed at. */
   fontSize?: number
 }
@@ -258,6 +260,19 @@ export interface NodeSurface {
   selectedProposal(on?: DrawingView): ProposalData | undefined
   /** The one node element the reader has selected, for the gestures the hook cannot see. */
   selectedNode(on?: DrawingView): MaybeNodeElement | undefined
+  /** Every drawing open in a view now; a drawing in a tab not yet loaded is not one. */
+  openViews(): DrawingView[]
+  /**
+   * Moves a drawing on to a landed rerun: each card of the runs `from` to the
+   * note `noteFor` files for its output, and the labels and frames to `to`.
+   * `false` when the drawing shows none of `from`.
+   */
+  followRerun(
+    from: readonly string[],
+    to: string,
+    noteFor: (output: string) => Promise<TFile | undefined>,
+    on: DrawingView,
+  ): Promise<boolean>
   /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
   editProposal(proposalId: string, action: 'accept' | 'dismiss', on?: DrawingView): Promise<boolean>
 }
@@ -485,6 +500,44 @@ export function createNodeSurface(app: App): NodeSurface {
         if (live) live.isDeleted = true
       }
       await ea.addElementsToView(false, true)
+      return true
+    },
+
+    openViews: () => {
+      const views: DrawingView[] = []
+      eachLeaf(app, leaf => {
+        if (leaf.view.getViewType() === EXCALIDRAW_VIEW) views.push(leaf.view)
+      })
+      return views
+    },
+
+    followRerun: async (from, to, noteFor, on) => {
+      const { ea, view } = bind(on)
+      const found = rerunScene(ea.getViewElements(), from, to, noteFrontmatter(app, view))
+      if (!found) return false
+      const notes = new Map<SceneElement, TFile>()
+      for (const card of found.cards) {
+        const note = await noteFor(card.output)
+        if (note) notes.set(card.element, note)
+      }
+
+      // Bound again: filing the notes gave another action the chance to rebind.
+      const { ea: editing } = bind(on)
+      editing.copyViewElementsToEAforEditing([...notes.keys(), ...found.labels, ...found.frames.map(frame => frame.element)])
+      const copy = (element: SceneElement): SceneElement | undefined => editing.getElement(element.id)
+      for (const [element, note] of notes) {
+        const card = copy(element)
+        if (card) card.link = `[[${note.path}]]`
+      }
+      for (const element of found.labels) {
+        const label = copy(element)
+        if (label) label.customData = relabel(label.customData, to)
+      }
+      for (const { element, name } of found.frames) {
+        const frame = copy(element)
+        if (frame) frame.name = name
+      }
+      await editing.addElementsToView(false, true)
       return true
     },
 

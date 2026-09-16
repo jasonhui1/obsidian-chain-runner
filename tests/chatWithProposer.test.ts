@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ChatWithProposer, NOTHING_TO_SEND, NOT_A_HOLD_NOTE, NOT_A_PROPOSER } from '@/ui/chatWithProposer'
 import { holdNoteContent } from '@/run/holdNote'
+import { RerunWatch } from '@/run/rerunWatch'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
@@ -104,6 +105,7 @@ function makeCommand(): ChatWithProposer {
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
+    reruns: new RerunWatch(),
   })
 }
 

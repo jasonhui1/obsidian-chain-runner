@@ -167,6 +167,8 @@ function makeRun(): NodeRun {
     selection: () => undefined,
     selectedProposal: () => undefined,
     selectedRun: () => undefined,
+    openViews: () => [],
+    followRerun: () => Promise.resolve(false),
     cardProposal: () => undefined,
     selectedNode: () => undefined,
     reflow: () => Promise.resolve(false),

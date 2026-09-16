@@ -474,7 +474,7 @@ describe('a rerun going', () => {
       { name: 'world', text: 'A controlled test.', given: [], combinedWith: [], edited: false },
     ],
   })
-  const verdictOnly = { verdict: true, proposals: [] }
+  const verdictOnly = { verdict: true, proposals: [], cards: ['verdict'] }
   const director = { name: 'director', writesVerdict: true }
   const progress = (): string[] => Array.from(root.querySelectorAll('.chain-runner-directing-progress')).map(line => line.textContent ?? '')
   const stale = (selector: string): boolean | undefined => root.querySelector(selector)?.classList.contains('is-stale')
@@ -488,7 +488,7 @@ describe('a rerun going', () => {
     button('⟳ Rerun downstream').click()
     progressTo({ ...verdictOnly, step: director })
     tick(42)
-    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:42'])
+    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:42'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
     expect(root.querySelector('.chain-runner-directing-verdict')?.textContent).toContain('A combat trial in a void.')
   })
@@ -514,7 +514,7 @@ describe('a rerun going', () => {
   it('leaves the verdict as it is when the rerun does not write it again', () => {
     board().open(showing(edited))
     button('⟳ Rerun downstream').click()
-    progressTo({ verdict: false, proposals: ['world'], step: { name: 'world', writesVerdict: false } })
+    progressTo({ verdict: false, proposals: ['world'], cards: ['world'], step: { name: 'world', writesVerdict: false } })
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
   })
@@ -530,7 +530,7 @@ describe('a rerun going', () => {
   it('shows the line under the tabs, over the greyed proposal, on a tab the rerun writes again', () => {
     board().open(showing(edited), 'world')
     button('⟳ Rerun downstream').click()
-    progressTo({ verdict: true, proposals: ['world'], step: { name: 'world', writesVerdict: false } })
+    progressTo({ verdict: true, proposals: ['world'], cards: ['world', 'verdict'], step: { name: 'world', writesVerdict: false } })
     expect(progress()).toEqual(['⟳ world is running… 0:00'])
     expect(root.querySelector('.chain-runner-directing-tabs')?.nextElementSibling?.className).toBe('chain-runner-directing-progress')
     expect(stale('.chain-runner-directing-proposal')).toBe(true)
@@ -544,7 +544,7 @@ describe('a rerun going', () => {
     expect(progress()).toEqual([])
     button('Run').click()
     tick(3)
-    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:03'])
+    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:03'])
   })
 
   it('puts the panel back as it was when the rerun lands nowhere', async () => {

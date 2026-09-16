@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDirectLabel, cardProposal, DIRECT_LINK, directLabelRunId, selectedRunId } from '@/ui/runLabel'
+import { buildDirectLabel, cardProposal, DIRECT_LINK, directLabelRunId, rerunScene, relabel, selectedRunId } from '@/ui/runLabel'
 import type { SceneShape } from '@/ui/nodeScene'
 
 /** The `✎ Direct` label on a run's frame, and which run a selection on the drawing names. */
@@ -71,5 +71,58 @@ describe('cardProposal', () => {
     expect(cardProposal({ id: 't', type: 'text', text: 'gameplay' }, frontmatter)).toBeUndefined()
     expect(cardProposal({ id: 'c', type: 'embeddable', link: '[[Notes/plain.md]]' }, frontmatter)).toBeUndefined()
     expect(cardProposal({ id: 'c', type: 'embeddable', link: '[[missing]]' }, frontmatter)).toBeUndefined()
+  })
+})
+
+describe('rerunScene', () => {
+  const OLD = '2026-09-15-old'
+  const OLDER = '2026-09-14-older'
+  const NEW = '2026-09-16-new'
+  const fronts: Record<string, unknown> = {
+    'runs/old/Verdict.md': { run: OLD, output: 'Verdict' },
+    'runs/old/World.md': { run: OLD, output: 'World' },
+    'runs/older/World.md': { run: OLDER, output: 'World' },
+    'runs/other/World.md': { run: 'another', output: 'World' },
+  }
+  const noteRun = (linkpath: string) => fronts[linkpath]
+  type Shape = SceneShape & { frameId?: string | null; name?: string | null }
+  const card = (id: string, path: string, frameId = 'frame'): Shape => ({ id, type: 'embeddable', link: `[[${path}]]`, frameId })
+  const label = (runId: string): Shape => ({ id: `label-${runId}`, type: 'text', frameId: 'frame', ...buildDirectLabel(frame, runId) })
+  const runFrame = (name: string, id = 'frame'): Shape => ({ id, type: 'frame', name })
+
+  it('finds the cards of any run the hold was under, by the output each shows', () => {
+    const scene = [card('a', 'runs/old/Verdict.md'), card('b', 'runs/older/World.md'), card('c', 'runs/other/World.md')]
+    const found = rerunScene(scene, [OLD, OLDER], NEW, noteRun)
+    expect(found?.cards.map(one => [one.element.id, one.output])).toEqual([
+      ['a', 'Verdict'],
+      ['b', 'World'],
+    ])
+  })
+
+  it('finds the Direct labels of those runs', () => {
+    const found = rerunScene([label(OLD), label('another')], [OLD], NEW, noteRun)
+    expect(found?.labels.map(one => one.id)).toEqual([`label-${OLD}`])
+  })
+
+  it('renames the frame those sit in to the new run, and no other frame', () => {
+    const scene = [runFrame(`creative-director · ${OLD}`), runFrame(`creative-director · ${OLD}`, 'elsewhere'), card('a', 'runs/old/Verdict.md')]
+    expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([{ element: scene[0], name: `creative-director · ${NEW}` }])
+  })
+
+  it('leaves a frame the reader renamed as it is', () => {
+    const scene = [runFrame('my best run'), card('a', 'runs/old/Verdict.md')]
+    expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([])
+  })
+
+  it('is undefined for a drawing that shows none of the runs', () => {
+    expect(rerunScene([card('c', 'runs/other/World.md'), label('another')], [OLD], NEW, noteRun)).toBeUndefined()
+  })
+})
+
+describe('relabel', () => {
+  it('names the new run, keeping any other plugin’s stamp', () => {
+    const relabelled = relabel({ other: 1, chainRunnerRun: { runId: 'old' } }, 'new')
+    expect(relabelled).toEqual({ other: 1, chainRunnerRun: { runId: 'new' } })
+    expect(directLabelRunId({ customData: relabelled })).toBe('new')
   })
 })

@@ -8,6 +8,7 @@ import { holdHeading, proposerPanels, type HoldHeading } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
 import type { OnRerunProgress } from '../run/rerunProgress'
 import type { EngineClient } from '../engine/client'
+import type { RerunWatch } from '../run/rerunWatch'
 
 /** The "Chat with proposer" command: the vault half of `src/run/chat.ts`. */
 
@@ -20,6 +21,7 @@ export interface ChatWithProposerDeps {
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
+  reruns: RerunWatch
 }
 
 export class ChatWithProposer {

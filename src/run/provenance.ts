@@ -27,10 +27,15 @@ export function sourceRunLabel(source: SourceRun): string {
  * Both keys are required: `run` alone is a word another plugin may well use.
  */
 export function sourceRunId(frontmatter: unknown): string | undefined {
+  return sourceNote(frontmatter)?.runId
+}
+
+/** The run a note was written by and which of its outputs it is; `undefined` when it is not an output note. */
+export function sourceNote(frontmatter: unknown): { runId: string; output: string } | undefined {
   if (typeof frontmatter !== 'object' || frontmatter === null) return undefined
   const { run, output } = frontmatter as Record<string, unknown>
   if (typeof run !== 'string' || run === '' || typeof output !== 'string') return undefined
-  return run
+  return { runId: run, output }
 }
 
 /** The run as a link, which is what it is until the engine says otherwise. */

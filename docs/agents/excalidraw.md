@@ -33,6 +33,7 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | `onSceneChangeHook` on `editingTextElement` | #21 — **run**: the editor opening is reported, on an already-selected element |
 | a group selecting as a group, and a double-click drilling in | #21 — **run**, and the reason a double-click took four attempts |
 | `addText`'s `autoResize: false`, and putting `fontSize` back after a group resize | #22 — **run**: a node dragged wider shows more of its words and holds its type size |
+| `link` rewritten on a copied embeddable, `name` on a copied frame | #45 — **written, not run**: how a landed rerun points a card at the new run's note and retitles its frame |
 
 `addFrame`, `addArrow`, `getViewSelectedElements` and
 `getViewFileForImageElement` are feature-detected rather than assumed. A build
@@ -233,6 +234,12 @@ An `image` may equally be a picture. Take the note only when its extension is
   you.
 - Removal is `isDeleted = true` on the copy, then write back.
 - Every write is a save. Only a change of words should earn one.
+- **A card is re-pointed, not rewritten** (#45). A rerun files its words under
+  the new run and sets the embeddable's `link` to that note, so the old note
+  stays the old run's record. Only a drawing loaded in a view can be reached:
+  a tab Obsidian has not loaded yet is not an Excalidraw view.
+- **Progress on a card is rendered, not written.** The ⟳ line lives in the
+  output note's rendered header, so a rerun going costs the drawing no saves.
 
 ## Identity
 

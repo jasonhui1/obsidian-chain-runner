@@ -437,6 +437,21 @@
   color: var(--text-warning);
 }
 
+/* A card a rerun is writing again: what it is doing, over the words it will
+   replace, greyed as the directing panel greys the old verdict. */
+.chain-runner-source-run-rerun {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-source-run-rerun:empty {
+  display: none;
+}
+
+.chain-runner-rerunning > :not(.chain-runner-source-run):not(.chain-runner-source-run-rerun) {
+  opacity: 0.5;
+}
+
 /* ── Direction buttons ────────────────────────────────────────────────────
    The verb row under each proposal in a hold note — a shortcut for typing the
    same line by hand, so it stays as quiet as the words it sits beside. */
@@ -558,9 +573,10 @@
     background-color var(--anim-duration-fast, 100ms) var(--anim-motion-smooth, ease-in-out);
 }
 
-/* The five things still happening. Each also says so in words, so the pulse is
+/* The six things still happening. Each also says so in words, so the pulse is
    never the only channel. */
 .chain-runner-directing-progress,
+.chain-runner-source-run-rerun,
 .chain-runner-run-status--running,
 .chain-runner-panel-notice--writing,
 .chain-runner-engine-pill--unknown,
