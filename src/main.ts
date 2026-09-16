@@ -86,13 +86,13 @@ export default class ChainRunnerPlugin extends Plugin {
     // Every rerun reports here, so the drawing follows one wherever it was started.
     const reruns = new RerunWatch()
     // Every rendering of an output note says which run wrote it (ADR-0004), and what a rerun is doing to it.
-    this.registerMarkdownPostProcessor(
-      createSourceRunHeader({
-        engineUrl: () => this.settings.engineUrl,
-        exists: runId => this.engine.runExists(runId),
-        reruns,
-      }),
-    )
+    const sourceRun = createSourceRunHeader({
+      engineUrl: () => this.settings.engineUrl,
+      exists: runId => this.engine.runExists(runId),
+      reruns,
+    })
+    this.registerMarkdownPostProcessor(sourceRun.processor)
+    this.register(sourceRun.stop)
     // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
     this.registerMarkdownPostProcessor(
       createDirectionButtons({ app: this.app, notify: message => new Notice(message) }),

@@ -61,7 +61,7 @@ beforeEach(() => {
 describe('the source-run line', () => {
   it('links to the run on the engine set now', async () => {
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
 
     const anchor = line(container)?.querySelector('a')
@@ -71,14 +71,14 @@ describe('the source-run line', () => {
 
   it('sits above the note’s own words', async () => {
     const { container, sections } = rendered(2)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
     expect(container.firstElementChild).toBe(line(container))
   })
 
   it('is one line for the note, not one per section rendered', async () => {
     const { container, sections } = rendered(3)
-    const processor = header()
+    const { processor } = header()
     for (const section of sections) processor(section, context(outputNote))
     await settle()
 
@@ -90,7 +90,7 @@ describe('the source-run line', () => {
   it('says the run is deleted once the engine says it has no such run', async () => {
     answer = 'missing'
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
 
     const shown = line(container)
@@ -102,13 +102,13 @@ describe('the source-run line', () => {
   it('leaves the link alone when the engine could not be asked', async () => {
     answer = 'unknown'
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
     expect(line(container)?.querySelector('a')?.textContent).toBe(SOURCE_RUN)
   })
 
   it('asks again after an engine that could not be asked, and not after one that answered', async () => {
-    const processor = header()
+    const { processor } = header()
     answer = 'unknown'
     processor(rendered(1).sections[0]!, context(outputNote))
     await settle()
@@ -123,7 +123,7 @@ describe('the source-run line', () => {
 
   it('leaves a note that is not an output note alone', async () => {
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context({ title: 'a premise' }))
+    header().processor(sections[0]!, context({ title: 'a premise' }))
     await settle()
     expect(line(container)).toBeNull()
     expect(asked).toEqual([])
@@ -142,7 +142,7 @@ describe('a card a rerun is writing again', () => {
 
   it('says what the rerun is doing under the source-run line, and greys the words it will replace', async () => {
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
     reruns.begin([RUN_ID]).hear(rewriting({ name: 'critic', writesVerdict: false }))
 
@@ -153,7 +153,7 @@ describe('a card a rerun is writing again', () => {
 
   it('follows each step, and goes when the rerun ends', async () => {
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
     const rerun = reruns.begin([RUN_ID])
     rerun.hear(rewriting())
@@ -169,29 +169,52 @@ describe('a card a rerun is writing again', () => {
   it('shows a rerun already going when the card is rendered', async () => {
     reruns.begin([RUN_ID]).hear(rewriting())
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    header().processor(sections[0]!, context(outputNote))
     await settle()
     expect(rerunLine(container)).toBe('⟳ Starting the rerun…')
   })
 
   it('leaves a card the rerun only replays as it is', async () => {
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context({ ...outputNote, output: 'Optimist' }))
+    header().processor(sections[0]!, context({ ...outputNote, output: 'Optimist' }))
     await settle()
     reruns.begin([RUN_ID]).hear(rewriting())
     expect(rerunLine(container)).toBe('')
     expect(container.classList.contains(RERUNNING_CLASS)).toBe(false)
   })
 
-  it('stops listening once the rendering is gone', async () => {
+  it('follows the note a rendering shows now, when the card is pointed at another', async () => {
+    const { processor } = header()
     const { container, sections } = rendered(1)
-    header()(sections[0]!, context(outputNote))
+    processor(sections[0]!, context({ ...outputNote, run: 'earlier' }))
     await settle()
-    container.remove()
-    const rerun = reruns.begin([RUN_ID])
-    rerun.hear(rewriting())
-    expect(rerunLine(container)).toBe('')
-    rerun.hear(rewriting())
+    processor(sections[0]!, context(outputNote))
+    await settle()
+    reruns.begin([RUN_ID]).hear(rewriting())
+    expect(container.querySelectorAll(`.${SOURCE_RUN_CLASS}`)).toHaveLength(1)
+    expect(rerunLine(container)).toBe('⟳ Starting the rerun…')
+    expect(line(container)?.querySelector('a')?.getAttribute('href')).toBe(`${ENGINE_URL}/history/${RUN_ID}`)
+  })
+
+  it('takes over a header another load of the plugin drew', async () => {
+    const { container, sections } = rendered(1)
+    const stale = document.createElement('div')
+    stale.className = SOURCE_RUN_CLASS
+    container.prepend(stale)
+    header().processor(sections[0]!, context(outputNote))
+    await settle()
+    reruns.begin([RUN_ID]).hear(rewriting())
+    expect(container.querySelectorAll(`.${SOURCE_RUN_CLASS}`)).toHaveLength(1)
+    expect(rerunLine(container)).toBe('⟳ Starting the rerun…')
+  })
+
+  it('lets go of the watch once stopped', async () => {
+    const shown = header()
+    const { container, sections } = rendered(1)
+    shown.processor(sections[0]!, context(outputNote))
+    await settle()
+    shown.stop()
+    reruns.begin([RUN_ID]).hear(rewriting())
     expect(rerunLine(container)).toBe('')
   })
 })

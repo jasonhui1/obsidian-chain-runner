@@ -20,51 +20,68 @@ export interface SourceRunHeaderDeps {
   reruns: Pick<RerunWatch, 'rewriting' | 'onChange'>
 }
 
+/** The post-processor, and what lets go of the rerun watch. */
+export interface SourceRunHeader {
+  processor: MarkdownPostProcessor
+  stop: () => void
+}
+
 /**
  * Draws the link at once and corrects it when the engine answers: a note renders
  * on every write of the run that is still filling it, and waiting on the network
  * first would hold each of those renders up.
  */
-export function createSourceRunHeader(deps: SourceRunHeaderDeps): MarkdownPostProcessor {
+export function createSourceRunHeader(deps: SourceRunHeaderDeps): SourceRunHeader {
   const exists = remembering(deps)
-  return (el, ctx) => {
+  // Every header on screen is found from its document when a rerun moves on, so a
+  // rendering that is gone needs no unsubscribing, and one reused for another note follows it.
+  const documents = new Set<Document>()
+  const stop = deps.reruns.onChange(() => {
+    for (const doc of documents) doc.querySelectorAll<HTMLElement>(`.${SOURCE_RUN_CLASS}`).forEach(header => showRerun(header, deps.reruns))
+  })
+  const processor: MarkdownPostProcessor = (el, ctx) => {
     const note = sourceNote(ctx.frontmatter)
     if (!note) return
-    const { runId } = note
+    const { runId, output } = note
     // The header is the note's, not this section's, and a post-processor runs
-    // per section against an element not yet in the document — so both the
-    // container and the one-header rule wait for the rendering to land.
+    // per section against an element not yet in the document — so the container waits for the rendering to land.
     setTimeout(() => {
       const header = headerFor(el)
-      if (!header) return
+      if (header.dataset['run'] === runId && header.dataset['output'] === output) return
+      header.dataset['run'] = runId
+      header.dataset['output'] = output
+      documents.add(header.ownerDocument)
       const engineUrl = deps.engineUrl()
       writeSourceRun(header, sourceRunLink(engineUrl, runId))
-      void resolveSourceRun({ runId, engineUrl, exists }).then(source => writeSourceRun(header, source))
-      followReruns(header, runId, note.output, deps.reruns)
+      void resolveSourceRun({ runId, engineUrl, exists }).then(source => {
+        if (header.dataset['run'] === runId) writeSourceRun(header, source)
+      })
+      showRerun(header, deps.reruns)
     })
   }
+  return { processor, stop }
 }
 
-/** A line under the header saying what a rerun writing this card again is doing; empty while none is. */
-function followReruns(header: HTMLElement, runId: string, card: string, reruns: SourceRunHeaderDeps['reruns']): void {
-  const line = header.ownerDocument.createElement('div')
-  line.className = `${SOURCE_RUN_CLASS}-rerun`
-  header.after(line)
-  const container = header.parentElement
-  const show = (): void => {
-    const rerun = reruns.rewriting(runId, card)
-    line.textContent = rerun ? rerunDoing(rerun.step) : ''
-    container?.classList.toggle(RERUNNING_CLASS, rerun !== undefined)
+/** The line under the header saying what a rerun writing this card again is doing; empty while none is. */
+function showRerun(header: HTMLElement, reruns: SourceRunHeaderDeps['reruns']): void {
+  const { run, output } = header.dataset
+  const rerun = run !== undefined && output !== undefined ? reruns.rewriting(run, output) : undefined
+  const lineClass = `${SOURCE_RUN_CLASS}-rerun`
+  const next = header.nextElementSibling
+  const line = next?.classList.contains(lineClass) ? next : header.ownerDocument.createElement('div')
+  if (line !== next) {
+    line.className = lineClass
+    header.after(line)
   }
-  show()
-  // Tied to the line, not a section: the header outlives the section that made it.
-  const stop = reruns.onChange(() => (line.isConnected ? show() : stop()))
+  line.textContent = rerun ? rerunDoing(rerun.step) : ''
+  header.parentElement?.classList.toggle(RERUNNING_CLASS, rerun !== undefined)
 }
 
-/** The note's own header element, made if this is the first section to ask for it. */
-function headerFor(el: HTMLElement): HTMLElement | undefined {
+/** The note's own header element: the one its rendering already has, or a new one. */
+function headerFor(el: HTMLElement): HTMLElement {
   const container = el.closest('.markdown-rendered, .markdown-preview-view') ?? el
-  if (container.querySelector(`.${SOURCE_RUN_CLASS}`)) return undefined
+  const existing = container.querySelector<HTMLElement>(`.${SOURCE_RUN_CLASS}`)
+  if (existing) return existing
   const header = container.ownerDocument.createElement('div')
   header.className = SOURCE_RUN_CLASS
   container.prepend(header)
