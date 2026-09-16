@@ -1,4 +1,4 @@
-import { normalizePath, TFile, TFolder, type App } from 'obsidian'
+import { normalizePath, TFile, type App } from 'obsidian'
 import {
   freeOutputPath,
   outputNoteContent,
@@ -7,6 +7,7 @@ import {
   type OutputNoteMeta,
 } from '../run/outputNote'
 import type { RunPanel } from '../run/panels'
+import { ensureFolder, guardWrite } from './vaultWrite'
 
 /**
  * The vault half of the output-note convention; the note itself is
@@ -46,7 +47,7 @@ export class OutputNotes {
   async writeNote(path: string, content: string): Promise<TFile | undefined> {
     return this.guard(async () => {
       const wanted = normalizePath(path)
-      await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
+      await ensureFolder(this.deps.app, wanted.slice(0, wanted.lastIndexOf('/')))
       return this.writeOrReuse(wanted, content)
     })
   }
@@ -101,40 +102,18 @@ export class OutputNotes {
     const meta: OutputNoteMeta = { ...run, folder: this.deps.folder(), engineUrl: this.deps.engineUrl() }
     const wanted = normalizePath(outputNotePath(panel, meta))
     return this.guard(async () => {
-      await this.ensureFolder(wanted.slice(0, wanted.lastIndexOf('/')))
+      await ensureFolder(this.deps.app, wanted.slice(0, wanted.lastIndexOf('/')))
       return use(meta, wanted)
     })
   }
 
-  /** Every write the vault can refuse goes through here: one notice, and `undefined`. */
-  private async guard<T>(use: () => Promise<T>): Promise<T | undefined> {
-    try {
-      return await use()
-    } catch (error) {
-      this.deps.notify(
-        error instanceof Error ? `Could not write the note: ${error.message}` : 'Could not write the note',
-      )
-      return undefined
-    }
+  private guard<T>(use: () => Promise<T>): Promise<T | undefined> {
+    return guardWrite(this.deps.notify, 'the note', use)
   }
 
   private async read(path: string): Promise<string | undefined> {
     const file = this.deps.app.vault.getAbstractFileByPath(path)
     if (!(file instanceof TFile)) return undefined
     return this.deps.app.vault.cachedRead(file)
-  }
-
-  /** Creates the run's folder and everything above it, a segment at a time. */
-  private async ensureFolder(folder: string): Promise<void> {
-    const segments = folder.split('/').filter(segment => segment !== '')
-    let path = ''
-    for (const segment of segments) {
-      path = path === '' ? segment : `${path}/${segment}`
-      const existing = this.deps.app.vault.getAbstractFileByPath(path)
-      if (existing instanceof TFolder) continue
-      // A note where the folder should be is the reader's, not ours to move.
-      if (existing) throw new Error(`${path} is a note, not a folder`)
-      await this.deps.app.vault.createFolder(path)
-    }
   }
 }

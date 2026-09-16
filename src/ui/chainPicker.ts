@@ -1,5 +1,7 @@
 import { App, FuzzySuggestModal, SuggestModal, prepareFuzzySearch } from 'obsidian'
+import { anchorModal } from './anchorModal'
 import { pickerRows, type Matcher, type PickerRow } from './pickerModel'
+import type { Point } from './panelSpot'
 import type { ChainSummary } from '../engine/types'
 
 /**
@@ -13,15 +15,18 @@ export interface ChainPickerOptions {
   placeholder?: string
   /** Said under a chain that reads no seed; named for what it will not read here. */
   unseeded?: string
+  /** Where the click that opened it was; absent means centre-screen (ADR-0010). */
+  anchor?: Point
 }
 
-const DEFAULT_OPTIONS: Required<ChainPickerOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<ChainPickerOptions, 'anchor'>> = {
   placeholder: 'Run which chain on this note?',
   unseeded: 'reads its own files — this note is not used',
 }
 
 export class ChainPicker extends SuggestModal<PickerRow> {
-  private readonly options: Required<ChainPickerOptions>
+  private readonly options: Required<Omit<ChainPickerOptions, 'anchor'>>
+  readonly anchor: Point | undefined
 
   constructor(
     app: App,
@@ -31,10 +36,16 @@ export class ChainPicker extends SuggestModal<PickerRow> {
   ) {
     super(app)
     this.options = { ...DEFAULT_OPTIONS, ...options }
+    this.anchor = options.anchor
     this.setPlaceholder(this.options.placeholder)
     this.emptyStateText = 'No chain matches'
     // Enough that a workspace of a few dozen chains is not silently truncated.
     this.limit = 100
+  }
+
+  override onOpen(): void {
+    super.onOpen()
+    if (this.anchor) anchorModal(this, this.anchor)
   }
 
   getSuggestions(query: string): PickerRow[] {
@@ -73,9 +84,15 @@ export class ParameterPicker extends FuzzySuggestModal<string> {
     parameterName: string,
     private readonly options: string[],
     private readonly onPick: (value: string) => void,
+    readonly anchor?: Point,
   ) {
     super(app)
     this.setPlaceholder(`Choose ${parameterName}`)
+  }
+
+  override onOpen(): void {
+    super.onOpen()
+    if (this.anchor) anchorModal(this, this.anchor)
   }
 
   getItems(): string[] {

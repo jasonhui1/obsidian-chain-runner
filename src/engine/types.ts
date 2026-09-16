@@ -79,11 +79,18 @@ export interface AgentOutput {
   timestamp: string
   /** Loop iteration, 0-based; set only on the outputs of a loop-body node. */
   round?: number
+  /** The node's reasoning, stored but never replayed to a model — read-only in a hold note. */
+  thought?: string
   [key: string]: unknown
 }
 
 /** Whether the engine still holds a run. `unknown` is an engine that could not be asked. */
 export type RunExistence = 'found' | 'missing' | 'unknown'
+
+/** The chain's graph as the run executed it, narrowed to the edges a walk needs. */
+export interface RunGraph {
+  edges: { fromNode: string; toNode: string }[]
+}
 
 export interface RunMeta {
   runId: string
@@ -94,6 +101,8 @@ export interface RunMeta {
   completedAt?: string
   status: 'running' | 'complete' | 'error'
   agentOutputs: AgentOutput[]
+  graph?: RunGraph
+  branchedFromRunId?: string
   [key: string]: unknown
 }
 
@@ -131,13 +140,21 @@ export interface Capabilities {
   runFailureFrame?: boolean
 }
 
-/** What `POST /api/run` is asked for. A run names a chain and supplies its inputs. */
+/** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
 export interface RunRequest {
   /** Chain name or slug — the engine resolves by name first, then slug. */
-  chainName: string
+  chainName?: string
+  /** Runs one agent alone, with no chain around it. Exclusive with `chainName`. */
+  agentName?: string
   seedPrompt: string
   /** The pick for the chain's declared dropdown, when it declares one. */
   paramValue?: string
+  /** Overrides a `context` node's file, keyed by the node's declared `file`. */
+  context?: Record<string, string>
+  /** The run this one branches from, for lineage only. */
+  branchedFromRunId?: string
+  /** Outputs set on their nodes as-is; any node without one executes. */
+  branchOutputs?: AgentOutput[]
 }
 
 export interface AgentStartEvent {

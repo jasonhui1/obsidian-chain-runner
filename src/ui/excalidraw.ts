@@ -1,8 +1,11 @@
-import { TFile, type App, type WorkspaceLeaf } from 'obsidian'
+import { TFile, normalizePath, type App, type WorkspaceLeaf } from 'obsidian'
 import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoices'
 import {
+  chainEdits,
   chainNodeData,
+  nodeTargets,
   parameterEdits,
+  reflowEdits,
   runEdits,
   type ChainNodeElement,
   type MaybeNodeElement,
@@ -34,6 +37,10 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
+import { buildDirectLabel, cardProposal, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
+import { SelectionClicks, type SelectedIds } from './selectionClick'
+import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
+import type { ChainSummary } from '../engine/types'
 import type { FramedPanel, RunFrame } from '../run/runFrame'
 
 /**
@@ -86,6 +93,7 @@ interface ExcalidrawAutomate {
   refreshTextElementSize?(id: string): void
   addElementsToView(repositionToCursor?: boolean, save?: boolean): Promise<boolean>
   onLinkClickHook?: LinkClickHook
+  onSceneChangeHook?: SceneChangeHook | null
 }
 
 /** EA's element defaults, set before each `add*` call rather than passed to it. */
@@ -109,6 +117,8 @@ interface ArrowFormatting {
 interface TextFormatting {
   width?: number
   textAlign?: string
+  /** Off with a width given, a text element wraps on resize instead of scaling (ADR-0010). */
+  autoResize?: boolean
 }
 
 /** An element on the scene, narrowed to the fields a chain node reads or writes. */
@@ -119,6 +129,10 @@ interface SceneElement extends SceneShape {
   strokeStyle?: StrokeStyle
   /** Excalidraw's own tombstone; setting it is how a scripted element is removed. */
   isDeleted?: boolean
+  /** The words as Excalidraw saves and re-parses them; the third place a text element holds them. */
+  rawText?: string
+  /** A drag scales this; a re-cut puts it back to the size the node was designed at. */
+  fontSize?: number
 }
 
 /** EA's link-click hook; returning `false` stops the link opening (`docs/spike-ea.md`, Q1). */
@@ -129,6 +143,38 @@ type LinkClickHook = (
   view: unknown,
   ea: unknown,
 ) => boolean
+
+/**
+ * EA's scene-change hook. An object, not a function, and it only fires for the
+ * `appStateKeys` it names — without one it is never called at all.
+ */
+interface SceneChangeHook {
+  appStateKeys?: string[]
+  trackElements?: boolean
+  triggerWhenInvisible?: boolean
+  callback: (
+    elements: SceneElement[],
+    appState: SceneAppState | undefined,
+    files: unknown,
+    view: unknown,
+    ea: unknown,
+  ) => void
+}
+
+/** The slice of Excalidraw's app state the selection hook reads. */
+interface SceneAppState {
+  selectedElementIds?: SelectedIds
+  /** The text element being typed into. Excalidraw opens its editor on a double-click. */
+  editingTextElement?: { id?: string } | null
+}
+
+/** What a reader's gesture on a node turns into. */
+export interface NodeGestures {
+  /** One element newly selected — a plain click, once the press behind it settles. */
+  clicked: (element: MaybeNodeElement, view: DrawingView) => void
+  /** A text element opened for typing, which is Excalidraw's own answer to a double-click. */
+  editing: (element: MaybeNodeElement, view: DrawingView) => void
+}
 
 /** What the "send to drawing" action needs a drawing surface to do. */
 export interface DrawingSurface {
@@ -184,9 +230,16 @@ export interface NodeSurface {
   /** Whether the tab in front of the reader is a drawing to put a node on. */
   hasActiveDrawing(): boolean
   /** Puts a built node on that drawing, at the cursor, and saves. */
-  place(elements: ChainNodeElement[]): Promise<void>
+  place(elements: ChainNodeElement[], on?: DrawingView): Promise<void>
   /** Rewrites a node's parameter in place. `false` means the node is no longer there. */
   setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
+  /** Re-shapes a node around another chain. `false` means the node is no longer there. */
+  setChain(target: NodeTarget, chain: ChainSummary, value?: string, on?: DrawingView): Promise<boolean>
+  /**
+   * Cuts every resized node's lines to its new width. `false` when there was
+   * nothing to do, which is every drawing the reader has not just dragged one on.
+   */
+  reflow(on?: DrawingView): Promise<boolean>
   /** What a node is bound to and where it sits; `undefined` when it is gone. */
   read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
   /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
@@ -197,8 +250,14 @@ export interface NodeSurface {
   selection(on?: DrawingView): BlockReading | undefined
   /** Draws a run's proposals greyed and dashed, each connected back to `source`. */
   placeProposals(proposals: readonly PlacedProposal[], source: BlockReading, on?: DrawingView): Promise<void>
+  /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
+  selectedRun(on?: DrawingView): string | undefined
+  /** The run and proposal a card on the drawing shows, by its output note. */
+  cardProposal(element: unknown, on: DrawingView): CardProposal | undefined
   /** The proposal the reader has selected, for the commands that decide one. */
   selectedProposal(on?: DrawingView): ProposalData | undefined
+  /** The one node element the reader has selected, for the gestures the hook cannot see. */
+  selectedNode(on?: DrawingView): MaybeNodeElement | undefined
   /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
   editProposal(proposalId: string, action: 'accept' | 'dismiss', on?: DrawingView): Promise<boolean>
 }
@@ -262,8 +321,8 @@ export function createNodeSurface(app: App): NodeSurface {
 
     hasActiveDrawing: () => activeDrawing(app) !== undefined,
 
-    place: async elements => {
-      const { ea } = bind()
+    place: async (elements, on) => {
+      const { ea } = bind(on)
       const ids = elements.map(element => draw(ea, element))
       // One group, so the node's elements move, copy and delete together.
       if (ids.length > 1) ea.addToGroup(ids)
@@ -274,6 +333,20 @@ export function createNodeSurface(app: App): NodeSurface {
     setParameter: async (target, value, on) => {
       const { ea } = bind(on)
       return write(ea, parameterEdits(ea.getViewElements(), target, value))
+    },
+
+    setChain: async (target, chain, value, on) => {
+      const { ea } = bind(on)
+      const reshape = chainEdits(ea.getViewElements(), target, chain, value)
+      return write(ea, reshape.edits, reshape.removals, reshape.additions)
+    },
+
+    reflow: async on => {
+      const { ea } = bind(on)
+      const scene = ea.getViewElements()
+      // Every node is asked; only one the reader dragged answers with anything.
+      const edits = nodeTargets(scene).flatMap(target => reflowEdits(scene, target))
+      return write(ea, edits)
     },
 
     setRunStatus: async (target, status, on) => {
@@ -310,6 +383,21 @@ export function createNodeSurface(app: App): NodeSurface {
         drawing: drawingPath(view),
       }
     },
+
+    selectedNode: on => {
+      const { ea } = bind(on)
+      const selected = selectedElements(ea)
+      // One element, so a double-click on a rubber-banded group runs nothing.
+      const only = selected.length === 1 ? selected[0] : undefined
+      return only && chainNodeData(only) ? only : undefined
+    },
+
+    selectedRun: on => {
+      const { ea, view } = bind(on)
+      return selectedRunId(selectedElements(ea), noteFrontmatter(app, view))
+    },
+
+    cardProposal: (element, on) => cardProposal(element as SceneShape, noteFrontmatter(app, on)),
 
     selectedProposal: on => {
       const { ea } = bind(on)
@@ -413,6 +501,17 @@ export function createNodeSurface(app: App): NodeSurface {
         if (element && frameId) element.frameId = frameId
       }
       ea.style.strokeWidth = PLAIN_STROKE
+
+      const label = buildDirectLabel(frame.box, frame.runId)
+      ea.style.strokeColor = label.strokeColor
+      ea.style.fontSize = label.fontSize
+      const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
+      if (made) {
+        made.link = label.link
+        made.customData = label.customData
+        if (frameId) made.frameId = frameId
+      }
+      ea.style.strokeColor = ACCEPTED_STROKE
       // Not repositioned to the cursor: the coordinates are the node's own.
       await ea.addElementsToView(false, true)
       return frameId !== undefined
@@ -464,22 +563,51 @@ function withoutProposal(custom: unknown): unknown {
   return Object.keys(rest).length === 0 ? undefined : rest
 }
 
-/** `false` means the node was deleted between the click and the write. */
-async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): Promise<boolean> {
+/**
+ * One change to a node on the scene, saved once. `false` means the node was
+ * deleted between the click and the write. Not repositioned to the cursor: the
+ * coordinates are the node's own.
+ */
+async function write(
+  ea: ExcalidrawAutomate,
+  edits: NodeEdit<SceneElement>[],
+  removals: readonly SceneElement[] = [],
+  additions: readonly ChainNodeElement[] = [],
+): Promise<boolean> {
   if (edits.length === 0) return false
+
   // The copies keep their ids, so writing them back updates the node in place.
-  ea.copyViewElementsToEAforEditing(edits.map(edit => edit.element))
+  ea.copyViewElementsToEAforEditing([...edits.map(edit => edit.element), ...removals])
   for (const edit of edits) {
     const element = ea.getElement(edit.element.id)
     if (!element) continue
     element.customData = { chainRunner: edit.data }
+    if (edit.x !== undefined) element.x = edit.x
+    if (edit.y !== undefined) element.y = edit.y
+    if (edit.height !== undefined) element.height = edit.height
+    if (edit.fontSize !== undefined) element.fontSize = edit.fontSize
+    if (edit.width !== undefined) element.width = edit.width
     if (edit.text === undefined) continue
     const wasWide = element.width ?? 0
+    // A text element holds its words in three places, and Excalidraw re-derives
+    // from `rawText` when it saves and when it renders; set fewer and they snap back.
     element.text = edit.text
-    // Excalidraw re-wraps from `originalText`; setting only `text` snaps back.
     element.originalText = edit.text
+    element.rawText = edit.text
     ea.refreshTextElementSize?.(element.id)
     if (edit.keepRightEdge) element.x = (element.x ?? 0) + wasWide - (element.width ?? 0)
+  }
+  for (const element of removals) {
+    const live = ea.getElement(element.id)
+    if (live) live.isDeleted = true
+  }
+  // A line drawn now claims the node's group and frame; only a drop is worked out.
+  const box = edits.find(edit => edit.data.role === 'box')?.element
+  for (const element of additions) {
+    const made = ea.getElement(draw(ea, element))
+    if (!made) continue
+    if (box?.groupIds) made.groupIds = [...box.groupIds]
+    if (box?.frameId) made.frameId = box.frameId
   }
   await ea.addElementsToView(false, true)
   return true
@@ -488,6 +616,15 @@ async function write(ea: ExcalidrawAutomate, edits: NodeEdit<SceneElement>[]): P
 /** The drawing a view is showing, as a vault path; `''` when it has no file. */
 function drawingPath(view: DrawingView): string {
   return (view as { file?: TFile }).file?.path ?? ''
+}
+
+/** A linked note's frontmatter, resolving the link from the drawing it sits on. */
+function noteFrontmatter(app: App, view: DrawingView): NoteFrontmatter {
+  const drawing = drawingPath(view)
+  return linkpath => {
+    const note = app.metadataCache.getFirstLinkpathDest(linkpath, drawing)
+    return note ? app.metadataCache.getFileCache(note)?.frontmatter : undefined
+  }
 }
 
 /** Why Excalidraw cannot be used right now, or `undefined` when it can. */
@@ -500,12 +637,17 @@ function unavailableReason(app: App): string | undefined {
 /** Adds one of the node's elements, and stamps it with what the node stores. */
 function draw(ea: ExcalidrawAutomate, element: ChainNodeElement): string {
   ea.style.strokeColor = element.strokeColor
+  // Set per element, not left to EA's default: the node's line heights are
+  // computed from these sizes, so a line drawn at another one lands on its neighbour.
+  if (element.fontSize) ea.style.fontSize = element.fontSize
   const id =
     element.shape === 'rect'
       ? drawRect(ea, element)
       : ea.addText(element.x, element.y, element.text ?? '', {
           width: element.width,
           textAlign: element.textAlign ?? 'left',
+          // Dragging a node's handles must not rewrite its type size (ADR-0010).
+          autoResize: false,
         })
   const made = ea.getElement(id)
   if (made) {
@@ -544,17 +686,89 @@ export function registerLinkHook(
   }
 }
 
+/**
+ * Intercepts a plain click, which Excalidraw reports only as a change of
+ * selection. `SelectionClicks` decides which of those changes is a click
+ * (ADR-0010); this only reaches the hook and hands over the element.
+ */
+export function registerSelectionHook(app: App, gestures: NodeGestures): () => void {
+  const ea = automate(app)
+  if (!ea) return () => {}
+  const previous = ea.onSceneChangeHook ?? undefined
+  const clicks = new SelectionClicks()
+  let editing: string | undefined
+  ea.onSceneChangeHook = {
+    // Ours on top of what the previous hook asked for, so chaining never narrows it.
+    appStateKeys: [
+      ...new Set([...(previous?.appStateKeys ?? []), 'selectedElementIds', 'editingTextElement']),
+    ],
+    ...(previous?.trackElements ? { trackElements: true } : {}),
+    ...(previous?.triggerWhenInvisible ? { triggerWhenInvisible: true } : {}),
+    callback: (elements, appState, files, view, self) => {
+      const opened = appState?.editingTextElement?.id
+      if (opened !== undefined && opened !== editing) {
+        const element = elements.find(one => one.id === opened)
+        if (element) gestures.editing(element, view)
+      }
+      editing = opened ?? undefined
+
+      const id = clicks.clicked(appState?.selectedElementIds)
+      const clicked = id === undefined ? undefined : elements.find(element => element.id === id)
+      if (clicked) gestures.clicked(clicked, view)
+      previous?.callback(elements, appState, files, view, self)
+    },
+  }
+  return () => {
+    ea.onSceneChangeHook = previous ?? null
+  }
+}
+
 /** The drawing in front of the reader, or `undefined` when the tab is something else. */
 function activeDrawing(app: App): unknown | undefined {
   const leaf = app.workspace.getMostRecentLeaf()
   return leaf?.view.getViewType() === EXCALIDRAW_VIEW ? leaf.view : undefined
 }
 
-function automate(app: App): ExcalidrawAutomate | undefined {
+/** Excalidraw's own plugin instance, or `undefined` when it is not loaded. */
+function excalidrawPlugin(app: App): ExcalidrawPluginInstance | undefined {
   // Through the plugin instance, not the window global, to keep the dependency
   // explicit (`docs/spike-ea.md`).
-  const plugins = (app as unknown as { plugins?: { plugins?: Record<string, { ea?: ExcalidrawAutomate }> } }).plugins
-  return plugins?.plugins?.[PLUGIN_ID]?.ea
+  const plugins = (app as unknown as { plugins?: { plugins?: Record<string, ExcalidrawPluginInstance> } }).plugins
+  return plugins?.plugins?.[PLUGIN_ID]
+}
+
+/** The slice of Excalidraw's plugin object this plugin reads. */
+interface ExcalidrawPluginInstance {
+  ea?: ExcalidrawAutomate
+  settings?: { scriptFolderPath?: string }
+}
+
+function automate(app: App): ExcalidrawAutomate | undefined {
+  return excalidrawPlugin(app)?.ea
+}
+
+/**
+ * The folder Excalidraw loads its scripts from; its own setting, and its own
+ * default. `undefined` when Excalidraw is not there — a vault without it has no
+ * use for a script folder, and nothing should make one.
+ */
+export function scriptFolder(app: App): string | undefined {
+  const plugin = excalidrawPlugin(app)
+  if (!plugin) return undefined
+  return normalizePath(plugin.settings?.scriptFolderPath?.trim() || DEFAULT_SCRIPT_FOLDER)
+}
+
+/** The vault as the toolbar script is written to it, folders made on the way. */
+export function createScriptVault(app: App): ScriptVault {
+  const adapter = app.vault.adapter
+  return {
+    read: async path => ((await adapter.exists(path)) ? adapter.read(path) : undefined),
+    write: async (path, content) => {
+      const folder = path.slice(0, path.lastIndexOf('/'))
+      if (folder && !(await adapter.exists(folder))) await adapter.mkdir(folder)
+      await adapter.write(path, content)
+    },
+  }
 }
 
 /**

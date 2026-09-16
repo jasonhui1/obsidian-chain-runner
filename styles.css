@@ -437,6 +437,39 @@
   color: var(--text-warning);
 }
 
+/* ── Direction buttons ────────────────────────────────────────────────────
+   The verb row under each proposal in a hold note — a shortcut for typing the
+   same line by hand, so it stays as quiet as the words it sits beside. */
+
+.chain-runner-direction-buttons {
+  display: flex;
+  gap: var(--size-2-3);
+  margin-bottom: var(--size-4-2);
+}
+
+.chain-runner-direction-button {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  height: auto;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-direction-button:hover {
+  background: none;
+  box-shadow: none;
+  color: var(--text-accent);
+}
+
+.chain-runner-direction-button:focus-visible {
+  color: var(--text-accent);
+  outline: 2px solid var(--background-modifier-border-focus, var(--text-accent));
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
+
 /* ── Keep-marks ───────────────────────────────────────────────────────
    The marking surface. A mark is Obsidian's own highlight, which is legible in
    both themes because the theme owns it; the cursor line is the hover ground the
@@ -525,8 +558,9 @@
     background-color var(--anim-duration-fast, 100ms) var(--anim-motion-smooth, ease-in-out);
 }
 
-/* The four things still happening. Each also says so in words, so the pulse is
+/* The five things still happening. Each also says so in words, so the pulse is
    never the only channel. */
+.chain-runner-directing-progress,
 .chain-runner-run-status--running,
 .chain-runner-panel-notice--writing,
 .chain-runner-engine-pill--unknown,
@@ -558,4 +592,444 @@
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* A picker opened from a click on the drawing sits beside what it changes,
+   rather than centre-screen, and lets the drawing show through (ADR-0010).
+   `anchorModal` sets the spot; these undo Obsidian's own centring. */
+.chain-runner-anchored .modal-bg {
+  opacity: 0;
+}
+
+.chain-runner-anchored .modal,
+.chain-runner-anchored .prompt {
+  position: absolute;
+  margin: 0;
+}
+
+/* ── Directing panel ──────────────────────────────────────────────────
+   One run's hold in the right sidebar: a one-line header, tabs that stay at
+   the top while the body scrolls, and one proposal at a time. */
+
+.chain-runner-directing {
+  --chain-runner-directing-gutter: var(--size-4-5);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0 !important;
+  line-height: 1.5;
+}
+
+.chain-runner-directing-header {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  padding: var(--size-4-3) var(--chain-runner-directing-gutter);
+}
+
+.chain-runner-directing-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-directing-faint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: normal;
+}
+
+.chain-runner-directing button.chain-runner-directing-more,
+.chain-runner-directing button.chain-runner-directing-quiet {
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.chain-runner-directing button.chain-runner-directing-more {
+  font-size: var(--font-ui-large);
+  padding: 0 var(--size-4-2);
+}
+
+.chain-runner-directing-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--chain-runner-directing-gutter) var(--size-4-6);
+}
+
+.chain-runner-directing-empty {
+  color: var(--text-muted);
+  padding: var(--size-4-6) 0 var(--size-4-3);
+}
+
+.chain-runner-directing-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2-1) var(--size-4-2);
+  margin: 0 calc(-1 * var(--chain-runner-directing-gutter));
+  padding: 0 var(--size-4-2);
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.chain-runner-directing-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-1);
+}
+
+.chain-runner-directing .chain-runner-directing-tablist button {
+  height: auto;
+  padding: var(--size-4-2) var(--size-4-2);
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+}
+
+/* An edited proposal's tab carries a dot, where a changed file's tab would. */
+.chain-runner-directing .chain-runner-directing-tablist button.is-edited::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--size-2-2);
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  vertical-align: middle;
+}
+
+.chain-runner-directing .chain-runner-directing-tablist button.is-selected {
+  color: var(--text-normal);
+  border-bottom-color: var(--interactive-accent);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-directing-section {
+  padding: var(--size-4-5) 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.chain-runner-directing-section:last-child {
+  border-bottom: none;
+}
+
+.chain-runner-directing-section-title {
+  margin-bottom: var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-directing-verbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-4);
+}
+
+.chain-runner-directing-verbs button,
+.chain-runner-directing-verbs select {
+  height: auto;
+  padding: var(--size-2-3) var(--size-4-3);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing .chain-runner-directing-verbs .is-given {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.chain-runner-directing-proposal {
+  padding: var(--size-2-1) var(--size-4-4);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+  line-height: 1.6;
+}
+
+.chain-runner-directing-proposal h1,
+.chain-runner-directing-proposal h2,
+.chain-runner-directing-proposal h3,
+.chain-runner-directing-proposal h4 {
+  margin: var(--size-4-4) 0 var(--size-2-1);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-bold);
+}
+
+.chain-runner-directing [hidden] {
+  display: none;
+}
+
+.chain-runner-directing-proposal.is-clamped {
+  max-height: 18em;
+  overflow: hidden;
+}
+
+.chain-runner-directing-proposal.is-clamped.is-overflowing {
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent);
+  mask-image: linear-gradient(to bottom, black 70%, transparent);
+}
+
+.chain-runner-directing-markdown {
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-direction {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-canon {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-2);
+  padding: var(--size-2-2) 0;
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-canon input {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.chain-runner-directing-turn {
+  margin-bottom: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-said {
+  margin-bottom: var(--size-2-2);
+  font-weight: var(--font-semibold);
+  white-space: pre-wrap;
+}
+
+.chain-runner-directing-said::before {
+  content: "You: ";
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.chain-runner-directing-answerer {
+  margin-top: var(--size-4-2);
+  color: var(--text-muted);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-directing-turn .chain-runner-directing-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chain-runner-directing-turn .chain-runner-directing-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chain-runner-directing-turn button.chain-runner-directing-quiet {
+  height: auto;
+  margin-top: var(--size-2-2);
+  padding: var(--size-2-1) 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-directing-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-3);
+}
+
+.chain-runner-directing-box textarea,
+.chain-runner-directing-box input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-box textarea {
+  resize: vertical;
+}
+
+.chain-runner-directing-quests .chain-runner-directing-said::before {
+  content: none;
+}
+
+.chain-runner-directing-run-link {
+  display: inline-block;
+  margin-top: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-directing button.chain-runner-directing-rerun {
+  margin-left: auto;
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-progress {
+  margin-top: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-runner-directing-verdict.is-stale,
+.chain-runner-directing-proposal.is-stale {
+  opacity: 0.5;
+}
+
+.chain-runner-directing-proposal-actions,
+.chain-runner-directing-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-2-3);
+}
+
+.chain-runner-directing-proposal-actions button.chain-runner-directing-quiet {
+  height: auto;
+  padding: var(--size-2-1) 0;
+  font-size: var(--font-ui-smaller);
+}
+
+/* The proposal editor: CodeMirror dressed as Obsidian's own editor. */
+.chain-runner-directing-editor .cm-editor {
+  max-height: 24em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.chain-runner-directing-editor .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--background-modifier-border-focus);
+}
+
+.chain-runner-directing-editor .cm-scroller {
+  overflow-y: auto;
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+  line-height: var(--line-height-normal);
+}
+
+.chain-runner-directing-editor .cm-content {
+  min-height: 12em;
+  padding: var(--size-4-2);
+  color: var(--text-normal);
+  caret-color: var(--caret-color);
+}
+
+.chain-runner-md-h1 {
+  font-size: var(--h1-size);
+  font-weight: var(--h1-weight);
+  color: var(--h1-color);
+}
+
+.chain-runner-md-h2 {
+  font-size: var(--h2-size);
+  font-weight: var(--h2-weight);
+  color: var(--h2-color);
+}
+
+.chain-runner-md-h3 {
+  font-size: var(--h3-size);
+  font-weight: var(--h3-weight);
+  color: var(--h3-color);
+}
+
+.chain-runner-md-h4 {
+  font-size: var(--h4-size);
+  font-weight: var(--h4-weight);
+  color: var(--h4-color);
+}
+
+.chain-runner-md-h5 {
+  font-size: var(--h5-size);
+  font-weight: var(--h5-weight);
+  color: var(--h5-color);
+}
+
+.chain-runner-md-h6 {
+  font-size: var(--h6-size);
+  font-weight: var(--h6-weight);
+  color: var(--h6-color);
+}
+
+.chain-runner-md-strong {
+  font-weight: var(--bold-weight);
+  color: var(--bold-color);
+}
+
+.chain-runner-md-emphasis {
+  font-style: italic;
+  color: var(--italic-color);
+}
+
+.chain-runner-md-struck {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.chain-runner-md-code {
+  font-family: var(--font-monospace);
+  font-size: var(--code-size);
+  color: var(--code-normal);
+  background: var(--code-background);
+}
+
+.chain-runner-md-quote {
+  color: var(--text-muted);
+}
+
+.chain-runner-md-link {
+  color: var(--link-color);
+}
+
+/* Every marker Obsidian leaves in view while the cursor is on the line: ##, **, a bullet. */
+.chain-runner-md-mark {
+  color: var(--text-faint);
+}
+
+/* Both classes together is a list's own marker, rather than the line it opens. */
+.chain-runner-md-list.chain-runner-md-mark {
+  color: var(--list-marker-color);
+}
+
+.chain-runner-directing-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  padding: var(--size-4-3) var(--chain-runner-directing-gutter);
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.chain-runner-directing-footer button {
+  width: 100%;
+}
+
+.chain-runner-directing-resumed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-directing-resumed .chain-runner-directing-run-link {
+  margin-top: 0;
+}
+
+.chain-runner-directing-failed {
+  color: var(--text-error);
 }

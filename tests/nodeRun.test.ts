@@ -6,6 +6,7 @@ import {
   NO_OUTPUTS,
   NodeRun,
   NOTHING_WRITTEN,
+  PICK_A_CHAIN,
   SOME_UNBOUND,
 } from '@/ui/nodeRun'
 import { MISSING_NOTE } from '@/ui/inputSeed'
@@ -165,12 +166,17 @@ function makeRun(): NodeRun {
   const surface: NodeSurface = {
     selection: () => undefined,
     selectedProposal: () => undefined,
+    selectedRun: () => undefined,
+    cardProposal: () => undefined,
+    selectedNode: () => undefined,
+    reflow: () => Promise.resolve(false),
     placeProposals: async () => {},
     editProposal: async () => false,
     unavailable: () => undefined,
     hasActiveDrawing: () => true,
     place: () => Promise.resolve(),
     setParameter: () => Promise.resolve(true),
+    setChain: () => Promise.resolve(true),
     read: () => reading,
     setRunStatus: (_target, status) => {
       labels.push(runLabel(status))
@@ -509,6 +515,12 @@ describe('what stops a run', () => {
     chains = []
     await start()
     expect(notices).toEqual([CHAIN_GONE('Relay')])
+  })
+
+  it('says which line to click when the node has no chain yet', async () => {
+    await makeRun().run({ ...nodeData, chain: '', chainName: '' }, { groupIds: ['g-1'] })
+    expect(notices).toEqual([PICK_A_CHAIN])
+    expect(launched).toEqual([])
   })
 
   it('says so when the node has left the drawing', async () => {

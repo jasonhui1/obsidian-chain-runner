@@ -6,18 +6,39 @@ import { EngineStatus } from './engine/status'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
-import { createDrawingSurface, createNodeSurface, registerLinkHook } from './ui/excalidraw'
+import { AskTheRoom } from './ui/askTheRoom'
+import { ChatWithProposer } from './ui/chatWithProposer'
+import { DirectingView, DIRECTING_VIEW_TYPE } from './ui/directingView'
+import { createDirectionButtons } from './ui/directionButtons'
+import {
+  createDrawingSurface,
+  createNodeSurface,
+  createScriptVault,
+  registerLinkHook,
+  registerSelectionHook,
+  scriptFolder,
+} from './ui/excalidraw'
 import { Expand, newProposalId } from './ui/expand'
+import { PointerClicks } from './ui/pointerClicks'
+import { DirectFromDrawing } from './ui/directFromDrawing'
+import { DirectRun } from './ui/directRun'
+import { HoldActions } from './ui/holdActions'
+import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
+import { RerunDownstream } from './ui/rerunDownstream'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
+import { RunPanels } from './ui/runPanels'
+import { Resume } from './ui/resume'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
+import { SideQuest } from './ui/sideQuest'
 import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
+import { installScript } from './ui/toolScript'
 
 export default class ChainRunnerPlugin extends Plugin {
   // Obsidian declares `settings?: unknown` on Plugin for subclasses to narrow.
@@ -29,6 +50,7 @@ export default class ChainRunnerPlugin extends Plugin {
 
   private pill: HTMLElement | undefined
   private quickRun!: QuickRunner
+  private nodes!: ChainNodes
 
   override async onload(): Promise<void> {
     this.settings = withDefaults(await this.loadData())
@@ -65,6 +87,10 @@ export default class ChainRunnerPlugin extends Plugin {
         engineUrl: () => this.settings.engineUrl,
         exists: runId => this.engine.runExists(runId),
       }),
+    )
+    // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
+    this.registerMarkdownPostProcessor(
+      createDirectionButtons({ app: this.app, notify: message => new Notice(message) }),
     )
     const keep = new KeepPiece({
       app: this.app,
@@ -112,7 +138,29 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the click that started it; unloading the plugin ends it.
     this.register(() => nodeRun.stop())
 
-    const nodes = new ChainNodes({
+    // A selection hook carries no event, so the press behind it is read from
+    // here; capture, because Excalidraw's canvas stops its own (ADR-0010).
+    const clicks = new PointerClicks(() => Date.now())
+    const spot = (event: PointerEvent): { x: number; y: number } => ({ x: event.clientX, y: event.clientY })
+    this.registerDomEvent(document, 'pointerdown', event => clicks.press(spot(event), Date.now()), { capture: true })
+    this.registerDomEvent(
+      document,
+      'pointerup',
+      event => {
+        clicks.release(spot(event), Date.now())
+        // A drag that resized a node is finished; its lines are re-cut now
+        // rather than on every frame, because every write is a save (ADR-0011).
+        nodes.handleResize()
+      },
+      { capture: true },
+    )
+    this.registerDomEvent(document, 'pointercancel', () => clicks.cancel(), { capture: true })
+    // `▶ Run` without a modifier. Excalidraw's canvas captures the pointer, so
+    // the browser's own `dblclick` never arrives; the presses are counted
+    // instead (ADR-0010).
+    clicks.onDouble(() => nodes.handleDoubleClick())
+
+    const nodes = (this.nodes = new ChainNodes({
       app: this.app,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
@@ -120,7 +168,11 @@ export default class ChainRunnerPlugin extends Plugin {
       surface,
       newNodeId,
       run: (data, element, view) => void nodeRun.run(data, element, view),
-    })
+      isRunning: nodeId => nodeRun.isRunning(nodeId),
+      clickSpot: settled => clicks.onSettled(settled),
+      pressSpot: () => clicks.pressed(),
+      now: () => Date.now(),
+    }))
     const expand = new Expand({
       app: this.app,
       engine: this.engine,
@@ -134,21 +186,115 @@ export default class ChainRunnerPlugin extends Plugin {
     // An expansion outlives the command that started it; unloading the plugin ends it.
     this.register(() => expand.stop())
 
+    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
+    const directRun = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => this.activeResultView()?.currentResult(),
+      open: note => this.app.workspace.getLeaf('tab').openFile(note),
+    })
+    // From the drawing, a hold opens in the directing panel rather than a tab.
+    const directInPanel = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => undefined,
+      open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
+    })
+    const chat = new ChatWithProposer({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const askRoom = new AskTheRoom({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const rerun = new RerunDownstream({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const sideQuest = new SideQuest({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
+    const resume = new Resume({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
+    const holds = new HoldActions({
+      app: this.app,
+      notify: message => new Notice(message),
+      notes: holdNotes,
+      write: runId => directInPanel.write(runId),
+      chat,
+      room: askRoom,
+      rerun,
+      quest: sideQuest,
+      resume,
+      engineUrl: () => this.settings.engineUrl,
+      panels: new RunPanels(this.engine),
+    })
+    this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
+    const directFromDrawing = new DirectFromDrawing({
+      surface: {
+        unavailable: () => surface.unavailable(),
+        selectedRun: () => surface.selectedRun(),
+        cardProposal: (element, view) => surface.cardProposal(element, view),
+      },
+      direct: runId => directInPanel.openHold(runId),
+      showProposal: async (runId, proposal) => void (await this.openDirectingPanel())?.show(runId, proposal),
+      notify: message => new Notice(message),
+      clickSpot: settled => clicks.onSettled(settled),
+    })
+
     // The hook lives on Excalidraw's plugin instance, which may not be loaded
     // yet; the disposer is registered now so an unload before layout-ready wins.
     let removeLinkHook: (() => void) | undefined
+    let removeSelectionHook: (() => void) | undefined
     let unloaded = false
     this.register(() => {
       unloaded = true
       removeLinkHook?.()
+      removeSelectionHook?.()
     })
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return
       // Each handler claims its own links and passes on what is not its; a
       // proposal's labels and a chain node's lines never overlap.
       removeLinkHook = registerLinkHook(this.app, (element, view) =>
-        [expand, nodes].every(handler => handler.handleLinkClick(element, view)),
+        [expand, nodes, directFromDrawing].every(handler => handler.handleLinkClick(element, view)),
       )
+      // A plain click reaches a node and a run's Direct label; a proposal's
+      // decisions stay on the link hook, where nothing is written without the reader saying so.
+      removeSelectionHook = registerSelectionHook(this.app, {
+        clicked: (element, view) => {
+          nodes.handleSelection(element, view)
+          directFromDrawing.handleSelection(element, view)
+        },
+        editing: (element, view) => nodes.handleTextEdit(element, view),
+      })
+      // The toolbar button is a file in the vault, and Excalidraw names the folder.
+      const folder = scriptFolder(this.app)
+      if (folder) {
+        void installScript(createScriptVault(this.app), folder).catch(() => {
+          new Notice('Chain Runner could not write its Excalidraw toolbar script.')
+        })
+      }
     })
 
     this.addSettingTab(new ChainRunnerSettingTab(this.app, this))
@@ -191,6 +337,54 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void this.markLines(marks),
     })
 
+    this.addCommand({
+      id: 'direct-this-run',
+      name: 'Direct this run',
+      callback: () => void directRun.start(),
+    })
+
+    this.addCommand({
+      id: 'open-directing-panel',
+      name: 'Open the directing panel',
+      callback: () => void this.openDirectingPanel(),
+    })
+
+    this.addCommand({
+      id: 'direct-selected-run',
+      name: 'Direct the selected run',
+      callback: () => void directFromDrawing.directSelected(),
+    })
+
+    this.addCommand({
+      id: 'resume-hold',
+      name: 'Resume this hold',
+      callback: () => void resume.start(),
+    })
+
+    this.addCommand({
+      id: 'rerun-downstream',
+      name: 'Rerun downstream',
+      callback: () => void rerun.start(),
+    })
+
+    this.addCommand({
+      id: 'chat-with-proposer',
+      name: 'Chat with proposer',
+      callback: () => void chat.start(),
+    })
+
+    this.addCommand({
+      id: 'ask-the-room',
+      name: 'Ask the room',
+      callback: () => void askRoom.start(),
+    })
+
+    this.addCommand({
+      id: 'side-quest',
+      name: 'Side quest',
+      callback: () => void sideQuest.start(),
+    })
+
     // Proof the client reaches a live engine, and something to exercise the
     // offline path against (#3).
     this.addCommand({
@@ -203,6 +397,14 @@ export default class ChainRunnerPlugin extends Plugin {
         })
       },
     })
+  }
+
+  /**
+   * What the Excalidraw toolbar script calls — this plugin's one caller from
+   * outside it. The view is the drawing the button was pressed on.
+   */
+  addChainNode(view?: unknown): Promise<void> {
+    return this.nodes.placeUnset(view)
   }
 
   /**
@@ -230,6 +432,22 @@ export default class ChainRunnerPlugin extends Plugin {
     if (open.length === 0) await leaf.setViewState({ type: RESULT_VIEW_TYPE, active: false })
     await this.app.workspace.revealLeaf(leaf)
     return leaf.view instanceof RunResultView ? leaf.view : undefined
+  }
+
+  /** The directing panel in the right sidebar, opened or brought to the front. */
+  private async openDirectingPanel(): Promise<DirectingView | undefined> {
+    const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)
+    const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
+    if (!leaf) return undefined
+    if (open.length === 0) await leaf.setViewState({ type: DIRECTING_VIEW_TYPE, active: false })
+    await this.app.workspace.revealLeaf(leaf)
+    return leaf.view instanceof DirectingView ? leaf.view : undefined
+  }
+
+  /** The result view already open, if any — this never opens one of its own. */
+  private activeResultView(): RunResultView | undefined {
+    const leaf = this.app.workspace.getLeavesOfType(RESULT_VIEW_TYPE)[0]
+    return leaf?.view instanceof RunResultView ? leaf.view : undefined
   }
 
   private refreshResultViews(): void {

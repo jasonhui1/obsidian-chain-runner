@@ -13,6 +13,8 @@ export const openedModals: OpenModal[] = []
 /** A modal on screen, as a test answers it. */
 export interface OpenModal {
   placeholder: string
+  /** Where it was told to open, or `undefined` for centre-screen. */
+  anchor?: { x: number; y: number }
   /** Answers it the way arrowing to a row and pressing enter would. */
   choose(index: number, query?: string): void
 }
@@ -41,6 +43,9 @@ class BaseModal {
   }
 
   close(): void {}
+
+  /** The real one draws; the anchoring that overrides it is checked on screen. */
+  onOpen(): void {}
 }
 
 export class SuggestModal<T> extends BaseModal {

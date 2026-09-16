@@ -8,8 +8,11 @@ import { momentOf, parameterToAsk, type ChainSummary } from '../engine/types'
  * link needs its own element. `src/ui/excalidraw.ts` puts them on a scene.
  */
 
-/** Which part of the node an element is. Stored on it, so a click knows what was clicked. */
-export type ChainNodeRole = 'box' | 'title' | 'moment' | 'parameter' | 'run'
+/**
+ * Which part of the node an element is. Stored on it, so a click knows what was
+ * clicked. `title` is a legacy alias for `chain` (ADR-0009).
+ */
+export type ChainNodeRole = 'box' | 'chain' | 'moment' | 'parameter' | 'run' | 'title'
 
 /**
  * The node's identity, in each element's `customData`. Stamped on all five so a
@@ -25,6 +28,10 @@ export interface ChainNodeData {
   chainName: string
   parameterName?: string
   parameterValue?: string
+  /** The chain's moment in full, which only the node records once it is drawn. */
+  moment?: string
+  /** The box width these lines were cut to fit, so a resize is noticed once. */
+  laidOut?: number
 }
 
 /** One element of the node, in the shapes Excalidraw is later asked for. */
@@ -49,17 +56,23 @@ export interface MaybeNodeElement {
   customData?: unknown
   /** Excalidraw's own grouping. Re-made on copy, which is what separates two copies. */
   groupIds?: readonly string[]
+  x?: number
+  y?: number
 }
 
 /**
  * The links the two clickable lines carry. A scheme of our own, so a click that
  * escapes the hook fails as an unopenable link rather than creating a note.
  */
+export const CHAIN_LINK = 'chain-runner://chain'
 export const PARAMETER_LINK = 'chain-runner://parameter'
 export const RUN_LINK = 'chain-runner://run'
 
 /** Said in the dropdown line before anything has been picked. */
 export const UNSET_PARAMETER = 'unset'
+
+/** Said on the chain line of a node placed before any chain was picked. */
+export const UNSET_CHAIN = 'pick a chain'
 
 /** The key the node's identity lives under, inside Excalidraw's `customData`. */
 const DATA_KEY = 'chainRunner'
@@ -87,6 +100,11 @@ export interface ChainNodeOptions {
   parameterValue?: string
 }
 
+/** The chain line: the mark, the chain's name, and the marker saying it can be changed. */
+export function chainLabel(name: string | undefined): string {
+  return `${TITLE_MARK} ${name || UNSET_CHAIN} ${DROPDOWN_MARK}`
+}
+
 /** The dropdown line: the parameter's name, the marker, and what it is set to. */
 export function parameterLabel(name: string, value: string | undefined): string {
   return `${name} ${DROPDOWN_MARK} ${value || UNSET_PARAMETER}`
@@ -96,14 +114,16 @@ export function parameterLabel(name: string, value: string | undefined): string 
  * The node's elements, top-left at the origin — the caller moves the set to the
  * cursor. The box comes first so every line sits on top of it.
  */
-export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): ChainNodeElement[] {
-  const parameter = parameterToAsk(chain)
+export function buildChainNode(chain: ChainSummary | undefined, options: ChainNodeOptions): ChainNodeElement[] {
+  const parameter = chain ? parameterToAsk(chain) : undefined
   const data = (role: ChainNodeRole): { chainRunner: ChainNodeData } => ({
     chainRunner: {
       nodeId: options.nodeId,
       role,
-      chain: chain.slug,
-      chainName: chain.name,
+      chain: chain?.slug ?? '',
+      chainName: chain?.name ?? '',
+      laidOut: WIDTH,
+      ...(chain && momentOf(chain) ? { moment: momentOf(chain) } : {}),
       ...(parameter ? { parameterName: parameter.name } : {}),
       ...(options.parameterValue ? { parameterValue: options.parameterValue } : {}),
     },
@@ -132,8 +152,8 @@ export function buildChainNode(chain: ChainSummary, options: ChainNodeOptions): 
     y += height + LINE_GAP
   }
 
-  line('title', `${TITLE_MARK} ${chain.name}`, TITLE_SIZE, INK)
-  const moment = momentOf(chain)
+  line('chain', chainLabel(chain?.name), TITLE_SIZE, LINK_BLUE, CHAIN_LINK)
+  const moment = chain ? momentOf(chain) : ''
   if (moment) line('moment', `“${moment}”`, LINE_SIZE, GREY)
   if (parameter) {
     line('parameter', parameterLabel(parameter.name, options.parameterValue), LINE_SIZE, LINK_BLUE, PARAMETER_LINK)
@@ -196,7 +216,8 @@ export function chainNodeData(element: MaybeNodeElement): ChainNodeData | undefi
   if (typeof custom !== 'object' || custom === null) return undefined
   const stamp = (custom as Record<string, unknown>)[DATA_KEY]
   if (typeof stamp !== 'object' || stamp === null) return undefined
-  const { nodeId, role, chain, chainName, parameterName, parameterValue } = stamp as Record<string, unknown>
+  const { nodeId, role, chain, chainName, parameterName, parameterValue, moment, laidOut } =
+    stamp as Record<string, unknown>
   if (typeof nodeId !== 'string' || typeof chain !== 'string' || typeof chainName !== 'string') return undefined
   if (!isRole(role)) return undefined
   return {
@@ -206,11 +227,25 @@ export function chainNodeData(element: MaybeNodeElement): ChainNodeData | undefi
     chainName,
     ...(typeof parameterName === 'string' ? { parameterName } : {}),
     ...(typeof parameterValue === 'string' ? { parameterValue } : {}),
+    ...(typeof moment === 'string' ? { moment } : {}),
+    ...(typeof laidOut === 'number' ? { laidOut } : {}),
   }
 }
 
 function isRole(role: unknown): role is ChainNodeRole {
-  return role === 'box' || role === 'title' || role === 'moment' || role === 'parameter' || role === 'run'
+  return ROLES.includes(role as ChainNodeRole)
+}
+
+const ROLES: ChainNodeRole[] = ['box', 'chain', 'moment', 'parameter', 'run', 'title']
+
+/** The role a stored one means now, so a node drawn before the chain line was clickable still reads. */
+export function chainNodeRole(role: ChainNodeRole): Exclude<ChainNodeRole, 'title'> {
+  return role === 'title' ? 'chain' : role
+}
+
+/** A node placed by the toolbar button, before its chain was picked. */
+export function chainIsUnset(data: ChainNodeData): boolean {
+  return data.chain === ''
 }
 
 /**
@@ -230,6 +265,16 @@ export interface NodeEdit<E> {
   text?: string
   /** The `run` line sits against the box's right edge; a grown label moves left. */
   keepRightEdge?: boolean
+  /** Where the line sits now, when a re-shaped node moved it. */
+  y?: number
+  /** The box's own height, when the lines inside it changed. */
+  height?: number
+  /** Where the line starts, when the box it sits in changed width. */
+  x?: number
+  /** How wide the line may draw, when the box it sits in changed width. */
+  width?: number
+  /** Put back to the size the node was designed at, after a drag scaled it. */
+  fontSize?: number
   data: ChainNodeData
 }
 
@@ -256,6 +301,150 @@ export function parameterEdits<E extends MaybeNodeElement>(
       data: next,
     })
   }
+  return edits
+}
+
+/** What the node becomes when its chain is changed (ADR-0009). */
+export interface NodeReshape<E> {
+  /** Elements already on the drawing, with their new words and place. */
+  edits: NodeEdit<E>[]
+  /** Lines the new chain has and the old did not, at their place on the drawing. */
+  additions: ChainNodeElement[]
+  /** Lines the new chain does not have. */
+  removals: E[]
+}
+
+/** An empty reshape: the node is no longer on the drawing. */
+const NOTHING: NodeReshape<never> = { edits: [], additions: [], removals: [] }
+
+/** Only `y` moves: every line but `run` is left-aligned, and `run`'s words do not change (ADR-0009). */
+export function chainEdits<E extends MaybeNodeElement>(
+  scene: readonly E[],
+  target: NodeTarget,
+  chain: ChainSummary,
+  parameterValue?: string,
+): NodeReshape<E> {
+  const mine = scene.flatMap(element => {
+    const data = nodeElementData(element, target)
+    return data ? [{ element, role: chainNodeRole(data.role) }] : []
+  })
+  const box = mine.find(one => one.role === 'box')
+  if (!box) return NOTHING
+
+  const x = box.element.x ?? 0
+  const y = box.element.y ?? 0
+  const wanted = buildChainNode(chain, {
+    nodeId: target.nodeId,
+    ...(parameterValue ? { parameterValue } : {}),
+  })
+
+  const edits: NodeEdit<E>[] = []
+  const additions: ChainNodeElement[] = []
+  for (const shape of wanted) {
+    const found = mine.find(one => one.role === shape.role)
+    if (!found) {
+      additions.push({ ...shape, x: x + shape.x, y: y + shape.y })
+      continue
+    }
+    edits.push({
+      element: found.element,
+      y: y + shape.y,
+      // The `run` line's words are its run's, not its chain's.
+      ...(shape.role === 'run' || shape.role === 'box' ? {} : { text: shape.text ?? '' }),
+      ...(shape.role === 'box' ? { height: shape.height } : {}),
+      data: shape.customData.chainRunner,
+    })
+  }
+
+  const kept = new Set(wanted.map(shape => shape.role))
+  return { edits, additions, removals: mine.filter(one => !kept.has(one.role)).map(one => one.element) }
+}
+
+/**
+ * Every node on the scene, one target each. The box is the one element a node
+ * has exactly one of; a copy carries the same `nodeId` and is told apart by the
+ * group Excalidraw re-made for it.
+ */
+export function nodeTargets(scene: readonly MaybeNodeElement[]): NodeTarget[] {
+  return scene.flatMap(element => {
+    const data = chainNodeData(element)
+    if (!data || chainNodeRole(data.role) !== 'box') return []
+    return [{ nodeId: data.nodeId, ...(element.groupIds ? { groupIds: element.groupIds } : {}) }]
+  })
+}
+
+/** The lines of a node, top to bottom, which is the order they are laid out in. */
+const STACK: ChainNodeRole[] = ['chain', 'title', 'moment', 'parameter']
+
+/** What a line's words are before they were ever cut to fit. */
+function fullText(data: ChainNodeData, shown: string): string {
+  const role = chainNodeRole(data.role)
+  if (role === 'chain') return chainLabel(data.chainName)
+  if (role === 'parameter' && data.parameterName) {
+    return parameterLabel(data.parameterName, data.parameterValue)
+  }
+  // The moment of a node drawn before it was kept, and the run's own words.
+  if (role === 'moment' && data.moment) return `“${data.moment}”`
+  return shown
+}
+
+/**
+ * What changes when the reader drags a node wider or narrower: every line cut
+ * again to the box's new width, at the size the node was designed at rather
+ * than the size a drag scaled it to (ADR-0010). Empty when the box is still the
+ * width its lines were cut for, so a scene that has settled is never written.
+ */
+export function reflowEdits<E extends MaybeNodeElement & { text?: string; fontSize?: number; width?: number }>(
+  scene: readonly E[],
+  target: NodeTarget,
+): NodeEdit<E>[] {
+  const mine = scene.flatMap(element => {
+    const data = nodeElementData(element, target)
+    return data ? [{ element, data, role: chainNodeRole(data.role) }] : []
+  })
+  const box = mine.find(one => one.role === 'box')
+  const width = box?.element.width
+  if (!box || width === undefined) return []
+  if (Math.round(width) === Math.round(box.data.laidOut ?? WIDTH)) return []
+
+  const lineWidth = width - PADDING * 2
+  const left = box.element.x ?? 0
+  const top = box.element.y ?? 0
+  const edits: NodeEdit<E>[] = []
+  let y = PADDING
+
+  for (const role of STACK) {
+    const found = mine.find(one => one.role === role)
+    if (!found) continue
+    const fontSize = role === 'chain' || role === 'title' ? TITLE_SIZE : LINE_SIZE
+    const height = Math.round(fontSize * LINE_HEIGHT)
+    edits.push({
+      element: found.element,
+      x: left + PADDING,
+      y: top + y,
+      width: lineWidth,
+      fontSize,
+      text: oneLine(fullText(found.data, found.element.text ?? ''), fontSize, lineWidth),
+      data: { ...found.data, laidOut: width },
+    })
+    y += height + LINE_GAP
+  }
+
+  const run = mine.find(one => one.role === 'run')
+  if (run) {
+    const height = Math.round(LINE_SIZE * LINE_HEIGHT)
+    edits.push({
+      element: run.element,
+      // The words are the run's, not the box's; only where they sit changes.
+      x: left + width - PADDING - (run.element.width ?? 0),
+      y: top + y,
+      fontSize: LINE_SIZE,
+      data: { ...run.data, laidOut: width },
+    })
+    y += height
+  }
+
+  edits.push({ element: box.element, y: top, height: y + PADDING, data: { ...box.data, laidOut: width } })
   return edits
 }
 

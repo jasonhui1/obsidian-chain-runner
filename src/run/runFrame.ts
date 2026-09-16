@@ -16,6 +16,7 @@ export interface FramedPanel {
 /** A run's outputs, as a frame holding placed panels. */
 export interface RunFrame {
   name: string
+  runId: string
   box: Box
   panels: FramedPanel[]
 }
@@ -25,7 +26,7 @@ const PANEL_HEIGHT = 240
 const JOIN_WIDTH = 480
 const GAP = 24
 /** Room inside the frame around its panels. */
-const PADDING = 32
+export const FRAME_PADDING = 32
 /** Between the node and the frame its run produced. */
 const NODE_GAP = 80
 
@@ -49,19 +50,20 @@ export function buildRunFrame(input: {
 
   return {
     name: `${chainName} · ${runId}`,
+    runId,
     box: {
       x: origin.x,
       y: origin.y,
-      width: bounds.width + PADDING * 2,
-      height: bounds.height + PADDING * 2,
+      width: bounds.width + FRAME_PADDING * 2,
+      height: bounds.height + FRAME_PADDING * 2,
     },
     // Arranged from zero, then moved as a set.
     panels: placed.map(one => ({
       ...one,
       box: {
         ...one.box,
-        x: one.box.x - bounds.x + origin.x + PADDING,
-        y: one.box.y - bounds.y + origin.y + PADDING,
+        x: one.box.x - bounds.x + origin.x + FRAME_PADDING,
+        y: one.box.y - bounds.y + origin.y + FRAME_PADDING,
       },
     })),
   }

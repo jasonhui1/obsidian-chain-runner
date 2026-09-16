@@ -117,13 +117,18 @@ function makeExpand(): Expand {
   const surface: NodeSurface = {
     unavailable: () => undefined,
     hasActiveDrawing: () => true,
+    selectedNode: () => undefined,
+    reflow: () => Promise.resolve(false),
     place: () => Promise.resolve(),
     setParameter: () => Promise.resolve(true),
+    setChain: () => Promise.resolve(true),
     read: () => undefined,
     setRunStatus: () => Promise.resolve(true),
     placeRun: () => Promise.resolve(true),
     selection: () => block,
     selectedProposal: () => selectedProposal,
+    selectedRun: () => undefined,
+    cardProposal: () => undefined,
     placeProposals: (proposals, source) => {
       placed.push({ proposals, sourceId: source.id })
       return Promise.resolve()

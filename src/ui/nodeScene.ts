@@ -138,7 +138,7 @@ function boundText(container: SceneShape, scene: readonly SceneShape[]): string 
  * The note an embeddable shows. An alias or a heading names the same note, and
  * the whole of it is what the chain is given; a web page is not a note.
  */
-function linkpathOf(link: string | null | undefined): string | undefined {
+export function linkpathOf(link: string | null | undefined): string | undefined {
   if (!link) return undefined
   const wiki = /^\[\[(.+)\]\]$/.exec(link.trim())
   const raw = (wiki ? wiki[1] : link.trim()).trim()

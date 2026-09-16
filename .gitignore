@@ -3,3 +3,7 @@ main.js
 *.js.map
 .DS_Store
 coverage/
+.env
+.builds/
+shots/
+.agents

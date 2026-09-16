@@ -1,5 +1,5 @@
 import type { App } from 'obsidian'
-import type { ChainNodeData, MaybeNodeElement, NodeRunStatus, NodeTarget } from './chainNode'
+import { chainIsUnset, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
 import type { DrawingView, NodeReading, NodeSurface, PlacedOutput } from './excalidraw'
 import type { Box } from './nodeScene'
 import type { OutputNotes } from './outputNotes'
@@ -30,6 +30,8 @@ export const SOME_UNBOUND = (count: number): string =>
     : `${count} arrows into this node came from nothing readable, and were skipped.`
 
 export const ALREADY_RUNNING = 'This chain node is already running.'
+
+export const PICK_A_CHAIN = 'This node has no chain yet. Click its top line to pick one.'
 
 export const NOTHING_WRITTEN = 'The run did not finish, so nothing was written.'
 
@@ -93,6 +95,10 @@ export class NodeRun {
     view: DrawingView | undefined,
     controller: AbortController,
   ): Promise<void> {
+    if (chainIsUnset(data)) {
+      this.deps.notify(PICK_A_CHAIN)
+      return
+    }
     const unavailable = this.deps.surface.unavailable()
     if (unavailable) {
       this.deps.notify(unavailable)
@@ -136,6 +142,11 @@ export class NodeRun {
       ...(data.parameterValue ? { parameterValue: data.parameterValue } : {}),
     }
     await this.launch(plan, controller)
+  }
+
+  /** Whether that node has a run going; a chain is not changed underneath one. */
+  isRunning(nodeId: string): boolean {
+    return this.inFlight.has(nodeId)
   }
 
   /** Drops every run in flight — the plugin is unloading. */
