@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NO_EDITED_PROPOSAL, NOT_A_HOLD_NOTE, RerunDownstream } from '@/ui/rerunDownstream'
-import { holdNoteContent } from '@/run/holdNote'
+import { holdNoteContent, proposalEdits } from '@/run/holdNote'
 import { RerunWatch, type RerunLanding } from '@/run/rerunWatch'
 import type { RerunProgress } from '@/run/rerunProgress'
 import type { EngineClient } from '@/engine/client'
@@ -229,6 +229,17 @@ describe('start', () => {
     await pending
     expect(notes[HOLD_PATH]).toBe(midRun)
     expect(notices).toEqual([`Reran as run ${NEW}, but proposals changed meanwhile — note left as is`])
+  })
+
+  it('carries a proposal it only replayed, edited while it went, onto the new run as an edit', async () => {
+    runFrames = [{ type: 'run_start', runId: NEW }]
+    const pending = makeRerun().start()
+    notes[HOLD_PATH] = edited().replace('Shrine-maiden silhouette.', 'A fox spirit.')
+    await pending
+    const note = notes[RENAMED_PATH]
+    expect(note).toContain('Burden-driven combat.')
+    expect(proposalEdits(note, newPanels)).toEqual({ 'character-director': 'A fox spirit.' })
+    expect(notices).toEqual([`Reran downstream as run ${NEW}`])
   })
 
   it('also skips the refresh when an edited proposal was reverted back to its original text mid-run — that too differs from what was sent', async () => {

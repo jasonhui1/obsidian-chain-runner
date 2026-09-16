@@ -1,7 +1,7 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { holdNotePath, reranFrom, refreshHoldNote, thoughtsByNode, type HoldHeading } from '../run/holdNote'
+import { editsToCarry, holdNotePath, reranFrom, refreshHoldNote, rewriteProposal, thoughtsByNode, type HoldHeading, type RerunEdits } from '../run/holdNote'
 import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
 import type { RerunReport, RerunWatch } from '../run/rerunWatch'
 import type { EngineClient } from '../engine/client'
@@ -35,8 +35,8 @@ export async function fetchRun(engine: EngineClient, runId: string): Promise<Fet
 export interface RerunAndRefreshHooks {
   /** Edits the freshly re-read note before folding — a chat-driven revise's way to mark its `revise` line done. */
   beforeRefresh?: (content: string, newRunId: string) => string
-  /** True when the freshly re-read note's proposals no longer match what the request was built from — the refresh would discard them, so it is skipped instead. */
-  proposalsStale?: (current: string) => boolean
+  /** The run the request branched from, and the edits it was sent; decides which edits made meanwhile outlive the refresh. */
+  edits: Omit<RerunEdits, 'landed'>
   onProgress?: OnRerunProgress | undefined
 }
 
@@ -46,7 +46,7 @@ export async function rerunAndRefresh(
   file: TFile,
   heading: HoldHeading,
   request: RunRequest,
-  hooks: RerunAndRefreshHooks = {},
+  hooks: RerunAndRefreshHooks,
 ): Promise<string | undefined> {
   const from = [heading.runId, ...reranFrom(await deps.app.vault.cachedRead(file))]
   const report = deps.reruns.begin(from)
@@ -95,15 +95,20 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
   const landedAt = await guardWrite(notify, 'the hold note', async (): Promise<{ notice: string; runId?: string }> => {
     // Read again: the human may have written in the note while the rerun went.
     const current = await app.vault.cachedRead(file)
-    if (hooks.proposalsStale?.(current)) {
+    const carried = editsToCarry(current, { ...hooks.edits, landed: landed.layout.panels })
+    if (!carried) {
       return { notice: `Reran as run ${newRunId}, but proposals changed meanwhile — note left as is` }
     }
-    const refreshed = refreshHoldNote(beforeRefresh(current, newRunId), {
-      runId: landed.run.runId,
-      chainName: heading.chainName,
-      panels: landed.layout.panels,
-      thoughts: thoughtsByNode(landed.run.agentOutputs),
-    })
+    // An edit to a proposal the rerun only replayed is put back, so it can go in the next rerun.
+    const refreshed = Object.entries(carried).reduce(
+      (content, [name, text]) => rewriteProposal(content, name, text),
+      refreshHoldNote(beforeRefresh(current, newRunId), {
+        runId: landed.run.runId,
+        chainName: heading.chainName,
+        panels: landed.layout.panels,
+        thoughts: thoughtsByNode(landed.run.agentOutputs),
+      }),
+    )
     await app.vault.modify(file, refreshed)
 
     // Named for the run it now shows, so directing that run finds it.

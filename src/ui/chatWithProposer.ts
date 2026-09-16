@@ -115,6 +115,10 @@ export class ChatWithProposer {
       return undefined
     }
 
-    return rerunAndRefresh(this.deps, file, heading, request, { beforeRefresh: mark, onProgress })
+    return rerunAndRefresh(this.deps, file, heading, request, {
+      beforeRefresh: mark,
+      onProgress,
+      edits: { before: source.layout.panels, sent: {}, revised: panel.node },
+    })
   }
 }

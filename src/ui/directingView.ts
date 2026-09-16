@@ -54,7 +54,10 @@ export class DirectingView extends ItemView {
 
   /** A rerun moves the hold to the run it landed on; the panel follows, on the tab it was on, unless it has moved on. */
   private async follow(from: string, landed: string | undefined): Promise<void> {
-    const state = landed && from === this.runId && (await this.moveTo(landed))
+    if (!landed || from !== this.runId) return
+    // Before the move, so no redraw of the new hold drops an open edit.
+    this.board().moved(from, landed)
+    const state = await this.moveTo(landed)
     if (state) this.board().draw(state)
   }
 

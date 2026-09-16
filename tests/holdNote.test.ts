@@ -8,6 +8,7 @@ import {
   holdNoteContent,
   holdNotePath,
   mergeHoldNote,
+  editsToCarry,
   proposalEdits,
   refreshHoldNote,
   reranFrom,
@@ -324,6 +325,47 @@ describe('proposalEdits', () => {
 
   it('ignores a proposal whose heading the human removed', () => {
     expect(proposalEdits(note().replace('### character-director', ''), panels)).toEqual({})
+  })
+})
+
+describe('editsToCarry', () => {
+  const world = panel({ name: 'world-director', node: 'world', text: 'A test chamber.' })
+  const gameplay = panel({ name: 'gameplay-director', node: 'gameplay', text: 'Stances.' })
+  const verdict = panel({ name: 'creative-director', node: 'decider', text: 'Old verdict.', emphasis: 'join' })
+  const before = [world, gameplay, verdict]
+  /** The run a rerun of `gameplay: Halo is a burden.` landed on: `world` replayed, the verdict rewritten. */
+  const landed = [world, { ...gameplay, text: 'Halo is a burden.' }, { ...verdict, text: 'New verdict.' }]
+  const sent = { gameplay: 'Halo is a burden.' }
+  const note = () => holdNoteContent(input({ panels: before })).replace('Stances.', 'Halo is a burden.')
+
+  it('carries nothing when nothing was edited while the rerun went', () => {
+    expect(editsToCarry(note(), { before, landed, sent })).toEqual({})
+  })
+
+  it('carries a proposal the rerun only replayed, edited while it went, by name', () => {
+    const current = note().replace('A test chamber.', 'A theme park.')
+    expect(editsToCarry(current, { before, landed, sent })).toEqual({ 'world-director': 'A theme park.' })
+  })
+
+  it('refuses when an edit the rerun was sent has changed since', () => {
+    expect(editsToCarry(note().replace('Halo is a burden.', 'Halo is a leash.'), { before, landed, sent })).toBeUndefined()
+  })
+
+  it('refuses when an edit the rerun was sent has been taken back since', () => {
+    expect(editsToCarry(holdNoteContent(input({ panels: before })), { before, landed, sent })).toBeUndefined()
+  })
+
+  it('refuses when a proposal edited since was one the rerun wrote again', () => {
+    const rewrote = [world, { ...gameplay, text: 'Halo is a burden.' }, panel({ name: 'art-director', node: 'art', text: 'New art.' })]
+    const artBefore = [...before, panel({ name: 'art-director', node: 'art', text: 'Old art.' })]
+    const current = holdNoteContent(input({ panels: artBefore })).replace('Stances.', 'Halo is a burden.').replace('Old art.', 'My art.')
+    expect(editsToCarry(current, { before: artBefore, landed: rewrote, sent })).toBeUndefined()
+  })
+
+  it('leaves the proposal a reply revised to the run it landed on', () => {
+    const revised = [world, { ...gameplay, text: 'Because.' }, verdict]
+    const current = holdNoteContent(input({ panels: before })).replace('Stances.', 'My own words.')
+    expect(editsToCarry(current, { before, landed: revised, sent: {}, revised: 'gameplay' })).toEqual({})
   })
 })
 

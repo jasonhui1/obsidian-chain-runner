@@ -88,6 +88,16 @@ export class DirectingBoard {
     this.showTab(state, proposal)
   }
 
+  /** The hold moved from run `from` to `to`, as a rerun landing moves it; an edit open on it goes along. */
+  moved(from: string, to: string): void {
+    const prefix = editKey(from, '')
+    for (const [key, edit] of [...this.edits]) {
+      if (!key.startsWith(prefix)) continue
+      this.edits.delete(key)
+      this.edits.set(editKey(to, key.slice(prefix.length)), edit)
+    }
+  }
+
   /** Lets go of every open editor; the panel is going away. */
   close(): void {
     for (const key of [...this.edits.keys()]) this.closeEdit(key)
@@ -326,6 +336,12 @@ export class DirectingBoard {
     return !this.rerunning.has(hold.runId) && !this.editOpen(hold)
   }
 
+  /** Whether a rerun going may write `name` again: until it says, any proposal may be. */
+  private rewriting(runId: string, name: string): boolean {
+    const going = this.rerunning.get(runId)
+    return going !== undefined && going.progress?.proposals.includes(name) !== false
+  }
+
   private editOpen(hold: HoldReading): boolean {
     return hold.proposals.some(one => this.edits.has(editKey(hold.runId, one.name)))
   }
@@ -435,7 +451,7 @@ export class DirectingBoard {
     const toggle = this.button(actions, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
     toggle.hidden = !whole
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
-    edit.disabled = this.rerunning.has(runId)
+    edit.disabled = this.rewriting(runId, name)
     edit.addEventListener('click', () => {
       const key = editKey(runId, name)
       const open: OpenEdit = { editor: this.deps.openEditor(text, () => open.refreshSave()), saving: false, refreshSave: () => {} }

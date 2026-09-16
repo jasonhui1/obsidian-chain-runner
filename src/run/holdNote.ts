@@ -265,6 +265,37 @@ export function proposalEdits(content: string, panels: LayoutPanel[]): Record<st
   return edits
 }
 
+/** What a rerun was built from, and what it landed on, for telling which edits made while it went can outlive it. */
+export interface RerunEdits {
+  /** The panels of the run it branched from. */
+  before: LayoutPanel[]
+  landed: LayoutPanel[]
+  /** The proposals' edits it was sent, by node. */
+  sent: Record<string, string>
+  /** A node whose words the rerun took from elsewhere — a chat reply — so its edit is the rerun's to settle. */
+  revised?: string
+}
+
+/**
+ * The proposals edited in `current` that a rerun only replayed, by name, to put
+ * back on the run it landed on. `undefined` when an edit it was sent has changed
+ * since, or it wrote again a proposal edited since: refreshing would lose words.
+ */
+export function editsToCarry(current: string, rerun: RerunEdits): Record<string, string> | undefined {
+  const now = proposalEdits(current, rerun.before)
+  if (Object.entries(rerun.sent).some(([node, text]) => now[node] !== text)) return undefined
+  const carried: Record<string, string> = {}
+  for (const [node, text] of Object.entries(now)) {
+    if (node in rerun.sent || node === rerun.revised) continue
+    const was = rerun.before.find(panel => panel.node === node)
+    const is = rerun.landed.find(panel => panel.node === node)
+    if (!was || !is) continue
+    if (is.text.trim() !== was.text.trim()) return undefined
+    carried[was.name] = text
+  }
+  return carried
+}
+
 const THINKING_FOLD = /^\s*<details>\s*<summary>thinking<\/summary>[\s\S]*?<\/details>/
 
 /** The note for the run a rerun landed on, the verdict it replaces folded atop earlier ones, Direction onward kept. */

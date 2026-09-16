@@ -536,6 +536,30 @@ describe('a rerun going', () => {
     expect(stale('.chain-runner-directing-proposal')).toBe(true)
   })
 
+  it('lets a proposal the rerun only replays be edited, once the rerun has said which it writes again', () => {
+    const panel = board()
+    panel.open(showing(edited), 'world')
+    button('⟳ Rerun downstream').click()
+    expect(button('✎ Edit').disabled).toBe(true)
+    progressTo(verdictOnly)
+    expect(button('✎ Edit').disabled).toBe(false)
+    progressTo({ verdict: true, proposals: ['world'], cards: ['world', 'verdict'] })
+    expect(button('✎ Edit').disabled).toBe(true)
+  })
+
+  it('keeps an edit open, with its words, when the panel moves to the run the rerun landed on', () => {
+    const panel = board()
+    panel.open(showing(edited), 'world')
+    button('⟳ Rerun downstream').click()
+    progressTo(verdictOnly)
+    button('✎ Edit').click()
+    const editor = root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!
+    type(editor, 'A theme park.')
+    panel.moved(RUN, 'landed')
+    panel.draw(showing(hold({ ...edited, runId: 'landed' })))
+    expect(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')?.value).toBe('A theme park.')
+  })
+
   it('shows the line for a reply used as the revision on the Run tab', () => {
     const talked = hold({ conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }] })
     board().open(showing(talked), 'world')

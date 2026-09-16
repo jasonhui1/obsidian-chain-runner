@@ -55,13 +55,8 @@ export class RerunDownstream {
     }
 
     return rerunAndRefresh(this.deps, file, heading, request, {
-      proposalsStale: current => !sameEdits(proposalEdits(current, panels), edits),
+      edits: { before: panels, sent: edits },
       onProgress,
     })
   }
-}
-
-function sameEdits(a: Record<string, string>, b: Record<string, string>): boolean {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
-  return [...keys].every(key => a[key] === b[key])
 }
