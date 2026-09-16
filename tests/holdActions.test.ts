@@ -188,6 +188,8 @@ let chainFrames: RunEvent[]
 let requests: RunRequest[]
 let online: boolean
 let layoutsFetched: number
+/** The runs whose layouts were asked for, in order. */
+let layoutsOf: string[]
 let folders: string[]
 
 function file(path: string): TFile {
@@ -239,9 +241,10 @@ function makeActions(): HoldActions {
       online
         ? Promise.resolve([{ slug: 'combat-lab', name: 'combat lab' }, { slug: 'develop', name: 'develop-direction' }])
         : Promise.reject(new EngineOfflineError(ENGINE_URL)),
-    getLayout: (): Promise<LayoutModel> => {
+    getLayout: (runId: string): Promise<LayoutModel> => {
       if (!online) return Promise.reject(new EngineOfflineError('http://localhost:3000'))
       layoutsFetched++
+      layoutsOf.push(runId)
       return Promise.resolve({ kind: 'columns', panels })
     },
     launchRun: async function* (request: RunRequest) {
@@ -285,6 +288,7 @@ beforeEach(() => {
   requests = []
   online = true
   layoutsFetched = 0
+  layoutsOf = []
   folders = []
 })
 
@@ -293,6 +297,17 @@ describe('read', () => {
     const hold = await makeActions().read(RUN)
     expect(hold?.runId).toBe(RUN)
     expect(hold?.chainName).toBe('creative-director')
+  })
+
+  it('tells edited proposals against the run the note names, which a landing writes before it renames the note', async () => {
+    notes[PATH] = HOLD.replace(`# Hold: run ${RUN}`, `# Hold: run ${NEW}`)
+    const hold = await makeActions().read(RUN)
+    expect(hold?.runId).toBe(NEW)
+    expect(layoutsOf).toEqual([NEW])
+  })
+
+  it('names the runs the hold was under before its reruns', async () => {
+    expect((await makeActions().read(RUN))?.earlierRuns).toEqual(['2026-09-14-old'])
   })
 
   it('is nothing for a run with no hold note', async () => {

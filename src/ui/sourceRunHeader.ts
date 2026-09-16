@@ -37,7 +37,11 @@ export function createSourceRunHeader(deps: SourceRunHeaderDeps): SourceRunHeade
   // rendering that is gone needs no unsubscribing, and one reused for another note follows it.
   const documents = new Set<Document>()
   const stop = deps.reruns.onChange(() => {
-    for (const doc of documents) doc.querySelectorAll<HTMLElement>(`.${SOURCE_RUN_CLASS}`).forEach(header => showRerun(header, deps.reruns))
+    for (const doc of documents) {
+      // A closed popout window's document has no window left.
+      if (!doc.defaultView) documents.delete(doc)
+      else doc.querySelectorAll<HTMLElement>(`.${SOURCE_RUN_CLASS}`).forEach(header => showRerun(header, deps.reruns))
+    }
   })
   const processor: MarkdownPostProcessor = (el, ctx) => {
     const note = sourceNote(ctx.frontmatter)

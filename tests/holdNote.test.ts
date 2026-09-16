@@ -339,12 +339,12 @@ describe('editsToCarry', () => {
   const note = () => holdNoteContent(input({ panels: before })).replace('Stances.', 'Halo is a burden.')
 
   it('carries nothing when nothing was edited while the rerun went', () => {
-    expect(editsToCarry(note(), { before, landed, sent })).toEqual({})
+    expect(editsToCarry(note(), { before, landed, sent })).toEqual({ carried: {}, replaced: [] })
   })
 
   it('carries a proposal the rerun only replayed, edited while it went, by name', () => {
     const current = note().replace('A test chamber.', 'A theme park.')
-    expect(editsToCarry(current, { before, landed, sent })).toEqual({ 'world-director': 'A theme park.' })
+    expect(editsToCarry(current, { before, landed, sent })).toEqual({ carried: { 'world-director': 'A theme park.' }, replaced: [] })
   })
 
   it('refuses when an edit the rerun was sent has changed since', () => {
@@ -355,17 +355,22 @@ describe('editsToCarry', () => {
     expect(editsToCarry(holdNoteContent(input({ panels: before })), { before, landed, sent })).toBeUndefined()
   })
 
-  it('refuses when a proposal edited since was one the rerun wrote again', () => {
+  it('names a proposal edited but not sent that the rerun wrote again, whose new words win', () => {
     const rewrote = [world, { ...gameplay, text: 'Halo is a burden.' }, panel({ name: 'art-director', node: 'art', text: 'New art.' })]
     const artBefore = [...before, panel({ name: 'art-director', node: 'art', text: 'Old art.' })]
     const current = holdNoteContent(input({ panels: artBefore })).replace('Stances.', 'Halo is a burden.').replace('Old art.', 'My art.')
-    expect(editsToCarry(current, { before: artBefore, landed: rewrote, sent })).toBeUndefined()
+    expect(editsToCarry(current, { before: artBefore, landed: rewrote, sent })).toEqual({ carried: {}, replaced: ['art-director'] })
   })
 
   it('leaves the proposal a reply revised to the run it landed on', () => {
     const revised = [world, { ...gameplay, text: 'Because.' }, verdict]
     const current = holdNoteContent(input({ panels: before })).replace('Stances.', 'My own words.')
-    expect(editsToCarry(current, { before, landed: revised, sent: {}, revised: 'gameplay' })).toEqual({})
+    expect(editsToCarry(current, { before, landed: revised, sent: {}, revised: 'gameplay' })).toEqual({ carried: {}, replaced: [] })
+  })
+
+  it('names a proposal edited but not sent that the run it landed on no longer has', () => {
+    const current = note().replace('A test chamber.', 'A theme park.')
+    expect(editsToCarry(current, { before, landed: landed.slice(1), sent })).toEqual({ carried: {}, replaced: ['world-director'] })
   })
 })
 

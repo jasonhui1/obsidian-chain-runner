@@ -65,7 +65,9 @@ export class HoldActions {
   async read(runId: string): Promise<HoldReading | undefined> {
     const file = this.deps.notes.find(runId)
     if (!file) return undefined
-    const [content, panels] = await Promise.all([this.deps.app.vault.cachedRead(file), this.deps.panels.of(runId)])
+    const content = await this.deps.app.vault.cachedRead(file)
+    // The run the note names: a landing rewrites the note before it is renamed.
+    const panels = await this.deps.panels.of(holdHeading(content)?.runId ?? runId)
     return readHold(content, panels ?? [])
   }
 

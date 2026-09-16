@@ -88,16 +88,6 @@ export class DirectingBoard {
     this.showTab(state, proposal)
   }
 
-  /** The hold moved from run `from` to `to`, as a rerun landing moves it; an edit open on it goes along. */
-  moved(from: string, to: string): void {
-    const prefix = editKey(from, '')
-    for (const [key, edit] of [...this.edits]) {
-      if (!key.startsWith(prefix)) continue
-      this.edits.delete(key)
-      this.edits.set(editKey(to, key.slice(prefix.length)), edit)
-    }
-  }
-
   /** Lets go of every open editor; the panel is going away. */
   close(): void {
     for (const key of [...this.edits.keys()]) this.closeEdit(key)
@@ -106,6 +96,7 @@ export class DirectingBoard {
   /** Redraws what the hold now says, keeping the reader's tab and scroll. */
   draw(state: DirectingState): void {
     this.state = state
+    if (state.kind === 'hold') this.followHold(state.hold)
     const scroll = this.body?.scrollTop ?? 0
     const typing = [...this.edits.values()].find(edit => edit.editor.hasFocus())
     const keepTyping = this.boxes.keepTyping(this.root)
@@ -125,6 +116,25 @@ export class DirectingBoard {
     body.scrollTop = scroll
     keepTyping()
     typing?.editor.focus()
+  }
+
+  /** A hold a rerun moved takes what the panel held under its earlier runs: an open edit, and the rerun still going. */
+  private followHold(hold: HoldReading): void {
+    for (const earlier of hold.earlierRuns) {
+      const going = this.rerunning.get(earlier)
+      this.rerunning.delete(earlier)
+      if (going && !this.rerunning.has(hold.runId)) this.rerunning.set(hold.runId, going)
+      const prefix = editKey(earlier, '')
+      for (const [key, edit] of [...this.edits]) {
+        if (!key.startsWith(prefix)) continue
+        const moved = editKey(hold.runId, key.slice(prefix.length))
+        if (this.edits.has(moved)) this.closeEdit(key)
+        else {
+          this.edits.delete(key)
+          this.edits.set(moved, edit)
+        }
+      }
+    }
   }
 
   private header(): void {
@@ -336,10 +346,11 @@ export class DirectingBoard {
     return !this.rerunning.has(hold.runId) && !this.editOpen(hold)
   }
 
-  /** Whether a rerun going may write `name` again: until it says, any proposal may be. */
+  /** Whether a rerun going may write `name` again: until it has said which it writes, any proposal may be. */
   private rewriting(runId: string, name: string): boolean {
     const going = this.rerunning.get(runId)
-    return going !== undefined && going.progress?.proposals.includes(name) !== false
+    if (!going) return false
+    return going.progress ? going.progress.proposals.includes(name) : true
   }
 
   private editOpen(hold: HoldReading): boolean {
@@ -380,14 +391,14 @@ export class DirectingBoard {
     this.rerunning.set(runId, going)
     this.draw(this.state)
     const onProgress = (progress: RerunProgress): void => {
-      if (this.rerunning.get(runId) !== going) return
       going.progress = progress
       this.draw(this.state)
     }
     try {
       await rerun(onProgress)
     } finally {
-      this.rerunning.delete(runId)
+      // By identity: the hold may have moved it to the run it landed on.
+      for (const [key, one] of [...this.rerunning]) if (one === going) this.rerunning.delete(key)
       this.draw(this.state)
     }
   }
@@ -499,7 +510,11 @@ export class DirectingBoard {
     edit.saving = true
     this.draw(this.state)
     try {
-      if (await this.deps.editProposal(name, edit.editor.text())) this.closeEdit(key)
+      // By identity: a rerun landing meanwhile moves the edit to the run it landed on.
+      if (await this.deps.editProposal(name, edit.editor.text())) {
+        const now = [...this.edits].find(([, one]) => one === edit)?.[0]
+        if (now) this.closeEdit(now)
+      }
     } finally {
       edit.saving = false
       this.draw(this.state)

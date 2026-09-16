@@ -269,6 +269,7 @@ export function proposalEdits(content: string, panels: LayoutPanel[]): Record<st
 export interface RerunEdits {
   /** The panels of the run it branched from. */
   before: LayoutPanel[]
+  /** The panels of the run it landed on. */
   landed: LayoutPanel[]
   /** The proposals' edits it was sent, by node. */
   sent: Record<string, string>
@@ -276,24 +277,31 @@ export interface RerunEdits {
   revised?: string
 }
 
+/** The edits a hold keeps across a landed rerun, and the proposals whose edit the new run's words replace. */
+export interface CarriedEdits {
+  /** By proposal name, to put back on the run it landed on. */
+  carried: Record<string, string>
+  replaced: string[]
+}
+
 /**
- * The proposals edited in `current` that a rerun only replayed, by name, to put
- * back on the run it landed on. `undefined` when an edit it was sent has changed
- * since, or it wrote again a proposal edited since: refreshing would lose words.
+ * What becomes of the proposals edited in `current` when a rerun lands: one it
+ * only replayed keeps its edit; one it wrote again, or no longer has, takes the
+ * new run's words. `undefined` when an edit it was sent has changed since.
  */
-export function editsToCarry(current: string, rerun: RerunEdits): Record<string, string> | undefined {
+export function editsToCarry(current: string, rerun: RerunEdits): CarriedEdits | undefined {
   const now = proposalEdits(current, rerun.before)
   if (Object.entries(rerun.sent).some(([node, text]) => now[node] !== text)) return undefined
-  const carried: Record<string, string> = {}
+  const kept: CarriedEdits = { carried: {}, replaced: [] }
   for (const [node, text] of Object.entries(now)) {
     if (node in rerun.sent || node === rerun.revised) continue
     const was = rerun.before.find(panel => panel.node === node)
+    if (!was) continue
     const is = rerun.landed.find(panel => panel.node === node)
-    if (!was || !is) continue
-    if (is.text.trim() !== was.text.trim()) return undefined
-    carried[was.name] = text
+    if (is?.text.trim() === was.text.trim()) kept.carried[was.name] = text
+    else kept.replaced.push(was.name)
   }
-  return carried
+  return kept
 }
 
 const THINKING_FOLD = /^\s*<details>\s*<summary>thinking<\/summary>[\s\S]*?<\/details>/
@@ -374,6 +382,8 @@ export function appendDirectionLine(content: string, line: string): string {
 /** A hold as the directing panel reads it: plain data, no note sections. */
 export interface HoldReading {
   runId: string
+  /** The runs this hold was under before its reruns moved it, newest first. */
+  earlierRuns: string[]
   chainName: string
   /** The join panel's text; absent when the run did not converge. */
   verdict?: string
@@ -420,6 +430,7 @@ export function readHold(content: string, panels: LayoutPanel[]): HoldReading | 
   const edited = new Set(proposerPanels(panels).filter(panel => panel.node in edits).map(panel => panel.name))
   return {
     ...heading,
+    earlierRuns: reranFrom(content),
     ...(verdict ? { verdict } : {}),
     proposals: proposals.map(proposal => ({
       ...proposal,

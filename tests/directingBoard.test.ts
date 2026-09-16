@@ -14,6 +14,7 @@ const RUN = '2026-09-15-ubqPU2'
 
 const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
   runId: RUN,
+  earlierRuns: [],
   chainName: 'creative-director',
   verdict: 'A combat trial in a void.',
   proposals: [
@@ -547,7 +548,7 @@ describe('a rerun going', () => {
     expect(button('✎ Edit').disabled).toBe(true)
   })
 
-  it('keeps an edit open, with its words, when the panel moves to the run the rerun landed on', () => {
+  it('carries an open edit and the rerun going onto the hold as it reads once it has landed', () => {
     const panel = board()
     panel.open(showing(edited), 'world')
     button('⟳ Rerun downstream').click()
@@ -555,9 +556,33 @@ describe('a rerun going', () => {
     button('✎ Edit').click()
     const editor = root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!
     type(editor, 'A theme park.')
-    panel.moved(RUN, 'landed')
-    panel.draw(showing(hold({ ...edited, runId: 'landed' })))
+    panel.draw(showing(hold({ ...edited, runId: 'landed', earlierRuns: [RUN] })))
     expect(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')?.value).toBe('A theme park.')
+    expect(button('Rerunning…').disabled).toBe(true)
+  })
+
+  it('closes an edit saved while the rerun landed', async () => {
+    const panel = board()
+    panel.open(showing(edited), 'world')
+    button('⟳ Rerun downstream').click()
+    progressTo(verdictOnly)
+    button('✎ Edit').click()
+    type(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!, 'A theme park.')
+    button('Save').click()
+    panel.draw(showing(hold({ ...edited, runId: 'landed', earlierRuns: [RUN] })))
+    waiting[1]!(true)
+    await settled()
+    expect(root.querySelector('.chain-runner-directing-editor')).toBeNull()
+  })
+
+  it('lets go of the rerun once it is done, wherever the hold has moved', async () => {
+    const panel = board()
+    panel.open(showing(edited), 'world')
+    button('⟳ Rerun downstream').click()
+    panel.draw(showing(hold({ ...edited, runId: 'landed', earlierRuns: [RUN] })))
+    waiting[0]!(true)
+    await settled()
+    expect(button('⟳ Rerun downstream').disabled).toBe(false)
   })
 
   it('shows the line for a reply used as the revision on the Run tab', () => {

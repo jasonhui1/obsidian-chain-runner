@@ -32,7 +32,7 @@ export async function fetchRun(engine: EngineClient, runId: string): Promise<Fet
   return { run, layout }
 }
 
-export interface RerunAndRefreshHooks {
+export interface RerunAndRefreshOptions {
   /** Edits the freshly re-read note before folding — a chat-driven revise's way to mark its `revise` line done. */
   beforeRefresh?: (content: string, newRunId: string) => string
   /** The run the request branched from, and the edits it was sent; decides which edits made meanwhile outlive the refresh. */
@@ -46,12 +46,12 @@ export async function rerunAndRefresh(
   file: TFile,
   heading: HoldHeading,
   request: RunRequest,
-  hooks: RerunAndRefreshHooks,
+  options: RerunAndRefreshOptions,
 ): Promise<string | undefined> {
   const from = [heading.runId, ...reranFrom(await deps.app.vault.cachedRead(file))]
   const report = deps.reruns.begin(from)
   try {
-    return await rerunReported(deps, { file, heading, request, hooks, report })
+    return await rerunReported(deps, { file, heading, request, options, report })
   } finally {
     report.end()
   }
@@ -62,20 +62,20 @@ interface ReportedRerun {
   file: TFile
   heading: HoldHeading
   request: RunRequest
-  hooks: RerunAndRefreshHooks
+  options: RerunAndRefreshOptions
   report: RerunReport
 }
 
 async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): Promise<string | undefined> {
-  const { file, heading, request, hooks, report } = rerun
+  const { file, heading, request, options, report } = rerun
   const { app, engine, notify } = deps
-  const beforeRefresh = hooks.beforeRefresh ?? (content => content)
+  const beforeRefresh = options.beforeRefresh ?? (content => content)
   const tracker = new RerunProgressTracker()
   const outcome = await deps.withEngine(() =>
     runHeadless(engine, request, event => {
       const progress = tracker.hear(event)
       if (!progress) return
-      hooks.onProgress?.(progress)
+      options.onProgress?.(progress)
       report.hear(progress)
     }),
   )
@@ -95,12 +95,12 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
   const landedAt = await guardWrite(notify, 'the hold note', async (): Promise<{ notice: string; runId?: string }> => {
     // Read again: the human may have written in the note while the rerun went.
     const current = await app.vault.cachedRead(file)
-    const carried = editsToCarry(current, { ...hooks.edits, landed: landed.layout.panels })
-    if (!carried) {
+    const kept = editsToCarry(current, { ...options.edits, landed: landed.layout.panels })
+    if (!kept) {
       return { notice: `Reran as run ${newRunId}, but proposals changed meanwhile — note left as is` }
     }
     // An edit to a proposal the rerun only replayed is put back, so it can go in the next rerun.
-    const refreshed = Object.entries(carried).reduce(
+    const refreshed = Object.entries(kept.carried).reduce(
       (content, [name, text]) => rewriteProposal(content, name, text),
       refreshHoldNote(beforeRefresh(current, newRunId), {
         runId: landed.run.runId,
@@ -117,7 +117,8 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
       return { notice: `Reran downstream as run ${newRunId}, but ${renamed} already exists — note not renamed` }
     }
     await app.fileManager.renameFile(file, renamed)
-    return { notice: `Reran downstream as run ${newRunId}`, runId: newRunId }
+    const replaced = kept.replaced.length > 0 ? ` — it wrote ${kept.replaced.join(', ')} again, over your edits` : ''
+    return { notice: `Reran downstream as run ${newRunId}${replaced}`, runId: newRunId }
   })
   if (landedAt) notify(landedAt.notice)
   if (landedAt?.runId) await report.land({ runId: landedAt.runId, chainName: heading.chainName, panels: landed.layout.panels })
