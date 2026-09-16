@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NOT_A_HOLD_NOTE, Resume } from '@/ui/resume'
 import type { EngineClient } from '@/engine/client'
-import type { RunEvent } from '@/engine/types'
+import type { AgentOutput, RunEvent } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
@@ -24,6 +24,8 @@ let notices: string[]
 let runFrames: RunEvent[]
 let online: boolean
 let requests: unknown[]
+let landedOutputs: AgentOutput[]
+let refuseWrites: boolean
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -54,6 +56,7 @@ function makeResume(): Resume {
         return Promise.resolve(file(path))
       },
       modify: (target: { path: string }, content: string) => {
+        if (refuseWrites) return Promise.reject(new Error('the file is read-only'))
         notes[target.path] = content
         return Promise.resolve()
       },
@@ -69,6 +72,7 @@ function makeResume(): Resume {
       requests.push(request)
       for (const event of runFrames) yield event
     },
+    getRun: (runId: string) => Promise.resolve({ runId, agentOutputs: landedOutputs }),
   } as unknown as EngineClient
 
   return new Resume({
@@ -88,6 +92,7 @@ beforeEach(() => {
   runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }]
   online = true
   requests = []
+  landedOutputs = [{ agentName: 'greenlight', output: '## Greenlight Pitch\nA combat trial in a void.', status: 'success', timestamp: '' }]
 })
 
 describe('start', () => {
@@ -183,5 +188,49 @@ describe('start', () => {
     const canon = notes['context/canon-anime-game.md']
     expect(canon).toContain('- old commitment')
     expect(canon).toContain('- halo = burden')
+  })
+})
+
+describe('resumeNote', () => {
+  it('brings back the Greenlight Pitch the run landed on', async () => {
+    const result = await makeResume().resumeNote(file(HOLD_PATH))
+    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', pitch: 'A combat trial in a void.', canon: 'written' })
+  })
+
+  it('asks for no pitch at all when the run failed, and says the ticks were held back', async () => {
+    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    const result = await makeResume().resumeNote(file(HOLD_PATH))
+    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', error: 'the model refused', canon: 'held-back' })
+    expect(result?.pitch).toBeUndefined()
+  })
+
+  it('carries the failure with no run when the engine never named one', async () => {
+    runFrames = [{ type: 'error', error: 'no such chain' }]
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ error: 'no such chain', canon: 'held-back' })
+  })
+
+  it('has nothing to report when the engine is offline', async () => {
+    online = false
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+  })
+
+  it('says there is nothing to resume for a note that is not a hold', async () => {
+    notes[HOLD_PATH] = 'just some words'
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+    expect(notices).toEqual([NOT_A_HOLD_NOTE])
+  })
+
+  it('has no pitch for a run that landed without one', async () => {
+    landedOutputs = [{ agentName: 'greenlight', output: 'Nothing that names a pitch.', status: 'success', timestamp: '' }]
+    const result = await makeResume().resumeNote(file(HOLD_PATH))
+    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', canon: 'written' })
+    expect(result?.pitch).toBeUndefined()
+  })
+
+  it('still reports the run and its pitch when the hold note refuses the link', async () => {
+    refuseWrites = true
+    const result = await makeResume().resumeNote(file(HOLD_PATH))
+    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', pitch: 'A combat trial in a void.' })
+    expect(notices).toContain('Could not write the hold note: the file is read-only')
   })
 })

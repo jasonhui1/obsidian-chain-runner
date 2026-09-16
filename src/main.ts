@@ -8,6 +8,7 @@ import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
 import { AskTheRoom } from './ui/askTheRoom'
 import { ChatWithProposer } from './ui/chatWithProposer'
+import { DirectingView, DIRECTING_VIEW_TYPE } from './ui/directingView'
 import { createDirectionButtons } from './ui/directionButtons'
 import {
   createDrawingSurface,
@@ -21,6 +22,7 @@ import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
 import { DirectRun } from './ui/directRun'
+import { HoldActions } from './ui/holdActions'
 import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
@@ -30,6 +32,7 @@ import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
 import { RerunDownstream } from './ui/rerunDownstream'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
+import { RunPanels } from './ui/runPanels'
 import { Resume } from './ui/resume'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { SideQuest } from './ui/sideQuest'
@@ -192,9 +195,69 @@ export default class ChainRunnerPlugin extends Plugin {
       currentRun: () => this.activeResultView()?.currentResult(),
       open: note => this.app.workspace.getLeaf('tab').openFile(note),
     })
+    // From the drawing, a hold opens in the directing panel rather than a tab.
+    const directInPanel = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => undefined,
+      open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
+    })
+    const chat = new ChatWithProposer({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const askRoom = new AskTheRoom({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const rerun = new RerunDownstream({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+    })
+    const sideQuest = new SideQuest({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
+    const resume = new Resume({
+      app: this.app,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      engineUrl: () => this.settings.engineUrl,
+    })
+    const holds = new HoldActions({
+      app: this.app,
+      notify: message => new Notice(message),
+      notes: holdNotes,
+      write: runId => directInPanel.write(runId),
+      chat,
+      room: askRoom,
+      rerun,
+      quest: sideQuest,
+      resume,
+      engineUrl: () => this.settings.engineUrl,
+      panels: new RunPanels(this.engine),
+    })
+    this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
     const directFromDrawing = new DirectFromDrawing({
-      surface: { unavailable: () => surface.unavailable(), selectedRun: () => surface.selectedRun() },
-      direct: runId => directRun.direct(runId),
+      surface: {
+        unavailable: () => surface.unavailable(),
+        selectedRun: () => surface.selectedRun(),
+        cardProposal: (element, view) => surface.cardProposal(element, view),
+      },
+      direct: runId => directInPanel.openHold(runId),
+      showProposal: async (runId, proposal) => void (await this.openDirectingPanel())?.show(runId, proposal),
       notify: message => new Notice(message),
       clickSpot: settled => clicks.onSettled(settled),
     })
@@ -221,7 +284,7 @@ export default class ChainRunnerPlugin extends Plugin {
       removeSelectionHook = registerSelectionHook(this.app, {
         clicked: (element, view) => {
           nodes.handleSelection(element, view)
-          directFromDrawing.handleSelection(element)
+          directFromDrawing.handleSelection(element, view)
         },
         editing: (element, view) => nodes.handleTextEdit(element, view),
       })
@@ -281,17 +344,15 @@ export default class ChainRunnerPlugin extends Plugin {
     })
 
     this.addCommand({
+      id: 'open-directing-panel',
+      name: 'Open the directing panel',
+      callback: () => void this.openDirectingPanel(),
+    })
+
+    this.addCommand({
       id: 'direct-selected-run',
       name: 'Direct the selected run',
       callback: () => void directFromDrawing.directSelected(),
-    })
-
-    const resume = new Resume({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      engineUrl: () => this.settings.engineUrl,
     })
 
     this.addCommand({
@@ -300,24 +361,10 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void resume.start(),
     })
 
-    const rerun = new RerunDownstream({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-    })
-
     this.addCommand({
       id: 'rerun-downstream',
       name: 'Rerun downstream',
       callback: () => void rerun.start(),
-    })
-
-    const chat = new ChatWithProposer({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
     })
 
     this.addCommand({
@@ -326,25 +373,10 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void chat.start(),
     })
 
-    const askRoom = new AskTheRoom({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-    })
-
     this.addCommand({
       id: 'ask-the-room',
       name: 'Ask the room',
       callback: () => void askRoom.start(),
-    })
-
-    const sideQuest = new SideQuest({
-      app: this.app,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      engineUrl: () => this.settings.engineUrl,
     })
 
     this.addCommand({
@@ -400,6 +432,16 @@ export default class ChainRunnerPlugin extends Plugin {
     if (open.length === 0) await leaf.setViewState({ type: RESULT_VIEW_TYPE, active: false })
     await this.app.workspace.revealLeaf(leaf)
     return leaf.view instanceof RunResultView ? leaf.view : undefined
+  }
+
+  /** The directing panel in the right sidebar, opened or brought to the front. */
+  private async openDirectingPanel(): Promise<DirectingView | undefined> {
+    const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)
+    const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
+    if (!leaf) return undefined
+    if (open.length === 0) await leaf.setViewState({ type: DIRECTING_VIEW_TYPE, active: false })
+    await this.app.workspace.revealLeaf(leaf)
+    return leaf.view instanceof DirectingView ? leaf.view : undefined
   }
 
   /** The result view already open, if any — this never opens one of its own. */

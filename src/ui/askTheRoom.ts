@@ -4,7 +4,7 @@ import { fetchRun } from './rerunAndRefresh'
 import { appendRoomAnswers, pendingRoomQuestion, type RoomAnswer } from '../run/askRoom'
 import { chatSeed, latestOutput } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
-import { holdHeading } from '../run/holdNote'
+import { holdHeading, proposerPanels } from '../run/holdNote'
 import type { EngineClient } from '../engine/client'
 
 /** The "Ask the room" command: the vault half of `src/run/askRoom.ts`. */
@@ -24,7 +24,7 @@ export class AskTheRoom {
   constructor(private readonly deps: AskTheRoomDeps) {}
 
   async start(): Promise<void> {
-    const { app, engine, notify } = this.deps
+    const { app, notify } = this.deps
     const file = app.workspace.getActiveFile()
     const content = file?.extension === 'md' ? await app.vault.cachedRead(file) : ''
     const heading = holdHeading(content)
@@ -39,24 +39,8 @@ export class AskTheRoom {
       return
     }
 
-    const answers = await this.deps.withEngine(async () => {
-      const source = await fetchRun(engine, heading.runId)
-      const proposers = source.layout.panels.filter(panel => panel.emphasis !== 'join')
-      const gathered: RoomAnswer[] = []
-      for (const panel of proposers) {
-        const seed = chatSeed(source.run, panel.node, question)
-        const agentName = latestOutput(source.run.agentOutputs, panel.node)?.agentName
-        if (seed === undefined || agentName === undefined) continue
-        const outcome = await runAgentOnce(engine, { agentName, seedPrompt: seed })
-        if (outcome.output) gathered.push({ name: panel.name, answer: outcome.output.output })
-      }
-      return gathered
-    })
+    const answers = await this.answers(heading.runId, question)
     if (!answers) return
-    if (answers.length === 0) {
-      notify(NOBODY_ANSWERED)
-      return
-    }
 
     const wrote = await guardWrite(notify, 'the hold note', async () => {
       // Read again: the human may have written in the note while the room went.
@@ -65,5 +49,28 @@ export class AskTheRoom {
       return true
     })
     if (wrote) notify(`The room answered (${answers.length})`)
+  }
+
+  /** Every proposer's answer to `question`, one at a time; `undefined`, once it has said why, when nobody answered. */
+  async answers(runId: string, question: string): Promise<RoomAnswer[] | undefined> {
+    const { engine, notify } = this.deps
+    const answers = await this.deps.withEngine(async () => {
+      const source = await fetchRun(engine, runId)
+      const gathered: RoomAnswer[] = []
+      for (const panel of proposerPanels(source.layout.panels)) {
+        const seed = chatSeed(source.run, panel.node, question)
+        const agentName = latestOutput(source.run.agentOutputs, panel.node)?.agentName
+        if (seed === undefined || agentName === undefined) continue
+        const outcome = await runAgentOnce(engine, { agentName, seedPrompt: seed })
+        if (outcome.output) gathered.push({ name: panel.name, answer: outcome.output.output })
+      }
+      return gathered
+    })
+    if (!answers) return undefined
+    if (answers.length === 0) {
+      notify(NOBODY_ANSWERED)
+      return undefined
+    }
+    return answers
   }
 }

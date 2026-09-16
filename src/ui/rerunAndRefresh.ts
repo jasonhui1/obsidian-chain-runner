@@ -1,7 +1,8 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { holdNotePath, refreshHoldNote, thoughtsByNode } from '../run/holdNote'
+import { holdNotePath, refreshHoldNote, thoughtsByNode, type HoldHeading } from '../run/holdNote'
+import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
 import type { EngineClient } from '../engine/client'
 import type { LayoutModel, RunMeta, RunRequest } from '../engine/types'
 
@@ -33,37 +34,44 @@ export interface RerunAndRefreshHooks {
   beforeRefresh?: (content: string, newRunId: string) => string
   /** True when the freshly re-read note's proposals no longer match what the request was built from — the refresh would discard them, so it is skipped instead. */
   proposalsStale?: (current: string) => boolean
+  onProgress?: OnRerunProgress | undefined
 }
 
-/** Runs `request`, then refreshes the hold note with the run it lands on and renames it to that run. */
+/** Runs `request`, then refreshes the hold note with the run it lands on and renames it to that run; answers that run once the note is under it. */
 export async function rerunAndRefresh(
   deps: RerunAndRefreshDeps,
   file: TFile,
-  heading: { runId: string; chainName: string },
+  heading: HoldHeading,
   request: RunRequest,
   hooks: RerunAndRefreshHooks = {},
-): Promise<void> {
+): Promise<string | undefined> {
   const { app, engine, notify } = deps
   const beforeRefresh = hooks.beforeRefresh ?? (content => content)
-  const outcome = await deps.withEngine(() => runHeadless(engine, request))
-  if (!outcome) return
+  const tracker = new RerunProgressTracker()
+  const outcome = await deps.withEngine(() =>
+    runHeadless(engine, request, event => {
+      const progress = tracker.hear(event)
+      if (progress) hooks.onProgress?.(progress)
+    }),
+  )
+  if (!outcome) return undefined
   const newRunId = outcome.runId
   if (!newRunId) {
     notify(outcome.error ? `Rerun failed: ${outcome.error}` : 'Rerun produced no run')
-    return
+    return undefined
   }
   if (outcome.error) {
     notify(`Rerun ${newRunId} failed: ${outcome.error}`)
-    return
+    return undefined
   }
   const landed = await deps.withEngine(() => fetchRun(engine, newRunId))
-  if (!landed) return
+  if (!landed) return undefined
 
-  const notice = await guardWrite(notify, 'the hold note', async () => {
+  const landedAt = await guardWrite(notify, 'the hold note', async (): Promise<{ notice: string; runId?: string }> => {
     // Read again: the human may have written in the note while the rerun went.
     const current = await app.vault.cachedRead(file)
     if (hooks.proposalsStale?.(current)) {
-      return `Reran as run ${newRunId}, but proposals changed meanwhile — note left as is`
+      return { notice: `Reran as run ${newRunId}, but proposals changed meanwhile — note left as is` }
     }
     const refreshed = refreshHoldNote(beforeRefresh(current, newRunId), {
       runId: landed.run.runId,
@@ -76,10 +84,11 @@ export async function rerunAndRefresh(
     // Named for the run it now shows, so directing that run finds it.
     const renamed = normalizePath(holdNotePath(newRunId))
     if (app.vault.getAbstractFileByPath(renamed)) {
-      return `Reran downstream as run ${newRunId}, but ${renamed} already exists — note not renamed`
+      return { notice: `Reran downstream as run ${newRunId}, but ${renamed} already exists — note not renamed` }
     }
     await app.fileManager.renameFile(file, renamed)
-    return `Reran downstream as run ${newRunId}`
+    return { notice: `Reran downstream as run ${newRunId}`, runId: newRunId }
   })
-  if (notice) notify(notice)
+  if (landedAt) notify(landedAt.notice)
+  return landedAt?.runId
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDirectLabel, DIRECT_LINK, directLabelRunId, selectedRunId } from '@/ui/runLabel'
+import { buildDirectLabel, cardProposal, DIRECT_LINK, directLabelRunId, selectedRunId } from '@/ui/runLabel'
 import type { SceneShape } from '@/ui/nodeScene'
 
 /** The `✎ Direct` label on a run's frame, and which run a selection on the drawing names. */
@@ -33,8 +33,8 @@ describe('directLabelRunId', () => {
 })
 
 describe('selectedRunId', () => {
-  const runs: Record<string, string> = { 'Chain Runner/2026-09-15-ubqPU2/Optimist.md': RUN }
-  const noteRun = (linkpath: string) => runs[linkpath]
+  const fronts: Record<string, unknown> = { 'Chain Runner/2026-09-15-ubqPU2/Optimist.md': { run: RUN, output: 'Optimist' } }
+  const noteRun = (linkpath: string) => fronts[linkpath]
 
   const card = (link: string): SceneShape => ({ id: 'card', type: 'embeddable', link })
 
@@ -52,5 +52,24 @@ describe('selectedRunId', () => {
     expect(selectedRunId([{ id: 't', type: 'text', text: 'an idea' }], noteRun)).toBeUndefined()
     expect(selectedRunId([card('[[some other note]]')], noteRun)).toBeUndefined()
     expect(selectedRunId([card('https://example.com')], noteRun)).toBeUndefined()
+  })
+})
+
+describe('cardProposal', () => {
+  const fronts: Record<string, unknown> = {
+    'Chain Runner/2026-09-15-ubqPU2/gameplay.md': { run: RUN, chain: 'creative-director', output: 'gameplay' },
+    'Notes/plain.md': { run: 'every morning' },
+  }
+  const frontmatter = (linkpath: string) => fronts[linkpath]
+
+  it('names the run and the proposal a card’s output note records', () => {
+    const card: SceneShape = { id: 'card', type: 'embeddable', link: '[[Chain Runner/2026-09-15-ubqPU2/gameplay.md]]' }
+    expect(cardProposal(card, frontmatter)).toEqual({ runId: RUN, proposal: 'gameplay' })
+  })
+
+  it('is undefined for anything that is not a card showing an output note', () => {
+    expect(cardProposal({ id: 't', type: 'text', text: 'gameplay' }, frontmatter)).toBeUndefined()
+    expect(cardProposal({ id: 'c', type: 'embeddable', link: '[[Notes/plain.md]]' }, frontmatter)).toBeUndefined()
+    expect(cardProposal({ id: 'c', type: 'embeddable', link: '[[missing]]' }, frontmatter)).toBeUndefined()
   })
 })

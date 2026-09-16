@@ -1,4 +1,4 @@
-import { conversationStart, locatedTriggers } from './conversationTrigger'
+import { appendToConversation, conversationStart, lineEnd, locatedTriggers, quoted } from './conversationTrigger'
 import { joinSeed } from './seed'
 import type { AgentOutput, RunMeta } from '../engine/types'
 
@@ -16,27 +16,50 @@ export interface ChatTurn {
   reply?: string
 }
 
+/** A chat turn as the Conversation reads back, with the run its reply was revised as. */
+export interface ChatEntry extends ChatTurn {
+  revisedAs?: string
+}
+
 const MESSAGE_LINE = /^@(\S+)\s+(.+)$/
 const REVISE_LINE = /^revise$/i
+const REVISED = 'revise → reran as run '
+const REVISED_LINE = new RegExp(`^${REVISED}(\\S+)$`)
 
 export { conversationStart }
 
-interface LocatedTurn extends ChatTurn {
+interface LocatedTurn {
+  entry: ChatEntry
   /** Offset in the full note right after the message line — where a reply is inserted. */
   insertAt: number
+  /** Offset right after the reply — where a revised line goes. */
+  end: number
 }
 
 /** Every `@name message` line under Conversation, in order, positioned to insert a reply after. */
 function locatedTurns(content: string): LocatedTurn[] {
   return locatedTriggers(content, MESSAGE_LINE, match => ({ name: match[1], message: match[2].trim() })).map(
-    ({ fields, insertAt, reply }) => ({ ...fields, insertAt, ...(reply !== undefined ? { reply } : {}) }),
+    ({ fields, insertAt, end, reply }) => {
+      const revisedAs = REVISED_LINE.exec(content.slice(end, lineEnd(content, end)).trim())?.[1]
+      return { entry: { ...fields, ...(reply !== undefined ? { reply } : {}), ...(revisedAs ? { revisedAs } : {}) }, insertAt, end }
+    },
   )
+}
+
+/** Every chat turn under Conversation, in order, each with where it sits in the note. */
+export function chatEntries(content: string): { entry: ChatEntry; at: number }[] {
+  return locatedTurns(content).map(({ entry, insertAt }) => ({ entry, at: insertAt }))
+}
+
+/** The same message, answered with the same reply. */
+export function sameTurn(a: ChatTurn, b: ChatTurn): boolean {
+  return a.name === b.name && a.message === b.message && a.reply === b.reply
 }
 
 /** The most recent `@name message` line with no reply below it yet, or undefined when there is none. */
 export function pendingMessage(content: string): ChatTurn | undefined {
   const turns = locatedTurns(content)
-  const last = turns[turns.length - 1]
+  const last = turns[turns.length - 1]?.entry
   return last && last.reply === undefined ? { name: last.name, message: last.message } : undefined
 }
 
@@ -47,26 +70,36 @@ export function pendingRevise(content: string): ChatTurn | undefined {
   if (!REVISE_LINE.test(lastLine)) return undefined
 
   const turns = locatedTurns(content)
-  const last = turns[turns.length - 1]
+  const last = turns[turns.length - 1]?.entry
   return last?.reply !== undefined ? { name: last.name, message: last.message, reply: last.reply } : undefined
 }
 
 /** The reply inserted as a blockquote right under the message it answers; unchanged if that turn is gone. */
 export function appendChatReply(content: string, turn: { name: string; message: string }, reply: string): string {
-  const found = locatedTurns(content).find(t => t.name === turn.name && t.message === turn.message && t.reply === undefined)
+  const found = locatedTurns(content).find(t => sameTurn(t.entry, turn))
   if (!found) return content
-  const block =
-    reply
-      .trim()
-      .split('\n')
-      .map(line => `> ${line}`)
-      .join('\n') + '\n'
-  return content.slice(0, found.insertAt) + block + content.slice(found.insertAt)
+  return content.slice(0, found.insertAt) + quoted(reply) + '\n' + content.slice(found.insertAt)
+}
+
+/** A message and its reply written together, as the Conversation's last entry. */
+export function appendChatTurn(content: string, turn: { name: string; message: string }, reply: string): string {
+  return appendToConversation(content, `@${turn.name} ${turn.message}\n${quoted(reply)}`)
 }
 
 /** The trailing bare `revise` replaced with which run it produced, so it is not acted on twice. */
 export function markRevised(content: string, runId: string): string {
-  return content.replace(/revise\s*$/i, `revise → reran as run ${runId}\n`)
+  return content.replace(/revise\s*$/i, `${REVISED}${runId}\n`)
+}
+
+/** The last such turn not yet revised, marked as revised into `runId`; unchanged when there is none. */
+export function markTurnRevised(content: string, turn: Required<ChatTurn>, runId: string): string {
+  const found = locatedTurns(content)
+    .filter(t => sameTurn(t.entry, turn) && !t.entry.revisedAs)
+    .at(-1)
+  if (!found) return content
+  const at = Math.min(found.end, content.length)
+  const before = content.slice(0, at)
+  return `${before}${before.endsWith('\n') ? '' : '\n'}${REVISED}${runId}\n${content.slice(at)}`
 }
 
 /** Last write wins, matching how the engine resolves a node's outputs. */

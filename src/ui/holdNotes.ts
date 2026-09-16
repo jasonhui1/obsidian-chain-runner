@@ -1,5 +1,5 @@
 import { normalizePath, TFile, type App } from 'obsidian'
-import { holdNoteContent, holdNotePath, mergeHoldNote, type HoldNoteInput } from '../run/holdNote'
+import { holdHeading, holdNoteContent, holdNotePath, mergeHoldNote, reranFrom, type HoldNoteInput } from '../run/holdNote'
 import { ensureFolder, guardWrite } from './vaultWrite'
 
 /**
@@ -16,8 +16,36 @@ export class HoldNotes {
     },
   ) {}
 
+  /** Where the run's hold note is, written or not. */
+  pathOf(runId: string): string {
+    return normalizePath(holdNotePath(runId))
+  }
+
+  /** The run's hold note, if one has been written. */
+  find(runId: string): TFile | undefined {
+    const file = this.deps.app.vault.getAbstractFileByPath(this.pathOf(runId))
+    return file instanceof TFile ? file : undefined
+  }
+
+  /** The run `runId`'s hold now lives under: itself, or the newest run a rerun moved its hold to. */
+  async currentRun(runId: string): Promise<string> {
+    if (this.find(runId)) return runId
+    const { vault } = this.deps.app
+    const path = this.pathOf(runId)
+    const holds = vault
+      .getMarkdownFiles()
+      .filter(file => file.path.startsWith(path.slice(0, path.lastIndexOf('/') + 1)))
+      .sort((a, b) => b.stat.mtime - a.stat.mtime)
+    for (const file of holds) {
+      const content = await vault.cachedRead(file)
+      const heading = holdHeading(content)
+      if (heading && reranFrom(content).includes(runId)) return heading.runId
+    }
+    return runId
+  }
+
   async write(input: HoldNoteInput): Promise<TFile | undefined> {
-    const path = normalizePath(holdNotePath(input.runId))
+    const path = this.pathOf(input.runId)
     const fresh = holdNoteContent(input)
     return guardWrite(this.deps.notify, 'the hold note', async () => {
       await ensureFolder(this.deps.app, path.slice(0, path.lastIndexOf('/')))

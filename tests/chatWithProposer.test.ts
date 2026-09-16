@@ -23,6 +23,9 @@ const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
 
 const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
 
+/** A human's words replayed in place of a node's output: nothing ran, so nothing was spent. */
+const revision = (nodeId: string, text: string): AgentOutput => ({ ...output(nodeId, text), tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 })
+
 const panels = [
   panel('character-director', 'Shrine-maiden silhouette.'),
   panel('gameplay-director', 'Stances mapped to segments.'),
@@ -188,7 +191,7 @@ describe('start, revising from a reply', () => {
     await makeCommand().start()
     expect(requests).toHaveLength(1)
     expect(requests[0].branchedFromRunId).toBe(RUN)
-    expect(requests[0].branchOutputs).toContainEqual(output('gameplay-director', 'Halo is a burden, not a toolkit.'))
+    expect(requests[0].branchOutputs).toContainEqual(revision('gameplay-director', 'Halo is a burden, not a toolkit.'))
     expect(notes[`Maestro/holds/${NEW}.md`]).toContain(`revise → reran as run ${NEW}`)
   })
 })

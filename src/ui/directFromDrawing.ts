@@ -1,8 +1,11 @@
-import { directLabelRunId } from './runLabel'
+import { directLabelRunId, type CardProposal } from './runLabel'
 import { UNREACHABLE_DRAWING } from './onDrawing'
 import type { Point } from './panelSpot'
 
-/** Directing a run from the drawing: a click on its frame's `✎ Direct`, or the palette on a selected card. */
+/**
+ * Directing a run from the drawing: a click on its frame's `✎ Direct` or on one
+ * of its cards, or the palette on a selected card.
+ */
 
 export const SELECT_A_RUN = 'Select a card from a run on the drawing to direct that run.'
 
@@ -11,8 +14,11 @@ export interface DirectFromDrawingDeps {
     unavailable(): string | undefined
     /** The run the selection belongs to; throws when the drawing cannot be reached. */
     selectedRun(): string | undefined
+    /** The run and proposal a clicked card shows, or `undefined` for any other element. */
+    cardProposal(element: unknown, view: unknown): CardProposal | undefined
   }
   direct: (runId: string) => Promise<void>
+  showProposal: (runId: string, proposal: string) => Promise<void>
   notify: (message: string) => void
   /** Where the press behind a selection settled, or `undefined` for a drag (ADR-0010). */
   clickSpot: (settled: (spot: Point | undefined) => void) => void
@@ -29,12 +35,15 @@ export class DirectFromDrawing {
     return false
   }
 
-  /** A plain click on the label, once the press is known not to be a drag. */
-  handleSelection(element: { customData?: unknown }): void {
+  /** A plain click on the label or a card, once the press is known not to be a drag. */
+  handleSelection(element: { customData?: unknown }, view?: unknown): void {
     const runId = directLabelRunId(element)
-    if (!runId) return
+    const card = runId ? undefined : this.deps.surface.cardProposal(element, view)
+    if (!runId && !card) return
     this.deps.clickSpot(spot => {
-      if (spot) void this.deps.direct(runId)
+      if (!spot) return
+      if (runId) void this.deps.direct(runId)
+      else if (card) void this.deps.showProposal(card.runId, card.proposal)
     })
   }
 

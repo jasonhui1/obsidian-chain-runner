@@ -53,15 +53,13 @@ export function rerunRequest(
 /**
  * The output with the panel's part swapped for the edit; a panel may show only
  * one section of what its node wrote. No thought: it reasoned toward the old text.
+ * The engine logs a replayed output's metrics, so they stay, at zero: nothing ran.
  */
 function revised(original: AgentOutput, shown: string, edit: string): AgentOutput {
   const at = shown === '' ? -1 : original.output.indexOf(shown)
   const output = at === -1 ? edit : original.output.slice(0, at) + edit + original.output.slice(at + shown.length)
-  return {
-    nodeId: original.nodeId,
-    agentName: original.agentName,
-    output,
-    status: 'success',
-    timestamp: original.timestamp,
-  }
+  const kept: AgentOutput = { ...original, output, status: 'success', tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 }
+  delete kept.thought
+  delete kept.error
+  return kept
 }

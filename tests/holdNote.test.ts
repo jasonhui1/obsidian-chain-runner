@@ -10,6 +10,7 @@ import {
   mergeHoldNote,
   proposalEdits,
   refreshHoldNote,
+  reranFrom,
   type HoldNoteInput,
 } from '@/run/holdNote'
 import type { LayoutPanel } from '@/engine/types'
@@ -355,6 +356,28 @@ describe('refreshHoldNote', () => {
     expect(again.match(/## Previous verdict/g)).toHaveLength(1)
     expect(again.indexOf('Halo as burden.')).toBeLessThan(again.indexOf('Stance-switching combat.'))
     expect(extractVerdict(again)).toBe('Third verdict.')
+  })
+
+  it('still names the run it came from when that run gave no verdict', () => {
+    const empty = holdNoteContent(input({ panels: [panel(), verdict('')] }))
+    expect(reranFrom(refreshHoldNote(empty, input({ runId: '2026-09-16-Zz1', panels: [panel(), verdict('Halo as burden.')] })))).toEqual([
+      '2026-09-15-Ab3dE1',
+    ])
+  })
+})
+
+describe('reranFrom', () => {
+  const verdict = (text: string) => panel({ name: 'creative-director', node: 'decider', text, emphasis: 'join' })
+
+  it('names every run a hold was rerun from, newest first', () => {
+    const first = holdNoteContent(input({ panels: [panel(), verdict('First.')] }))
+    const second = refreshHoldNote(first, input({ runId: '2026-09-16-Zz1', panels: [panel(), verdict('Second.')] }))
+    const third = refreshHoldNote(second, input({ runId: '2026-09-17-Yy2', panels: [panel(), verdict('Third.')] }))
+    expect(reranFrom(third)).toEqual(['2026-09-16-Zz1', '2026-09-15-Ab3dE1'])
+  })
+
+  it('names none for a hold never rerun', () => {
+    expect(reranFrom(holdNoteContent(input()))).toEqual([])
   })
 })
 

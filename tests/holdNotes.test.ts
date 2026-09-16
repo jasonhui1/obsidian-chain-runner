@@ -20,11 +20,13 @@ const input = (over: Partial<HoldNoteInput> = {}): HoldNoteInput => ({
 let notes: Record<string, string>
 let folders: string[]
 let notices: string[]
+let modified: Record<string, number>
 
 function file(path: string): TFile {
   const stub = new StubFile()
   stub.path = path
   stub.name = path.slice(path.lastIndexOf('/') + 1)
+  stub.stat = { ctime: 0, mtime: modified[path] ?? 0, size: 0 }
   return stub as unknown as TFile
 }
 
@@ -41,6 +43,7 @@ function makeHoldNotes(): HoldNotes {
         return null
       },
       cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
+      getMarkdownFiles: () => Object.keys(notes).map(file),
       create: (path: string, content: string) => {
         notes[path] = content
         return Promise.resolve(file(path))
@@ -63,6 +66,44 @@ beforeEach(() => {
   notes = {}
   folders = []
   notices = []
+  modified = {}
+})
+
+describe('currentRun', () => {
+  const ORIGINAL = '2026-09-15-ubqPU2'
+  const hold = (runId: string, reranFrom: string[] = []): string =>
+    [
+      `# Hold: run ${runId} · creative-director`,
+      '',
+      ...(reranFrom.length ? ['## Previous verdict', '', ...reranFrom.map(run => `<details>\n<summary>run ${run}</summary>\n\nA verdict.\n\n</details>`), ''] : []),
+      '## Proposals',
+      '## Direction',
+      '',
+    ].join('\n')
+
+  it('is the run itself while its hold is where it was written', async () => {
+    notes[`Maestro/holds/${ORIGINAL}.md`] = hold(ORIGINAL)
+    expect(await makeHoldNotes().currentRun(ORIGINAL)).toBe(ORIGINAL)
+  })
+
+  it('is the run a rerun moved the hold to', async () => {
+    notes['Maestro/holds/2026-09-15-WKRDJJ.md'] = hold('2026-09-15-WKRDJJ', [ORIGINAL])
+    notes['Maestro/holds/2026-09-15-other.md'] = hold('2026-09-15-other', ['2026-09-14-elsewhere'])
+    expect(await makeHoldNotes().currentRun(ORIGINAL)).toBe('2026-09-15-WKRDJJ')
+  })
+
+  it('is the newest, when more than one hold was rerun from it', async () => {
+    notes['Maestro/holds/2026-09-15-WKRDJJ.md'] = hold('2026-09-15-WKRDJJ', [ORIGINAL])
+    notes['Maestro/holds/2026-09-15-D_QS9w.md'] = hold('2026-09-15-D_QS9w', [ORIGINAL])
+    modified = { 'Maestro/holds/2026-09-15-WKRDJJ.md': 1, 'Maestro/holds/2026-09-15-D_QS9w.md': 2 }
+    expect(await makeHoldNotes().currentRun(ORIGINAL)).toBe('2026-09-15-D_QS9w')
+  })
+
+  it('is the run itself when no hold was rerun from it', async () => {
+    notes['Maestro/holds/2026-09-15-other.md'] = hold('2026-09-15-other', ['2026-09-14-elsewhere'])
+    notes['Notes/not-a-hold.md'] = hold('2026-09-15-stray', [ORIGINAL])
+    expect(await makeHoldNotes().currentRun(ORIGINAL)).toBe(ORIGINAL)
+  })
 })
 
 describe('write', () => {

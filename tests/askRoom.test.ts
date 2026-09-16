@@ -66,12 +66,11 @@ describe('appendRoomAnswers', () => {
     )
   })
 
-  it('folds a multi-line answer to at most three non-blank lines', () => {
+  it('keeps a long answer whole, its blank lines and headings included', () => {
     const content = HOLD + 'ask the room: how would you push it?\n'
-    const answer = 'Line one.\n\nLine two.\nLine three.\nLine four.'
+    const answer = 'Line one.\n\n## Why\nLine two.\nLine three.\nLine four.'
     const appended = appendRoomAnswers(content, 'how would you push it?', [{ name: 'gameplay-director', answer }])
-    expect(appended).toContain('> **gameplay-director:**\n> Line one.\n> Line two.\n> Line three.\n')
-    expect(appended).not.toContain('Line four.')
+    expect(appended).toContain('> **gameplay-director:**\n> Line one.\n> \n> ## Why\n> Line two.\n> Line three.\n> Line four.\n')
   })
 
   it('leaves the note as it was when the question is no longer there to answer', () => {

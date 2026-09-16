@@ -1,3 +1,4 @@
+import { readConversation, type ConversationEntry } from './conversation'
 import { fileName } from './outputNote'
 import { extractSection } from './section'
 import type { AgentOutput, LayoutPanel } from '../engine/types'
@@ -43,10 +44,21 @@ export function thoughtsByNode(outputs: AgentOutput[]): Record<string, string> {
   return thoughts
 }
 
+/** A run's proposals: every panel but the one they converge on. */
+export function proposerPanels(panels: LayoutPanel[]): LayoutPanel[] {
+  return panels.filter(panel => panel.emphasis !== 'join')
+}
+
+/** The run and chain a hold note was written for. */
+export interface HoldHeading {
+  runId: string
+  chainName: string
+}
+
 const HOLD_HEADING = /^# Hold: run (\S+) · (.+?)\s*$/m
 
 /** The run and chain a hold note was written for, from its title; `undefined` for any other note. */
-export function holdHeading(content: string): { runId: string; chainName: string } | undefined {
+export function holdHeading(content: string): HoldHeading | undefined {
   const match = HOLD_HEADING.exec(content)
   return match ? { runId: match[1], chainName: match[2] } : undefined
 }
@@ -56,6 +68,11 @@ const PREVIOUS_VERDICT = '## Previous verdict'
 const PROPOSALS = '## Proposals'
 const DIRECTION = '## Direction'
 
+/** The panel a hold shows as its verdict, when the layout has one. */
+export function verdictPanel(panels: LayoutPanel[]): LayoutPanel | undefined {
+  return panels.find(panel => panel.emphasis === 'join')
+}
+
 /**
  * A fresh hold note for a finished run: the join panel as the verdict (a
  * `columns` chain's converging panel; absent under any other layout), every
@@ -63,8 +80,8 @@ const DIRECTION = '## Direction'
  * template, and an empty Conversation.
  */
 export function holdNoteContent(input: HoldNoteInput): string {
-  const verdict = input.panels.find(panel => panel.emphasis === 'join')
-  const proposers = input.panels.filter(panel => panel.emphasis !== 'join')
+  const verdict = verdictPanel(input.panels)
+  const proposers = proposerPanels(input.panels)
 
   return (
     [
@@ -144,8 +161,8 @@ interface CanonEntry {
 const CANON_LINE = /^-\s*\[([ xX])\]\s*(.+)$/
 
 /** The CANON? checklist in `content`, if it has one — its entries, and where the heading through its last line sits. */
-function canonBlock(content: string): { entries: CanonEntry[]; start: number; end: number } | undefined {
-  const start = lineAt(content, 'CANON?', 0)
+function canonBlock(content: string, from = 0): { entries: CanonEntry[]; start: number; end: number } | undefined {
+  const start = lineAt(content, 'CANON?', from)
   if (start === -1) return undefined
 
   const entries: CanonEntry[] = []
@@ -235,7 +252,7 @@ export function directionBlock(content: string): string | undefined {
 export function proposalEdits(content: string, panels: LayoutPanel[]): Record<string, string> {
   const proposalsAt = lineAt(content, PROPOSALS, 0)
   if (proposalsAt === -1) return {}
-  const proposers = panels.filter(panel => panel.emphasis !== 'join')
+  const proposers = proposerPanels(panels)
   const ends = [...proposers.map(panel => `### ${panel.name}`), DIRECTION]
 
   const edits: Record<string, string> = {}
@@ -255,10 +272,17 @@ export function refreshHoldNote(previous: string, input: HoldNoteInput): string 
   const heading = holdHeading(previous)
   const oldVerdict = heading ? bodyUnder(previous, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim() : undefined
   const earlier = bodyUnder(previous, PREVIOUS_VERDICT, [PROPOSALS], 0)?.trim()
-  const folds = [heading && oldVerdict ? verdictFold(heading.runId, oldVerdict) : '', earlier ?? '']
+  // Folded even when empty: the fold is what names the run a hold came from.
+  const folds = [heading ? verdictFold(heading.runId, oldVerdict || '*No verdict.*') : '', earlier ?? '']
     .filter(fold => fold !== '')
     .join('\n\n')
   return mergeHoldNote(holdNoteContent({ ...input, ...(folds ? { previousVerdicts: folds } : {}) }), previous)
+}
+
+/** The runs a hold was rerun from, newest first, as its Previous verdict names them. */
+export function reranFrom(content: string): string[] {
+  const earlier = bodyUnder(content, PREVIOUS_VERDICT, [PROPOSALS], 0) ?? ''
+  return [...earlier.matchAll(/^<summary>run (\S+)<\/summary>$/gm)].map(match => match[1])
 }
 
 function verdictFold(runId: string, verdict: string): string {
@@ -314,6 +338,170 @@ export function appendDirectionLine(content: string, line: string): string {
   const body = content.slice(bodyStart, bodyEnd).replace(/\s+$/, '')
   const newBody = `${body === '' ? '' : `${body}\n`}${line}\n`
   return `${content.slice(0, bodyStart)}${newBody}\n${content.slice(bodyEnd).replace(/^\s+/, '')}`
+}
+
+/** A hold as the directing panel reads it: plain data, no note sections. */
+export interface HoldReading {
+  runId: string
+  chainName: string
+  /** The join panel's text; absent when the run did not converge. */
+  verdict?: string
+  proposals: HoldProposal[]
+  /** The Direction's lines so far, minus the empty verb template and the canon checklist. */
+  direction: string[]
+  canon: CanonChoice[]
+  conversation: ConversationEntry[]
+}
+
+export interface HoldProposal {
+  name: string
+  /** The proposal's words, its thinking fold left out. */
+  text: string
+  /** The verbs a Direction line already gives it. */
+  given: DirectionVerb[]
+  /** The proposals a COMBINE line already joins it with. */
+  combinedWith: string[]
+  /** Whether its words differ from what its run wrote. */
+  edited: boolean
+}
+
+export interface CanonChoice {
+  /** What `tickCanonLine` finds the line by. */
+  id: string
+  /** The line's words, without who offered it. */
+  text: string
+  proposer: string
+  ticked: boolean
+}
+
+/**
+ * A hold note read whole; `undefined` for a note that is not one. A proposal
+ * reads as edited only against `panels`, the run's own.
+ */
+export function readHold(content: string, panels: LayoutPanel[]): HoldReading | undefined {
+  const heading = holdHeading(content)
+  const direction = directionBlock(content)
+  if (!heading || direction === undefined) return undefined
+  const lines = directionLines(direction)
+  const verdict = bodyUnder(content, verdictHeading(heading.chainName), [PREVIOUS_VERDICT, PROPOSALS], 0)?.trim()
+  const proposals = proposalsIn(content)
+  const edits = proposalEdits(content, panels)
+  const edited = new Set(proposerPanels(panels).filter(panel => panel.node in edits).map(panel => panel.name))
+  return {
+    ...heading,
+    ...(verdict ? { verdict } : {}),
+    proposals: proposals.map(proposal => ({
+      ...proposal,
+      given: verbsGiven(lines, proposal.name),
+      combinedWith: combinedWith(lines, proposal.name),
+      edited: edited.has(proposal.name),
+    })),
+    direction: lines,
+    canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
+    conversation: readConversation(content, proposals.map(proposal => proposal.name)),
+  }
+}
+
+/**
+ * Each `### ` proposal under Proposals, up to the next one or Direction. A
+ * proposer writes its own sections as `## `, so those stay inside it.
+ */
+function proposalsIn(content: string): { name: string; text: string }[] {
+  const proposalsAt = lineAt(content, PROPOSALS, 0)
+  if (proposalsAt === -1) return []
+  const directionAt = lineAt(content, DIRECTION, proposalsAt)
+  const body = content.slice(afterLine(content, proposalsAt), directionAt === -1 ? content.length : directionAt)
+  return body
+    .split(/^### /m)
+    .slice(1)
+    .map(chunk => {
+      const newline = afterLine(chunk, 0)
+      return { name: chunk.slice(0, newline).trim(), text: chunk.slice(newline).replace(THINKING_FOLD, '').trim() }
+    })
+}
+
+/** The proposal `name`'s words replaced by `text`, its thinking fold kept; unchanged when the note has no such proposal. */
+export function rewriteProposal(content: string, name: string, text: string): string {
+  const proposalsAt = lineAt(content, PROPOSALS, 0)
+  if (proposalsAt === -1) return content
+  const found = lineAt(content, DIRECTION, proposalsAt)
+  const directionAt = found === -1 ? content.length : found
+  const start = lineAt(content, `### ${name}`, proposalsAt)
+  if (start === -1 || start > directionAt) return content
+  const bodyStart = afterLine(content, start)
+  const next = /^### /m.exec(content.slice(bodyStart, directionAt))
+  const bodyEnd = next ? bodyStart + next.index : directionAt
+  const fold = THINKING_FOLD.exec(content.slice(bodyStart, bodyEnd))?.[0].trim()
+  return `${content.slice(0, bodyStart)}\n${fold ? `${fold}\n\n` : ''}${text.trim()}\n\n${content.slice(bodyEnd)}`
+}
+
+const EMPTY_VERB = new RegExp(`^(${DIRECTIONS.join('|')}):$`)
+
+function directionLines(direction: string): string[] {
+  return direction
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '' && line !== 'CANON?' && !EMPTY_VERB.test(line) && !CANON_LINE.test(line))
+}
+
+const GIVEN_LINE = new RegExp(`^(${DIRECTION_VERBS.join('|')}):\\s*(.+)$`)
+
+/** Each verb line naming `name`, as its verb and every proposal it names. */
+function linesNaming(lines: string[], name: string): { verb: DirectionVerb; named: string[] }[] {
+  return lines
+    .map(line => GIVEN_LINE.exec(line))
+    .filter((match): match is RegExpExecArray => match !== null)
+    .map(match => ({ verb: match[1] as DirectionVerb, named: match[2].split(' + ').map(named => named.trim()) }))
+    .filter(line => line.named.includes(name))
+}
+
+function verbsGiven(lines: string[], name: string): DirectionVerb[] {
+  return [...new Set(linesNaming(lines, name).map(line => line.verb))]
+}
+
+function combinedWith(lines: string[], name: string): string[] {
+  const others = linesNaming(lines, name)
+    .filter(line => line.verb === 'COMBINE')
+    .flatMap(line => line.named.filter(named => named !== name))
+  return [...new Set(others)]
+}
+
+function canonChoice(entry: CanonEntry): CanonChoice {
+  const at = entry.text.lastIndexOf(' — ')
+  return {
+    id: entry.text,
+    text: at === -1 ? entry.text : entry.text.slice(0, at),
+    proposer: at === -1 ? '' : entry.text.slice(at + 3),
+    ticked: entry.ticked,
+  }
+}
+
+/** The canon line `id` ticked or unticked in place; unchanged when the note no longer offers it. */
+export function tickCanonLine(content: string, id: string, ticked: boolean): string {
+  const directionAt = DIRECTION_HEADING.exec(content)?.index
+  const block = directionAt === undefined ? undefined : canonBlock(content, directionAt)
+  if (!block) return content
+  const lines = content
+    .slice(block.start, block.end)
+    .split('\n')
+    .map(line => (CANON_LINE.exec(line.trim())?.[2] === id ? `- [${ticked ? 'x' : ' '}] ${id}` : line))
+  return content.slice(0, block.start) + lines.join('\n') + content.slice(block.end)
+}
+
+/** The Direction with every line reading exactly one of `lines` taken out; the rest left as written. */
+export function removeDirectionLines(content: string, lines: string[]): string {
+  const match = DIRECTION_HEADING.exec(content)
+  if (!match) return content
+  const bodyStart = afterLine(content, match.index)
+  const heading = /^#{1,6}[ \t]+.*$/gm
+  heading.lastIndex = bodyStart
+  const bodyEnd = heading.exec(content)?.index ?? content.length
+  const body = content
+    .slice(bodyStart, bodyEnd)
+    .split('\n')
+    .filter(line => !lines.includes(line.trim()))
+    .join('\n')
+  return content.slice(0, bodyStart) + body + content.slice(bodyEnd)
 }
 
 const RESUMED_HEADING = /^##\s+Resumed\s*$/m
