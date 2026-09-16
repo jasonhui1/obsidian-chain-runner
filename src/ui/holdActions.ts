@@ -2,7 +2,6 @@ import type { App, TAbstractFile, TFile } from 'obsidian'
 import type { AskTheRoom } from './askTheRoom'
 import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
-import type { OnRerunProgress } from './rerunAndRefresh'
 import type { RerunDownstream } from './rerunDownstream'
 import type { Resume, ResumeResult } from './resume'
 import type { RunPanels } from './runPanels'
@@ -23,6 +22,7 @@ import {
   type HoldReading,
 } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
+import type { OnRerunProgress } from '../run/rerunProgress'
 import { appendSideQuest } from '../run/sideQuest'
 
 /**
@@ -35,7 +35,7 @@ export type { ConversationEntry } from '../run/conversation'
 export { sameTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
 export { canonNote, type CanonOutcome, type ResumeResult } from './resume'
-export type { OnRerunProgress, RerunProgress, RerunStep } from './rerunAndRefresh'
+export type { OnRerunProgress, RerunProgress, RerunStep } from '../run/rerunProgress'
 
 /** A chat reply that can become its proposal's revision. */
 export type RepliedTurn = Required<ChatTurn>

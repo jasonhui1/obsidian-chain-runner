@@ -1,11 +1,12 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite, readIfPresent } from './vaultWrite'
-import { fetchRun, rerunAndRefresh, type OnRerunProgress } from './rerunAndRefresh'
+import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatTurn } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
 import { holdHeading, proposerPanels, type HoldHeading } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
+import type { OnRerunProgress } from '../run/rerunProgress'
 import type { EngineClient } from '../engine/client'
 
 /** The "Chat with proposer" command: the vault half of `src/run/chat.ts`. */
@@ -112,6 +113,6 @@ export class ChatWithProposer {
       return undefined
     }
 
-    return rerunAndRefresh(this.deps, file, heading, source.layout.panels, request, { beforeRefresh: mark, onProgress })
+    return rerunAndRefresh(this.deps, file, heading, request, { beforeRefresh: mark, onProgress })
   }
 }

@@ -1,9 +1,10 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { readIfPresent } from './vaultWrite'
-import { fetchRun, rerunAndRefresh, type OnRerunProgress } from './rerunAndRefresh'
+import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { holdHeading, proposalEdits } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
+import type { OnRerunProgress } from '../run/rerunProgress'
 import type { EngineClient } from '../engine/client'
 
 /** The "Rerun downstream" command: the vault half of `src/run/rerun.ts`. */
@@ -51,7 +52,7 @@ export class RerunDownstream {
       return undefined
     }
 
-    return rerunAndRefresh(this.deps, file, heading, panels, request, {
+    return rerunAndRefresh(this.deps, file, heading, request, {
       proposalsStale: current => !sameEdits(proposalEdits(current, panels), edits),
       onProgress,
     })

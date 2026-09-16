@@ -125,6 +125,12 @@ const panels = [
   panel('creative-director', 'A combat trial in a void.', 'join'),
 ]
 
+/** The frame a rerun sends: every panel filled but those named, still waiting. */
+const layoutFrame = (...waiting: string[]): RunEvent => ({
+  type: 'layout',
+  model: { kind: 'columns', panels: panels.map(one => (waiting.includes(one.node) ? { ...one, state: 'pending' as const } : one)) },
+})
+
 const theRun = (runId: string): RunMeta => ({
   runId,
   chainName: 'creative-director',
@@ -441,8 +447,10 @@ describe('rerun', () => {
   it('says what it writes again, then each step the engine starts, named as its card is', async () => {
     rerunFrames = [
       { type: 'run_start', runId: NEW },
+      layoutFrame('creative-director'),
       { type: 'agent_start', agentName: 'critic', nodeId: 'scratch', step: 0 },
       { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 1 },
+      layoutFrame(),
       { type: 'run_complete', runId: NEW },
     ]
     const actions = makeActions()
@@ -453,6 +461,7 @@ describe('rerun', () => {
     expect(heard).toEqual([
       plan,
       { ...plan, step: { name: 'critic', writesVerdict: false } },
+      { ...plan, step: { name: 'creative-director', writesVerdict: true } },
       { ...plan, step: { name: 'creative-director', writesVerdict: true } },
     ])
   })
@@ -632,6 +641,7 @@ describe('revise', () => {
   it('says what it writes again, and each step the engine starts', async () => {
     rerunFrames = [
       { type: 'run_start', runId: NEW },
+      layoutFrame('creative-director'),
       { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 },
       { type: 'run_complete', runId: NEW },
     ]

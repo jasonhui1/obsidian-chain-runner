@@ -1,5 +1,5 @@
 import type { EngineClient } from '../engine/client'
-import { isEvent, type AgentOutput, type AgentStartEvent, type RunRequest } from '../engine/types'
+import { isEvent, type AgentOutput, type RunEvent, type RunRequest } from '../engine/types'
 
 /** A run nothing draws while it goes — only the id it lands on matters. */
 
@@ -9,15 +9,15 @@ export interface RunOutcome {
   error?: string
 }
 
-/** Runs a request to completion and reports what it landed on, telling `onStart` each step as it starts. */
+/** Runs a request to completion and reports what it landed on, passing `onEvent` every event on the way. */
 export async function runHeadless(
   engine: EngineClient,
   request: RunRequest,
-  onStart: (step: AgentStartEvent) => void = () => {},
+  onEvent: (event: RunEvent) => void = () => {},
 ): Promise<RunOutcome> {
   let outcome: RunOutcome = {}
   for await (const event of engine.launchRun(request)) {
-    if (isEvent(event, 'agent_start')) onStart(event)
+    onEvent(event)
     if (isEvent(event, 'run_start') || isEvent(event, 'run_complete')) outcome = { ...outcome, runId: event.runId }
     if (isEvent(event, 'error')) outcome = { ...outcome, error: event.error }
   }
