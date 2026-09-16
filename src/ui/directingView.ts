@@ -98,19 +98,24 @@ export class DirectingView extends ItemView {
       askRoom: question => this.written(runId => this.holds.askRoom(runId, question)),
       change: text => this.written(runId => this.holds.change(runId, text)),
       editProposal: (proposal, text) => this.written(runId => this.holds.editProposal(runId, proposal, text)),
-      revise: async turn => {
+      revise: async (turn, onStep) => {
         const runId = this.runId
-        if (runId) await this.follow(runId, await this.holds.revise(runId, turn))
+        if (runId) await this.follow(runId, await this.holds.revise(runId, turn, onStep))
       },
       resume: runId => this.holds.resume(runId),
-      rerun: async () => {
+      rerun: async onStep => {
         const runId = this.runId
-        if (runId) await this.follow(runId, await this.holds.rerun(runId))
+        if (runId) await this.follow(runId, await this.holds.rerun(runId, onStep))
       },
       sideQuest: (proposal, chain) => this.written(runId => this.holds.sideQuest(runId, proposal, chain)),
       chains: () => this.holds.chains(),
       runUrl: runId => this.holds.runUrl(runId),
       openEditor: (text, changed) => markdownEditor(this.contentEl.ownerDocument, text, changed),
+      now: () => Date.now(),
+      every: (ms, tick) => {
+        const id = this.contentEl.win.setInterval(tick, ms)
+        return () => this.contentEl.win.clearInterval(id)
+      },
       openMenu: event =>
         this.onRun(runId =>
           new Menu()

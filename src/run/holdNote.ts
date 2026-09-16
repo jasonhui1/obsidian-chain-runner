@@ -68,6 +68,11 @@ const PREVIOUS_VERDICT = '## Previous verdict'
 const PROPOSALS = '## Proposals'
 const DIRECTION = '## Direction'
 
+/** The panel a hold shows as its verdict, when the layout has one. */
+export function verdictPanel(panels: LayoutPanel[]): LayoutPanel | undefined {
+  return panels.find(panel => panel.emphasis === 'join')
+}
+
 /**
  * A fresh hold note for a finished run: the join panel as the verdict (a
  * `columns` chain's converging panel; absent under any other layout), every
@@ -75,7 +80,7 @@ const DIRECTION = '## Direction'
  * template, and an empty Conversation.
  */
 export function holdNoteContent(input: HoldNoteInput): string {
-  const verdict = input.panels.find(panel => panel.emphasis === 'join')
+  const verdict = verdictPanel(input.panels)
   const proposers = proposerPanels(input.panels)
 
   return (

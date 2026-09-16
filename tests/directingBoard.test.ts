@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectingBoard, type DirectingState } from '@/ui/directingBoard'
 import type { ProposalEditor } from '@/ui/proposalEditor'
-import type { HoldReading, ResumeResult } from '@/ui/holdActions'
+import type { HoldReading, RerunStep, ResumeResult } from '@/ui/holdActions'
 
 /**
  * The directing panel's elements: which tab shows what, and that every button
@@ -43,6 +43,11 @@ let chainsAsked: number
 let resumesWaiting: ((result: ResumeResult | undefined) => void)[]
 /** Every editor the board has opened, in the order it opened them. */
 let editors: FakeEditor[]
+/** Hands the rerun going now the step the engine is on. */
+let stepTo: (step: RerunStep) => void
+let clock: number
+/** The board's running timers, ticked by the test. */
+let timers: Set<() => void>
 
 /** Stands in for the CodeMirror editor: a textarea, so a test can type into it. */
 interface FakeEditor extends ProposalEditor {
@@ -85,9 +90,15 @@ function board(): DirectingBoard {
     chat: (proposal, message) => answered(`chat ${proposal} ${message}`),
     askRoom: question => answered(`ask ${question}`),
     change: text => answered(`change ${text}`),
-    revise: turn => answered(`revise ${turn.name} ${turn.reply}`).then(() => {}),
+    revise: (turn, onStep) => {
+      stepTo = onStep
+      return answered(`revise ${turn.name} ${turn.reply}`).then(() => {})
+    },
     editProposal: (proposal, words) => answered(`edit ${proposal} ${words}`),
-    rerun: () => answered('rerun').then(() => {}),
+    rerun: onStep => {
+      stepTo = onStep
+      return answered('rerun').then(() => {})
+    },
     resume: runId => {
       calls.push(`resume ${runId}`)
       return new Promise(resolve => resumesWaiting.push(resolve))
@@ -99,6 +110,11 @@ function board(): DirectingBoard {
     },
     runUrl: runId => `http://engine/history/${runId}`,
     openEditor,
+    now: () => clock,
+    every: (_ms, tick) => {
+      timers.add(tick)
+      return () => void timers.delete(tick)
+    },
     watchOverflow: (_frame, changed) => {
       changed(overflowing)
       return () => {}
@@ -145,6 +161,9 @@ beforeEach(() => {
   chainsAsked = 0
   resumesWaiting = []
   editors = []
+  stepTo = () => {}
+  clock = 0
+  timers = new Set()
 })
 
 describe('header', () => {
@@ -444,6 +463,79 @@ describe('rerunning downstream', () => {
     waiting[0]!(true)
     await settled()
     expect(button('⟳ Rerun downstream').disabled).toBe(false)
+  })
+})
+
+describe('a rerun going', () => {
+  const edited = hold({
+    proposals: [
+      { name: 'gameplay', text: 'Rotate stances.', given: [], combinedWith: [], edited: true },
+      { name: 'world', text: 'A controlled test.', given: [], combinedWith: [], edited: false },
+    ],
+  })
+  const progress = (): string[] => Array.from(root.querySelectorAll('.chain-runner-directing-progress')).map(line => line.textContent ?? '')
+  const tick = (seconds: number): void => {
+    clock += seconds * 1000
+    timers.forEach(one => one())
+  }
+
+  it('shows the step and a timer over the old verdict, greyed out, on the Run tab', () => {
+    board().open(showing(edited))
+    button('⟳ Rerun downstream').click()
+    expect(progress()).toEqual(['⟳ Starting the rerun… 0:00'])
+    stepTo({ name: 'director', writesVerdict: true })
+    tick(42)
+    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:42'])
+    const verdict = root.querySelector('.chain-runner-directing-verdict')
+    expect(verdict?.classList.contains('is-stale')).toBe(true)
+    expect(verdict?.textContent).toContain('A combat trial in a void.')
+  })
+
+  it('names a step that is not the verdict as running', () => {
+    board().open(showing(edited))
+    button('⟳ Rerun downstream').click()
+    stepTo({ name: 'world', writesVerdict: false })
+    tick(65)
+    expect(progress()).toEqual(['⟳ world is running… 1:05'])
+  })
+
+  it('shows the same line on a proposal tab, under the rerun bar', () => {
+    board().open(showing(edited), 'world')
+    button('⟳ Rerun downstream').click()
+    stepTo({ name: 'director', writesVerdict: true })
+    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:00'])
+    expect(root.querySelector('.chain-runner-directing-rerun')?.nextElementSibling?.className).toBe('chain-runner-directing-progress')
+  })
+
+  it('shows the line for a reply used as the revision, where no rerun bar is', () => {
+    const talked = hold({ conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }] })
+    board().open(showing(talked), 'world')
+    button('Use this reply as the revision & rerun').click()
+    stepTo({ name: 'director', writesVerdict: true })
+    tick(3)
+    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:03'])
+  })
+
+  it('puts the panel back as it was when the rerun lands nowhere', async () => {
+    board().open(showing(edited))
+    button('⟳ Rerun downstream').click()
+    stepTo({ name: 'director', writesVerdict: true })
+    waiting[0]!(false)
+    await settled()
+    expect(progress()).toEqual([])
+    expect(root.querySelector('.chain-runner-directing-verdict')?.classList.contains('is-stale')).toBe(false)
+    expect(timers.size).toBe(0)
+    stepTo({ name: 'late', writesVerdict: false })
+    expect(progress()).toEqual([])
+  })
+
+  it('shows no line for a run the panel has moved on from', () => {
+    const b = board()
+    b.open(showing(edited))
+    button('⟳ Rerun downstream').click()
+    b.draw(showing(hold({ runId: '2026-09-16-Xy9zW2' })))
+    expect(progress()).toEqual([])
+    expect(timers.size).toBe(0)
   })
 })
 

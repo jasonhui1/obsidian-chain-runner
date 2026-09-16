@@ -558,8 +558,9 @@
     background-color var(--anim-duration-fast, 100ms) var(--anim-motion-smooth, ease-in-out);
 }
 
-/* The four things still happening. Each also says so in words, so the pulse is
+/* The five things still happening. Each also says so in words, so the pulse is
    never the only channel. */
+.chain-runner-directing-progress,
 .chain-runner-run-status--running,
 .chain-runner-panel-notice--writing,
 .chain-runner-engine-pill--unknown,
@@ -862,6 +863,17 @@
   border-radius: var(--radius-m);
   background: var(--background-secondary);
   font-size: var(--font-ui-small);
+}
+
+.chain-runner-directing-progress {
+  margin-top: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-runner-directing-verdict.is-stale {
+  opacity: 0.5;
 }
 
 .chain-runner-directing-proposal-actions,

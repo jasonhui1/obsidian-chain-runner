@@ -7,6 +7,8 @@ import {
   type HoldProposal,
   type HoldReading,
   type RepliedTurn,
+  type OnRerunStep,
+  type RerunStep,
   type ResumeResult,
   sameTurn,
 } from './holdActions'
@@ -27,11 +29,12 @@ export interface DirectingBoardDeps {
   chat: (proposal: string, message: string) => Promise<boolean>
   askRoom: (question: string) => Promise<boolean>
   change: (text: string) => Promise<boolean>
-  revise: (turn: RepliedTurn) => Promise<void>
+  /** Each rerun tells `onStep` the step the engine has started. */
+  revise: (turn: RepliedTurn, onStep: OnRerunStep) => Promise<void>
   /** Answers whether the proposal’s new words reached the hold. */
   editProposal: (proposal: string, text: string) => Promise<boolean>
   /** Reruns downstream of every edited proposal. */
-  rerun: () => Promise<void>
+  rerun: (onStep: OnRerunStep) => Promise<void>
   /** Runs the hold's Direction as develop-direction; `undefined` when nothing ran. */
   resume: (runId: string) => Promise<ResumeResult | undefined>
   /** Answers whether the side quest's result reached the hold. */
@@ -42,6 +45,9 @@ export interface DirectingBoardDeps {
   /** Opens an editor on a proposal's words, which reports every change. */
   openEditor: (text: string, changed: () => void) => ProposalEditor
   openMenu: (event: MouseEvent) => void
+  now: () => number
+  /** Calls `tick` every `ms`; returns what stops it. */
+  every: (ms: number, tick: () => void) => () => void
   /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
   watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
 }
@@ -59,8 +65,8 @@ export class DirectingBoard {
   private tab: string | undefined
   private readonly unclamped = new Set<string>()
   private readonly boxes = new TypingBoxes(() => this.draw(this.state))
-  /** What each run is being rerun from, while its rerun goes. */
-  private readonly rerunning = new Map<string, RerunFrom>()
+  /** Each run's rerun, while it goes. */
+  private readonly rerunning = new Map<string, Rerun>()
   /** Each run's resume, while it goes and once it has landed. */
   private readonly resumes = new Map<string, ResumeShown>()
   /** Each proposal being edited, by `editKey`. */
@@ -134,10 +140,11 @@ export class DirectingBoard {
     this.tabButton(tabs, 'Run', undefined, !proposal)
     for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal)
     this.rerunBar(body, hold)
+    if (proposal) this.progress(body, hold.runId)
 
     if (!proposal) {
       this.pitch(body, hold.runId)
-      if (hold.verdict) this.markdown(this.section(body, 'Verdict'), hold.verdict)
+      this.verdict(body, hold)
       const direction = this.section(body, 'Direction so far')
       this.directionSoFar(direction, hold.direction)
       this.boxes.draw(direction, {
@@ -246,11 +253,11 @@ export class DirectingBoard {
   }
 
   private reviseButton(el: HTMLElement, hold: HoldReading, turn: RepliedTurn): void {
-    const going = this.rerunning.get(hold.runId)
+    const going = this.rerunning.get(hold.runId)?.from
     const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = !this.canRerun(hold)
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, () => this.deps.revise(turn)))
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, onStep => this.deps.revise(turn, onStep)))
   }
 
   /** What the last resume landed on, shown where the Run tab opens. A failed run says so in the bar instead. */
@@ -306,10 +313,10 @@ export class DirectingBoard {
     const bar = this.add(body, 'div', `${CLS}-rerun`)
     const editOpen = this.editOpen(hold)
     this.add(bar, 'span', `${CLS}-faint`, editOpen ? 'Save or cancel the edit first' : `Edited: ${edited.join(', ')}`)
-    const going = this.rerunning.get(hold.runId)
+    const going = this.rerunning.get(hold.runId)?.from
     const button = this.button(bar, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', 'mod-cta')
     button.disabled = !this.canRerun(hold)
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, () => this.deps.rerun()))
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, onStep => this.deps.rerun(onStep)))
   }
 
   /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
@@ -321,13 +328,43 @@ export class DirectingBoard {
     return hold.proposals.some(one => this.edits.has(editKey(hold.runId, one.name)))
   }
 
-  private async startRerun(hold: HoldReading, from: RerunFrom, rerun: () => Promise<void>): Promise<void> {
+  /** The old verdict stays, greyed, under what the rerun is doing, until the run it lands on replaces it. */
+  private verdict(body: HTMLElement, hold: HoldReading): void {
+    const going = this.rerunning.has(hold.runId)
+    if (!hold.verdict && !going) return
+    const section = this.section(body, 'Verdict')
+    this.progress(section, hold.runId)
+    if (!hold.verdict) return
+    const old = this.add(section, 'div', going ? `${CLS}-verdict is-stale` : `${CLS}-verdict`)
+    this.markdown(old, hold.verdict)
+  }
+
+  /** The step the run's rerun is on, and how long it has gone; nothing while none goes. */
+  private progress(el: HTMLElement, runId: string): void {
+    const going = this.rerunning.get(runId)
+    if (!going) return
+    const line = this.add(el, 'div', `${CLS}-progress`)
+    const doing = !going.step ? 'Starting the rerun' : `${going.step.name} ${going.step.writesVerdict ? 'is writing a new verdict' : 'is running'}`
+    const show = (): void => {
+      line.textContent = `⟳ ${doing}… ${elapsed(this.deps.now() - going.startedAt)}`
+    }
+    show()
+    this.releases.push(this.deps.every(1000, show))
+  }
+
+  private async startRerun(hold: HoldReading, from: RerunFrom, rerun: (onStep: OnRerunStep) => Promise<void>): Promise<void> {
     const runId = hold.runId
     if (!this.canRerun(hold)) return
-    this.rerunning.set(runId, from)
+    const going: Rerun = { from, startedAt: this.deps.now() }
+    this.rerunning.set(runId, going)
     this.draw(this.state)
+    const onStep = (step: RerunStep): void => {
+      if (this.rerunning.get(runId) !== going) return
+      going.step = step
+      this.draw(this.state)
+    }
     try {
-      await rerun()
+      await rerun(onStep)
     } finally {
       this.rerunning.delete(runId)
       this.draw(this.state)
@@ -502,6 +539,13 @@ type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>
 
 type RerunFrom = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn }
 
+/** A rerun going: what it was started from, when, and the step the engine is on. */
+interface Rerun {
+  from: RerunFrom
+  startedAt: number
+  step?: RerunStep
+}
+
 /** A resume from the panel: going, landed, or stopped before it ran. */
 type ResumeShown = { kind: 'running' } | { kind: 'landed'; result: ResumeResult } | { kind: 'stopped' }
 
@@ -509,6 +553,12 @@ type ResumeShown = { kind: 'running' } | { kind: 'landed'; result: ResumeResult 
 function resumeLabel(canon: CanonChoice[]): string {
   if (canon.length === 0) return '▶ Resume'
   return `▶ Resume · ${canon.filter(line => line.ticked).length} of ${canon.length} canon ticked`
+}
+
+/** `m:ss` */
+function elapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 function editKey(runId: string, proposal: string): string {

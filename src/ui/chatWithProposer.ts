@@ -1,6 +1,6 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite, readIfPresent } from './vaultWrite'
-import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
+import { fetchRun, rerunAndRefresh, type OnRerunStep } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatTurn } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
@@ -86,13 +86,14 @@ export class ChatWithProposer {
 
   /**
    * A reply becomes the proposer's revision, rerun downstream; `mark` notes in the
-   * hold which reply it was. Answers the run the hold now lives under.
+   * hold which reply it was, and `onStep` hears each step. Answers the run the hold now lives under.
    */
   async revise(
     file: TFile,
     heading: HoldHeading,
     turn: Required<ChatTurn>,
     mark: (content: string, newRunId: string) => string = markRevised,
+    onStep?: OnRerunStep,
   ): Promise<string | undefined> {
     const { engine, notify } = this.deps
     const source = await this.deps.withEngine(() => fetchRun(engine, heading.runId))
@@ -111,6 +112,6 @@ export class ChatWithProposer {
       return undefined
     }
 
-    return rerunAndRefresh(this.deps, file, heading, request, { beforeRefresh: mark })
+    return rerunAndRefresh(this.deps, file, heading, source.layout.panels, request, { beforeRefresh: mark, onStep })
   }
 }

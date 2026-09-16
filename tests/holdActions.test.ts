@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { HoldActions, PROPOSAL_HEADING } from '@/ui/holdActions'
+import { HoldActions, PROPOSAL_HEADING, type RerunStep } from '@/ui/holdActions'
 import { HoldNotes } from '@/ui/holdNotes'
 import { AskTheRoom, NOBODY_ANSWERED } from '@/ui/askTheRoom'
 import { ChatWithProposer } from '@/ui/chatWithProposer'
@@ -438,6 +438,23 @@ describe('rerun', () => {
     expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
   })
 
+  it('reports each step the engine starts, named as its card is, and whether it writes the verdict', async () => {
+    rerunFrames = [
+      { type: 'run_start', runId: NEW },
+      { type: 'agent_start', agentName: 'critic', nodeId: 'scratch', step: 0 },
+      { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 1 },
+      { type: 'run_complete', runId: NEW },
+    ]
+    const actions = makeActions()
+    await actions.editProposal(RUN, 'world', 'The world is real.')
+    const steps: RerunStep[] = []
+    await actions.rerun(RUN, step => steps.push(step))
+    expect(steps).toEqual([
+      { name: 'critic', writesVerdict: false },
+      { name: 'creative-director', writesVerdict: true },
+    ])
+  })
+
   it('runs nothing for a run with no hold note', async () => {
     expect(await makeActions().rerun('2026-09-15-none')).toBeUndefined()
     expect(requests).toEqual([])
@@ -608,6 +625,17 @@ describe('revise', () => {
     expect(conversation?.[0]).toMatchObject({ revisedAs: '2026-09-14-old' })
     expect(conversation?.at(-1)).toEqual({ kind: 'chat', ...turn, revisedAs: NEW })
     expect(Object.keys(notes)).toEqual([NEW_PATH])
+  })
+
+  it('reports each step the engine starts', async () => {
+    rerunFrames = [
+      { type: 'run_start', runId: NEW },
+      { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 },
+      { type: 'run_complete', runId: NEW },
+    ]
+    const steps: RerunStep[] = []
+    await makeActions().revise(RUN, turn, step => steps.push(step))
+    expect(steps).toEqual([{ name: 'creative-director', writesVerdict: true }])
   })
 
   it('leaves the hold where it was when the rerun fails', async () => {
