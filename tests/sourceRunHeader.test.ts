@@ -159,7 +159,7 @@ describe('a card a rerun is writing again', () => {
     rerun.hear(rewriting())
     expect(rerunLine(container)).toBe('⟳ Starting the rerun…')
     rerun.hear(rewriting({ name: 'Survivor', writesVerdict: true }))
-    expect(rerunLine(container)).toBe('⟳ Survivor is writing a new verdict…')
+    expect(rerunLine(container)).toBe('⟳ Writing a new verdict…')
     rerun.end()
 
     expect(rerunLine(container)).toBe('')

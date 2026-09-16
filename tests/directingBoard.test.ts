@@ -488,7 +488,7 @@ describe('a rerun going', () => {
     button('⟳ Rerun downstream').click()
     progressTo({ ...verdictOnly, step: director })
     tick(42)
-    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:42'])
+    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:42'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
     expect(root.querySelector('.chain-runner-directing-verdict')?.textContent).toContain('A combat trial in a void.')
   })
@@ -544,7 +544,7 @@ describe('a rerun going', () => {
     expect(progress()).toEqual([])
     button('Run').click()
     tick(3)
-    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:03'])
+    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:03'])
   })
 
   it('puts the panel back as it was when the rerun lands nowhere', async () => {

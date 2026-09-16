@@ -22,7 +22,7 @@ export interface RerunProgress {
 
 /** What a rerun is doing, as a line under the words it will replace. */
 export function rerunDoing(step: RerunStep | undefined): string {
-  const doing = !step ? 'Starting the rerun' : step.writesVerdict ? `${step.name} is writing a new verdict` : `${step.name} is running`
+  const doing = !step ? 'Starting the rerun' : step.writesVerdict ? 'Writing a new verdict' : `${step.name} is running`
   return `⟳ ${doing}…`
 }
 
