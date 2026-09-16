@@ -671,14 +671,21 @@
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--size-2-1);
+  align-items: center;
+  gap: var(--size-2-1) var(--size-4-2);
   margin: 0 calc(-1 * var(--chain-runner-directing-gutter));
   padding: 0 var(--size-4-2);
   background: var(--background-secondary);
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.chain-runner-directing .chain-runner-directing-tabs button {
+.chain-runner-directing-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-1);
+}
+
+.chain-runner-directing .chain-runner-directing-tablist button {
   height: auto;
   padding: var(--size-4-2) var(--size-4-2);
   background: none;
@@ -688,7 +695,19 @@
   color: var(--text-muted);
 }
 
-.chain-runner-directing .chain-runner-directing-tabs button.is-selected {
+/* An edited proposal's tab carries a dot, where a changed file's tab would. */
+.chain-runner-directing .chain-runner-directing-tablist button.is-edited::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--size-2-2);
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  vertical-align: middle;
+}
+
+.chain-runner-directing .chain-runner-directing-tablist button.is-selected {
   color: var(--text-normal);
   border-bottom-color: var(--interactive-accent);
   font-weight: var(--font-semibold);
@@ -852,16 +871,8 @@
   font-size: var(--font-ui-smaller);
 }
 
-.chain-runner-directing-rerun {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--size-4-2);
-  margin-top: var(--size-4-3);
-  padding: var(--size-4-2) var(--size-4-3);
-  border-radius: var(--radius-m);
-  background: var(--background-secondary);
+.chain-runner-directing button.chain-runner-directing-rerun {
+  margin-left: auto;
   font-size: var(--font-ui-small);
 }
 

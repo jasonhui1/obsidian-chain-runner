@@ -135,11 +135,12 @@ export class DirectingBoard {
 
   private hold(body: HTMLElement, hold: HoldReading): void {
     const proposal = hold.proposals.find(one => one.name === this.tab)
-    const tabs = this.add(body, 'div', `${CLS}-tabs`)
+    const row = this.add(body, 'div', `${CLS}-tabs`)
+    const tabs = this.add(row, 'div', `${CLS}-tablist`)
     tabs.setAttribute('role', 'tablist')
     this.tabButton(tabs, 'Run', undefined, !proposal)
-    for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal)
-    this.rerunBar(body, hold)
+    for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal, one.edited)
+    this.rerunButton(row, hold)
     const going = this.rerunning.get(hold.runId)
     const rewritten = proposal !== undefined && going?.progress?.proposals.includes(proposal.name) === true
     if (going && rewritten) this.progress(body, going)
@@ -309,15 +310,13 @@ export class DirectingBoard {
     }
   }
 
-  private rerunBar(body: HTMLElement, hold: HoldReading): void {
-    const edited = hold.proposals.filter(one => one.edited).map(one => one.name)
-    if (edited.length === 0) return
-    const bar = this.add(body, 'div', `${CLS}-rerun`)
-    const editOpen = this.editOpen(hold)
-    this.add(bar, 'span', `${CLS}-faint`, editOpen ? 'Save or cancel the edit first' : `Edited: ${edited.join(', ')}`)
+  /** At the end of the tab row, once a proposal is edited; the edited ones are marked on their tabs. */
+  private rerunButton(row: HTMLElement, hold: HoldReading): void {
+    if (!hold.proposals.some(one => one.edited)) return
     const going = this.rerunning.get(hold.runId)?.from
-    const button = this.button(bar, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', 'mod-cta')
+    const button = this.button(row, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', `mod-cta ${CLS}-rerun`)
     button.disabled = !this.canRerun(hold)
+    if (this.editOpen(hold)) button.title = 'Save or cancel the edit first'
     button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, onProgress => this.deps.rerun(onProgress)))
   }
 
@@ -350,7 +349,7 @@ export class DirectingBoard {
   private progress(el: HTMLElement, going: Rerun): void {
     const line = this.add(el, 'div', `${CLS}-progress`)
     const step = going.progress?.step
-    const doing = !step ? 'Starting the rerun' : `${step.name} ${step.writesVerdict ? 'is writing a new verdict' : 'is running'}`
+    const doing = !step ? 'Starting the rerun' : step.writesVerdict ? 'Writing a new verdict' : `${step.name} is running`
     const show = (): void => {
       line.textContent = `⟳ ${doing}… ${elapsed(this.deps.now() - going.startedAt)}`
     }
@@ -377,8 +376,10 @@ export class DirectingBoard {
     }
   }
 
-  private tabButton(tabs: HTMLElement, label: string, proposal: string | undefined, selected: boolean): void {
+  private tabButton(tabs: HTMLElement, label: string, proposal: string | undefined, selected: boolean, edited = false): void {
     const tab = this.button(tabs, label, selected ? 'is-selected' : '')
+    tab.classList.toggle('is-edited', edited)
+    if (edited) tab.title = 'Edited since the run'
     tab.setAttribute('role', 'tab')
     tab.setAttribute('aria-selected', String(selected))
     tab.addEventListener('click', () => this.showTab(this.state, proposal))

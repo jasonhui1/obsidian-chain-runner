@@ -427,11 +427,12 @@ describe('rerunning downstream', () => {
     expect(buttons().some(b => b.textContent === '⟳ Rerun downstream')).toBe(false)
   })
 
-  it('offers a rerun once a proposal is edited, naming the edited proposals, on any tab', () => {
+  it('offers a rerun in the tab row once a proposal is edited, marking the edited proposals’ tabs, on any tab', () => {
     board().open(showing(edited), 'world')
-    expect(button('⟳ Rerun downstream')).toBeDefined()
-    expect(root.querySelector('.chain-runner-directing-rerun')?.textContent).toContain('gameplay')
-    expect(root.querySelector('.chain-runner-directing-rerun')?.textContent).not.toContain('world')
+    expect(button('⟳ Rerun downstream').parentElement?.className).toBe('chain-runner-directing-tabs')
+    const marked = Array.from(root.querySelectorAll('[role="tab"].is-edited')).map(tab => tab.textContent)
+    expect(marked).toEqual(['gameplay'])
+    expect(tabs()).toEqual(['Run', 'gameplay', 'world'])
     button('Run').click()
     expect(button('⟳ Rerun downstream')).toBeDefined()
   })
@@ -442,7 +443,7 @@ describe('rerunning downstream', () => {
     button('✎ Edit').click()
     expect(button('⟳ Rerun downstream').disabled).toBe(true)
     expect(button('Use this reply as the revision & rerun').disabled).toBe(true)
-    expect(text()).toContain('Save or cancel the edit first')
+    expect(button('⟳ Rerun downstream').title).toBe('Save or cancel the edit first')
     button('Cancel').click()
     expect(button('⟳ Rerun downstream').disabled).toBe(false)
   })
@@ -487,7 +488,7 @@ describe('a rerun going', () => {
     button('⟳ Rerun downstream').click()
     progressTo({ ...verdictOnly, step: director })
     tick(42)
-    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:42'])
+    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:42'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
     expect(root.querySelector('.chain-runner-directing-verdict')?.textContent).toContain('A combat trial in a void.')
   })
@@ -526,12 +527,12 @@ describe('a rerun going', () => {
     expect(stale('.chain-runner-directing-proposal')).toBe(false)
   })
 
-  it('shows the line under the rerun bar, over the greyed proposal, on a tab the rerun writes again', () => {
+  it('shows the line under the tabs, over the greyed proposal, on a tab the rerun writes again', () => {
     board().open(showing(edited), 'world')
     button('⟳ Rerun downstream').click()
     progressTo({ verdict: true, proposals: ['world'], step: { name: 'world', writesVerdict: false } })
     expect(progress()).toEqual(['⟳ world is running… 0:00'])
-    expect(root.querySelector('.chain-runner-directing-rerun')?.nextElementSibling?.className).toBe('chain-runner-directing-progress')
+    expect(root.querySelector('.chain-runner-directing-tabs')?.nextElementSibling?.className).toBe('chain-runner-directing-progress')
     expect(stale('.chain-runner-directing-proposal')).toBe(true)
   })
 
@@ -543,7 +544,7 @@ describe('a rerun going', () => {
     expect(progress()).toEqual([])
     button('Run').click()
     tick(3)
-    expect(progress()).toEqual(['⟳ director is writing a new verdict… 0:03'])
+    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:03'])
   })
 
   it('puts the panel back as it was when the rerun lands nowhere', async () => {
