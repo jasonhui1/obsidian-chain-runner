@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectingBoard, type DirectingState } from '@/ui/directingBoard'
+import type { ProposalEditor } from '@/ui/proposalEditor'
 import type { HoldReading, ResumeResult } from '@/ui/holdActions'
 
 /**
@@ -40,6 +41,30 @@ let chainNames: string[]
 let chainsAsked: number
 /** Each resume still waiting on the hold actions, answered by the test. */
 let resumesWaiting: ((result: ResumeResult | undefined) => void)[]
+/** Every editor the board has opened, in the order it opened them. */
+let editors: FakeEditor[]
+
+/** Stands in for the CodeMirror editor: a textarea, so a test can type into it. */
+interface FakeEditor extends ProposalEditor {
+  el: HTMLTextAreaElement
+  destroyed: boolean
+}
+
+const openEditor = (words: string, changed: () => void): FakeEditor => {
+  const el = document.createElement('textarea')
+  el.value = words
+  el.addEventListener('input', changed)
+  const editor: FakeEditor = {
+    el,
+    destroyed: false,
+    text: () => el.value,
+    hasFocus: () => document.activeElement === el,
+    focus: () => el.focus(),
+    destroy: () => void (editor.destroyed = true),
+  }
+  editors.push(editor)
+  return editor
+}
 
 const answered = (call: string): Promise<boolean> => {
   calls.push(call)
@@ -73,6 +98,7 @@ function board(): DirectingBoard {
       return Promise.resolve(chainNames)
     },
     runUrl: runId => `http://engine/history/${runId}`,
+    openEditor,
     watchOverflow: (_frame, changed) => {
       changed(overflowing)
       return () => {}
@@ -118,6 +144,7 @@ beforeEach(() => {
   chainNames = []
   chainsAsked = 0
   resumesWaiting = []
+  editors = []
 })
 
 describe('header', () => {
@@ -257,10 +284,11 @@ describe('a proposal tab', () => {
 
 describe('a proposal tab, editing', () => {
   const editor = (): HTMLTextAreaElement | null => root.querySelector('.chain-runner-directing-editor textarea')
+  const open = (): void => button('✎ Edit').click()
 
   it('turns the proposal’s text into an editor holding its words, with Save and Cancel', () => {
     board().open(showing(), 'world')
-    button('✎ Edit').click()
+    open()
     expect(editor()?.value).toBe('A controlled test.')
     expect(buttons().map(b => b.textContent)).toEqual(expect.arrayContaining(['Save', 'Cancel']))
     expect(buttons().some(b => b.textContent === '✎ Edit')).toBe(false)
@@ -268,7 +296,7 @@ describe('a proposal tab, editing', () => {
 
   it('hands the edited words to the hold actions on Save, and closes the editor once they are kept', async () => {
     board().open(showing(), 'world')
-    button('✎ Edit').click()
+    open()
     type(editor()!, 'A real world.\n\nWith a second line.')
     button('Save').click()
     expect(calls).toEqual(['edit world A real world.\n\nWith a second line.'])
@@ -280,7 +308,7 @@ describe('a proposal tab, editing', () => {
 
   it('keeps the editor open, with its words, when they could not be kept', async () => {
     board().open(showing(), 'world')
-    button('✎ Edit').click()
+    open()
     type(editor()!, 'A real world.')
     button('Save').click()
     waiting[0]!(false)
@@ -291,7 +319,7 @@ describe('a proposal tab, editing', () => {
 
   it('cannot save blank words', () => {
     board().open(showing(), 'world')
-    button('✎ Edit').click()
+    open()
     type(editor()!, ' \n ')
     expect(button('Save').disabled).toBe(true)
     type(editor()!, 'Words.')
@@ -300,7 +328,7 @@ describe('a proposal tab, editing', () => {
 
   it('puts the proposal back as it was on Cancel', () => {
     board().open(showing(), 'world')
-    button('✎ Edit').click()
+    open()
     type(editor()!, 'A real world.')
     button('Cancel').click()
     expect(editor()).toBeNull()
@@ -309,22 +337,51 @@ describe('a proposal tab, editing', () => {
     expect(editor()?.value).toBe('A controlled test.')
   })
 
-  it('starts a new line on Enter, rather than saving', () => {
-    board().open(showing(), 'world')
-    button('✎ Edit').click()
-    expect(press(editor()!, 'Enter').defaultPrevented).toBe(false)
-    expect(calls).toEqual([])
-  })
-
-  it('keeps the words being edited, and the focus, across a redraw', () => {
+  it('keeps the one editor, with its words and the focus, across a redraw', () => {
     const panel = board()
     panel.open(showing(), 'world')
-    button('✎ Edit').click()
+    open()
     type(editor()!, 'half an edit')
     editor()!.focus()
     panel.draw(showing())
+    expect(editors).toHaveLength(1)
+    expect(editor()).toBe(editors[0]!.el)
     expect(editor()?.value).toBe('half an edit')
     expect(document.activeElement).toBe(editor())
+  })
+
+  it('leaves the editor be when the reader is typing somewhere else', () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    open()
+    composer('Message world…').focus()
+    panel.draw(showing())
+    expect(document.activeElement).toBe(composer('Message world…'))
+  })
+
+  it('lets go of the editor on Cancel, and again once the words are kept', async () => {
+    board().open(showing(), 'world')
+    open()
+    button('Cancel').click()
+    expect(editors[0]!.destroyed).toBe(true)
+    open()
+    type(editor()!, 'A real world.')
+    button('Save').click()
+    waiting[0]!(true)
+    await settled()
+    expect(editors[1]!.destroyed).toBe(true)
+    expect(editors).toHaveLength(2)
+  })
+
+  it('keeps the editor it has when the words could not be kept', async () => {
+    board().open(showing(), 'world')
+    open()
+    type(editor()!, 'A real world.')
+    button('Save').click()
+    waiting[0]!(false)
+    await settled()
+    expect(editors[0]!.destroyed).toBe(false)
+    expect(editors).toHaveLength(1)
   })
 })
 

@@ -10,6 +10,7 @@ import {
   type ResumeResult,
   sameTurn,
 } from './holdActions'
+import type { ProposalEditor } from './proposalEditor'
 import { TypingBoxes } from './typingBoxes'
 
 /** The directing panel's elements: a Run tab, and a tab per proposal. Plain DOM; every button is handed to the deps. */
@@ -38,6 +39,8 @@ export interface DirectingBoardDeps {
   /** The chains a side quest can go through; none while the engine cannot say. */
   chains: () => Promise<string[]>
   runUrl: (runId: string) => string | undefined
+  /** Opens an editor on a proposal's words, which reports every change. */
+  openEditor: (text: string, changed: () => void) => ProposalEditor
   openMenu: (event: MouseEvent) => void
   /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
   watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
@@ -60,8 +63,10 @@ export class DirectingBoard {
   private readonly rerunning = new Map<string, RerunFrom>()
   /** Each run's resume, while it goes and once it has landed. */
   private readonly resumes = new Map<string, ResumeShown>()
-  /** Each proposal being edited, by `editKey`, and the words so far. */
-  private readonly editing = new Map<string, string>()
+  /** Each proposal being edited, by `editKey`, and the editor holding the words. */
+  private readonly editing = new Map<string, ProposalEditor>()
+  /** How each open editor tells its Save button the words changed; redrawn with it. */
+  private readonly savers = new Map<string, () => void>()
   private readonly saving = new Set<string>()
   /** The chains the engine named when a tab was last opened. */
   private chains: string[] = []
@@ -83,6 +88,7 @@ export class DirectingBoard {
   draw(state: DirectingState): void {
     this.state = state
     const scroll = this.body?.scrollTop ?? 0
+    const typing = [...this.editing.values()].find(editor => editor.hasFocus())
     const keepTyping = this.boxes.keepTyping(this.root)
     this.releases.forEach(release => release())
     this.releases = []
@@ -99,6 +105,7 @@ export class DirectingBoard {
     }
     body.scrollTop = scroll
     keepTyping()
+    typing?.focus()
   }
 
   private header(): void {
@@ -146,7 +153,8 @@ export class DirectingBoard {
     const top = this.section(body)
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
     const key = editKey(hold.runId, proposal.name)
-    if (this.editing.has(key)) this.editor(top, key, proposal.name)
+    const editing = this.editing.get(key)
+    if (editing) this.editor(top, key, proposal.name, editing)
     else this.proposalText(top, hold.runId, proposal.name, proposal.text)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
@@ -381,7 +389,8 @@ export class DirectingBoard {
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
     edit.disabled = this.rerunning.has(runId)
     edit.addEventListener('click', () => {
-      this.editing.set(editKey(runId, name), text)
+      const key = editKey(runId, name)
+      this.editing.set(key, this.deps.openEditor(text, () => this.savers.get(key)?.()))
       this.draw(this.state)
     })
     toggle.addEventListener('click', () => {
@@ -398,35 +407,35 @@ export class DirectingBoard {
     )
   }
 
-  /** Enter starts a new line: a proposal runs to many. */
-  private editor(el: HTMLElement, key: string, name: string): void {
-    const editor = this.add(el, 'div', `${CLS}-editor`)
-    const input = this.add(editor, 'textarea')
-    input.value = this.editing.get(key) ?? ''
-    input.rows = 12
-    input.dataset.box = key
-    const row = this.add(editor, 'div', `${CLS}-editor-actions`)
+  /** The editor outlives the redraw, so it is put back rather than made again. */
+  private editor(el: HTMLElement, key: string, name: string, editing: ProposalEditor): void {
+    const frame = this.add(el, 'div', `${CLS}-editor`)
+    frame.append(editing.el)
+    const row = this.add(frame, 'div', `${CLS}-editor-actions`)
     const save = this.button(row, 'Save', 'mod-cta')
-    const savable = (): boolean => !this.saving.has(key) && input.value.trim() !== ''
+    const savable = (): boolean => !this.saving.has(key) && editing.text().trim() !== ''
     save.disabled = !savable()
-    input.addEventListener('input', () => {
-      this.editing.set(key, input.value)
-      save.disabled = !savable()
-    })
+    this.savers.set(key, () => void (save.disabled = !savable()))
     save.addEventListener('click', () => void this.save(key, name))
     this.button(row, 'Cancel', '').addEventListener('click', () => {
-      this.editing.delete(key)
+      this.closeEdit(key)
       this.draw(this.state)
     })
   }
 
+  private closeEdit(key: string): void {
+    this.editing.get(key)?.destroy()
+    this.editing.delete(key)
+    this.savers.delete(key)
+  }
+
   private async save(key: string, name: string): Promise<void> {
-    const text = this.editing.get(key)
-    if (text === undefined || this.saving.has(key)) return
+    const editing = this.editing.get(key)
+    if (!editing || this.saving.has(key)) return
     this.saving.add(key)
     this.draw(this.state)
     try {
-      if (await this.deps.editProposal(name, text)) this.editing.delete(key)
+      if (await this.deps.editProposal(name, editing.text())) this.closeEdit(key)
     } finally {
       this.saving.delete(key)
       this.draw(this.state)

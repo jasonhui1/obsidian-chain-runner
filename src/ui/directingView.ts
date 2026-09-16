@@ -1,6 +1,7 @@
 import { Component, ItemView, MarkdownRenderer, Menu, type IconName, type WorkspaceLeaf } from 'obsidian'
 import { DirectingBoard, type DirectingState } from './directingBoard'
 import type { HoldActions } from './holdActions'
+import { markdownEditor } from './proposalEditor'
 
 export const DIRECTING_VIEW_TYPE = 'chain-runner-directing'
 
@@ -108,6 +109,7 @@ export class DirectingView extends ItemView {
       sideQuest: (proposal, chain) => this.written(runId => this.holds.sideQuest(runId, proposal, chain)),
       chains: () => this.holds.chains(),
       runUrl: runId => this.holds.runUrl(runId),
+      openEditor: (text, changed) => markdownEditor(this.contentEl.ownerDocument, text, changed),
       openMenu: event =>
         this.onRun(runId =>
           new Menu()

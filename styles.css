@@ -878,12 +878,102 @@
   font-size: var(--font-ui-smaller);
 }
 
-.chain-runner-directing-editor textarea {
-  width: 100%;
-  resize: vertical;
+/* The proposal editor: CodeMirror dressed as Obsidian's own editor. */
+.chain-runner-directing-editor .cm-editor {
+  max-height: 24em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+.chain-runner-directing-editor .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--background-modifier-border-focus);
+}
+
+.chain-runner-directing-editor .cm-scroller {
+  overflow-y: auto;
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+  line-height: var(--line-height-normal);
+}
+
+.chain-runner-directing-editor .cm-content {
+  min-height: 12em;
+  padding: var(--size-4-2);
+  color: var(--text-normal);
+  caret-color: var(--caret-color);
+}
+
+.chain-runner-md-h1 {
+  font-size: var(--h1-size);
+  font-weight: var(--h1-weight);
+  color: var(--h1-color);
+}
+
+.chain-runner-md-h2 {
+  font-size: var(--h2-size);
+  font-weight: var(--h2-weight);
+  color: var(--h2-color);
+}
+
+.chain-runner-md-h3 {
+  font-size: var(--h3-size);
+  font-weight: var(--h3-weight);
+  color: var(--h3-color);
+}
+
+.chain-runner-md-h4 {
+  font-size: var(--h4-size);
+  font-weight: var(--h4-weight);
+  color: var(--h4-color);
+}
+
+.chain-runner-md-h5 {
+  font-size: var(--h5-size);
+  font-weight: var(--h5-weight);
+  color: var(--h5-color);
+}
+
+.chain-runner-md-h6 {
+  font-size: var(--h6-size);
+  font-weight: var(--h6-weight);
+  color: var(--h6-color);
+}
+
+.chain-runner-md-strong {
+  font-weight: var(--bold-weight);
+  color: var(--bold-color);
+}
+
+.chain-runner-md-emphasis {
+  font-style: italic;
+  color: var(--italic-color);
+}
+
+.chain-runner-md-struck {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.chain-runner-md-code {
   font-family: var(--font-monospace);
-  font-size: var(--font-ui-small);
-  line-height: 1.5;
+  font-size: var(--code-size);
+  color: var(--code-normal);
+  background: var(--code-background);
+}
+
+.chain-runner-md-quote {
+  color: var(--text-muted);
+}
+
+.chain-runner-md-link {
+  color: var(--link-color);
+}
+
+/* Every marker Obsidian leaves in view while the cursor is on the line: ##, **, a bullet. */
+.chain-runner-md-mark {
+  color: var(--text-faint);
 }
 
 .chain-runner-directing-footer {
