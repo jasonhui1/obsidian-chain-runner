@@ -1,6 +1,7 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
-import { runHeadless, type StreamedRun } from '../run/headlessRun'
+import type { ForkedRun } from '../run/fork'
+import { runHeadless } from '../run/headlessRun'
 import { editsToCarry, holdNotePath, holdNoteInput, reranFrom, refreshHoldNote, rewriteProposal, type HoldHeading, type RerunEdits } from '../run/holdNote'
 import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
 import type { RerunReport, RerunWatch } from '../run/rerunWatch'
@@ -34,7 +35,7 @@ export async function fetchRun(engine: EngineClient, runId: string): Promise<Fet
 }
 
 /** The call the hold note fires, told every event on the way so progress can be drawn. */
-export type LaunchRun = (onEvent: (event: RunEvent) => void) => Promise<StreamedRun>
+export type LaunchRun = (onEvent: (event: RunEvent) => void) => Promise<ForkedRun>
 
 /**
  * How the notices name what the hold note fired. Each answers the stem; any
@@ -73,7 +74,9 @@ export function rerunAndRefresh(
   request: RunRequest,
   options: RerunAndRefreshOptions,
 ): Promise<string | undefined> {
-  return streamIntoHold(deps, file, heading, async onEvent => ({ kind: 'ran', outcome: await runHeadless(deps.engine, request, onEvent) }), options)
+  // A fresh run forks nothing: it carries on no run, so it can name none other than its own.
+  const launch: LaunchRun = async onEvent => ({ kind: 'ran', outcome: await runHeadless(deps.engine, request, onEvent), forked: false })
+  return streamIntoHold(deps, file, heading, launch, options)
 }
 
 /** The same fold, for a call that is not a fresh run: the note takes whichever run the stream names. */
@@ -129,7 +132,7 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
   }
   const landedRun = await deps.withEngine(() => fetchRun(deps.engine, newRunId))
   if (!landedRun) return undefined
-  const said = wording.landed(newRunId, newRunId !== heading.runId)
+  const said = wording.landed(newRunId, streamed.forked)
 
   const folded = await guardWrite(notify, 'the hold note', async (): Promise<{ notice: string; runId?: string }> => {
     // Read again: the human may have written in the note while the rerun went.

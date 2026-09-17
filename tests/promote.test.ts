@@ -62,12 +62,12 @@ describe('runPromote', () => {
 
   it('reads back the same run when the engine reran to the hold in place', async () => {
     const outcome = await runPromote(stubEngine([{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }]), reply())
-    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: RUN } })
+    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: RUN }, forked: false })
   })
 
   it('reads back the fork’s own id, not the run it was called on', async () => {
     const outcome = await runPromote(stubEngine([{ type: 'run_start', runId: FORK }, { type: 'run_complete', runId: FORK }]), reply())
-    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: FORK } })
+    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: FORK }, forked: true })
   })
 
   it('hears every event on the way, so a panel can draw what is being written again', async () => {
@@ -80,7 +80,7 @@ describe('runPromote', () => {
 
   it('reports an engine error event as the run’s failure, not as a refusal', async () => {
     const outcome = await runPromote(stubEngine([{ type: 'run_start', runId: RUN }, { type: 'error', error: 'the model refused' }]), reply())
-    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: RUN, error: 'the model refused' } })
+    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: RUN, error: 'the model refused' }, forked: false })
   })
 
   it.each([

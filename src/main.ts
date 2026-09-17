@@ -251,6 +251,7 @@ export default class ChainRunnerPlugin extends Plugin {
       notify: message => new Notice(message),
       engineUrl: () => this.settings.engineUrl,
       refresh: runId => directInPanel.refresh(runId),
+      openFork: runId => directInPanel.openHold(runId),
     })
     const holds = new HoldActions({
       app: this.app,

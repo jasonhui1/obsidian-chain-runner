@@ -1,5 +1,6 @@
 import { CANON_CONTEXT_KEY } from './canon'
-import { streamOrRefusal, type StreamedRun } from './headlessRun'
+import { underRunOfRecord, type ForkedRun } from './fork'
+import { streamOrRefusal } from './headlessRun'
 import { directionLines, type HoldPick } from './holdNote'
 import { engineSaid } from '../engine/guard'
 import type { EngineHttpError } from '../engine/transport'
@@ -47,14 +48,15 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
 }
 
 /** What a resume came back with: the run it carried on as — which may be a fork — or why the engine would not. */
-export type ResumeOutcome = StreamedRun
+export type ResumeOutcome = ForkedRun
 
 /**
- * The hold answered and the run carried on, read as a run stream. Every refusal
- * comes back as words to show; only an unreachable engine still throws.
+ * The hold answered and the run carried on, read as a run stream under whichever
+ * run the stream names — a hold already answered forks instead (#53). Every
+ * refusal comes back as words to show; only an unreachable engine still throws.
  */
 export function runResume(engine: EngineClient, runId: string, request: ResumeRequest): Promise<ResumeOutcome> {
-  return streamOrRefusal(() => engine.resumeRun(runId, request), error => refusal(error, runId))
+  return underRunOfRecord(runId, onEvent => streamOrRefusal(() => engine.resumeRun(runId, request), error => refusal(error, runId), onEvent))
 }
 
 function refusal(error: EngineHttpError, runId: string): string | undefined {

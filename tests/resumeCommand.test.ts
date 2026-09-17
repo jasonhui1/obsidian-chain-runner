@@ -41,6 +41,7 @@ let online: boolean
 let requests: unknown[]
 let refusal: unknown
 let refreshed: string[]
+let openedForks: string[]
 let refuseWrites: boolean
 
 function file(path: string): TFile {
@@ -98,6 +99,7 @@ function makeResume(): Resume {
     notify: message => void notices.push(message),
     engineUrl: () => 'http://localhost:3000',
     refresh: runId => Promise.resolve(refreshed.push(runId)),
+    openFork: runId => Promise.resolve(openedForks.push(runId)),
   })
 }
 
@@ -106,11 +108,12 @@ beforeEach(() => {
   active = file(HOLD_PATH)
   folders = []
   notices = []
-  runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }]
+  runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }]
   online = true
   requests = []
   refusal = undefined
   refreshed = []
+  openedForks = []
   refuseWrites = false
 })
 
@@ -185,12 +188,12 @@ describe('start', () => {
   it('links the resulting run at the bottom of the hold note', async () => {
     await makeResume().start()
     expect(notes[HOLD_PATH]).toContain('## Resumed')
-    expect(notes[HOLD_PATH]).toContain('2026-09-20-Xy9zW2')
+    expect(notes[HOLD_PATH]).toContain('2026-09-15-Ab3dE1')
   })
 
   it('says the run it resumed as', async () => {
     await makeResume().start()
-    expect(notices).toEqual(['Resumed as run 2026-09-20-Xy9zW2'])
+    expect(notices).toEqual(['Resumed as run 2026-09-15-Ab3dE1'])
   })
 
   it('writes nothing when the engine is offline', async () => {
@@ -201,18 +204,18 @@ describe('start', () => {
   })
 
   it('still links the run but skips canon when it failed partway through', async () => {
-    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }, { type: 'error', error: 'the model refused' }]
     await makeResume().start()
-    expect(notes[HOLD_PATH]).toContain('2026-09-20-Xy9zW2')
+    expect(notes[HOLD_PATH]).toContain('2026-09-15-Ab3dE1')
     expect(notes['context/canon-anime-game.md']).toBeUndefined()
-    expect(notices).toEqual(['Resumed as run 2026-09-20-Xy9zW2, but it failed: the model refused (canon not written)'])
+    expect(notices).toEqual(['Resumed as run 2026-09-15-Ab3dE1, but it failed: the model refused (canon not written)'])
   })
 
   it('says nothing extra about canon on failure when nothing was ticked', async () => {
     notes[HOLD_PATH] = holdNote('KEEP: fast combat\n')
-    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }, { type: 'error', error: 'the model refused' }]
     await makeResume().start()
-    expect(notices).toEqual(['Resumed as run 2026-09-20-Xy9zW2, but it failed: the model refused'])
+    expect(notices).toEqual(['Resumed as run 2026-09-15-Ab3dE1, but it failed: the model refused'])
   })
 
   it('writes nothing and says so when the stream never named a run', async () => {
@@ -231,13 +234,14 @@ describe('start', () => {
     expect(notices).toEqual(['Run 2026-09-15-Ab3dE1 cannot be resumed yet: run is running'])
   })
 
-  it('brings the hold note up to date with the run it carried on as, not the one it posted to', async () => {
+  it('brings the hold note up to date with the run it carried on as', async () => {
     await makeResume().start()
-    expect(refreshed).toEqual(['2026-09-20-Xy9zW2'])
+    expect(refreshed).toEqual(['2026-09-15-Ab3dE1'])
+    expect(openedForks).toEqual([])
   })
 
   it('leaves the note as it stands when the continued run failed', async () => {
-    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }, { type: 'error', error: 'the model refused' }]
     await makeResume().start()
     expect(refreshed).toEqual([])
   })
@@ -251,25 +255,60 @@ describe('start', () => {
   })
 })
 
+/** A hold already answered is not carried on: the engine starts a new run and names it up front (#53). */
+describe('a resume the engine forked', () => {
+  beforeEach(() => {
+    runFrames = [{ type: 'run_start', runId: '2026-09-21-Forked' }]
+  })
+
+  it('opens the fork own hold note, not the run the resume was posted to', async () => {
+    await makeResume().start()
+    expect(openedForks).toEqual(['2026-09-21-Forked'])
+  })
+
+  it('brings the note it forked from up to date, so it stops offering a hold the engine has answered', async () => {
+    await makeResume().start()
+    expect(refreshed).toEqual(['2026-09-15-Ab3dE1'])
+  })
+
+  it('says in the note it forked from that the live run is elsewhere', async () => {
+    await makeResume().start()
+    expect(notes[HOLD_PATH]).toContain('forked as [run 2026-09-21-Forked]')
+    expect(notes[HOLD_PATH]).toContain('the live run is there now')
+  })
+
+  it('says it forked rather than carried on', async () => {
+    await makeResume().start()
+    expect(notices).toEqual(['Resumed — forked as run 2026-09-21-Forked'])
+  })
+
+  it('still shows the fork, and still answers the old hold, when the forked run failed', async () => {
+    runFrames = [{ type: 'run_start', runId: '2026-09-21-Forked' }, { type: 'error', error: 'the model refused' }]
+    await makeResume().start()
+    expect(openedForks).toEqual(['2026-09-21-Forked'])
+    expect(refreshed).toEqual(['2026-09-15-Ab3dE1'])
+  })
+})
+
 describe('resumeNote', () => {
   it('reports the run the resume carried on as', async () => {
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ runId: '2026-09-20-Xy9zW2', canon: 'written' })
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, canon: 'written' })
   })
 
   it('reports a forked run under the id the stream named, not the one it posted to', async () => {
     runFrames = [{ type: 'run_start', runId: '2026-09-21-Forked' }]
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toMatchObject({ runId: '2026-09-21-Forked' })
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toMatchObject({ runId: '2026-09-21-Forked', forked: true })
   })
 
   it('says the ticks were held back when the run failed', async () => {
-    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }, { type: 'error', error: 'the model refused' }]
     const result = await makeResume().resumeNote(file(HOLD_PATH))
-    expect(result).toEqual({ runId: '2026-09-20-Xy9zW2', error: 'the model refused', canon: 'held-back' })
+    expect(result).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, error: 'the model refused', canon: 'held-back' })
   })
 
   it('carries the failure with no run when the stream never named one', async () => {
     runFrames = [{ type: 'error', error: 'nothing to resume' }]
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ error: 'nothing to resume', canon: 'held-back' })
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ error: 'nothing to resume', forked: false, canon: 'held-back' })
   })
 
   it('has nothing to report when the engine is offline', async () => {
@@ -292,7 +331,7 @@ describe('resumeNote', () => {
   it('still reports the run when the hold note refuses the link', async () => {
     refuseWrites = true
     const result = await makeResume().resumeNote(file(HOLD_PATH))
-    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2' })
+    expect(result).toMatchObject({ runId: '2026-09-15-Ab3dE1' })
     expect(notices).toContain('Could not write the hold note: the file is read-only')
   })
 })

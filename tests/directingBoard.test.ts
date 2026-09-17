@@ -964,7 +964,7 @@ describe('without a hold', () => {
 describe('resume', () => {
   const RESUMED = '2026-09-16-Rs1Kq4'
 
-  const resumed = (over: Partial<ResumeResult> = {}): ResumeResult => ({ runId: RESUMED, canon: 'written', ...over })
+  const resumed = (over: Partial<ResumeResult> = {}): ResumeResult => ({ runId: RESUMED, forked: false, canon: 'written', ...over })
 
   const land = async (result: ResumeResult | undefined): Promise<void> => {
     resumesWaiting.pop()?.(result)
@@ -1023,7 +1023,7 @@ describe('resume', () => {
   it('says a run failed, and that its canon was held back', async () => {
     board().open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
-    await land({ runId: RESUMED, error: 'the model refused', canon: 'held-back' })
+    await land({ runId: RESUMED, forked: false, error: 'the model refused', canon: 'held-back' })
     expect(text()).toContain('Failed: the model refused')
     expect(text()).toContain('canon not written')
   })

@@ -27,6 +27,8 @@ export function canonNote(canon: CanonOutcome): string {
 export interface ResumeResult {
   /** The run it carried on as. */
   runId?: string
+  /** The engine forked rather than carrying the run on: `runId` is a new run (#53). */
+  forked: boolean
   error?: string
   canon: CanonOutcome
 }
@@ -39,6 +41,8 @@ export interface ResumeDeps {
   engineUrl: () => string
   /** Brings the run's hold note up to date with what the engine now holds. */
   refresh: (runId: string) => Promise<unknown>
+  /** Shows the fork's own hold note, written first when the fork has none yet. */
+  openFork: (runId: string) => Promise<unknown>
 }
 
 export class Resume {
@@ -79,19 +83,33 @@ export class Resume {
     }
 
     const outcome = resumed.outcome
+    const forked = resumed.forked
     const ticked = tickedCanonLines(direction)
-    if (!outcome.runId) return { ...(outcome.error ? { error: outcome.error } : {}), canon: ticked.length > 0 ? 'held-back' : 'none' }
+    if (!outcome.runId) return { forked, ...(outcome.error ? { error: outcome.error } : {}), canon: ticked.length > 0 ? 'held-back' : 'none' }
 
     const canonOutcome = await this.lockCanon(canonPath, ticked, outcome.error)
     // A note that refuses the link says so on its own; the run still happened, so it is still reported.
-    await this.linkRun(file, content, outcome.runId)
-    if (!outcome.error) await this.deps.refresh(outcome.runId)
+    await this.linkRun(file, content, { runId: outcome.runId, forked })
+    // A fork has moved the engine on whether it landed or not; a run carried on
+    // in place that failed is left as it stands, still showing its own hold.
+    if (forked) await this.followFork(heading.runId, outcome.runId)
+    else if (!outcome.error) await this.deps.refresh(outcome.runId)
 
     return {
       runId: outcome.runId,
+      forked,
       ...(outcome.error ? { error: outcome.error } : {}),
       canon: canonOutcome,
     }
+  }
+
+  /**
+   * The fork shown — it is a run of its own — and the note it forked from
+   * brought up to date, so it stops offering a hold the engine has answered.
+   */
+  private async followFork(from: string, runId: string): Promise<void> {
+    await this.deps.openFork(runId)
+    await this.deps.refresh(from)
   }
 
   /** The ticks locked into canon, held back when the run failed (#32), or none to lock. */
@@ -103,9 +121,10 @@ export class Resume {
 
   private resumeNotice(result: ResumeResult): string {
     if (!result.runId) return result.error ? `Resume failed: ${result.error}` : 'Resume produced no run'
-    if (!result.error) return `Resumed as run ${result.runId}`
+    const as = result.forked ? `Resumed — forked as run ${result.runId}` : `Resumed as run ${result.runId}`
+    if (!result.error) return as
     const note = canonNote(result.canon)
-    return `Resumed as run ${result.runId}, but it failed: ${result.error}${note ? ` (${note})` : ''}`
+    return `${as}, but it failed: ${result.error}${note ? ` (${note})` : ''}`
   }
 
   /** Reads canon again right before writing — not the snapshot sent with the run — so a change made while the run was going is never clobbered. */
@@ -121,10 +140,10 @@ export class Resume {
     return wrote === true
   }
 
-  private async linkRun(file: TFile, content: string, runId: string): Promise<void> {
+  private async linkRun(file: TFile, content: string, run: { runId: string; forked: boolean }): Promise<void> {
     await guardWrite(this.deps.notify, 'the hold note', async () => {
-      const url = runViewUrl(this.deps.engineUrl(), runId)
-      await this.deps.app.vault.modify(file, appendResumeLink(content, { runId, ...(url ? { url } : {}) }))
+      const url = runViewUrl(this.deps.engineUrl(), run.runId)
+      await this.deps.app.vault.modify(file, appendResumeLink(content, { ...run, ...(url ? { url } : {}) }))
     })
   }
 }

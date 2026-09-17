@@ -201,6 +201,7 @@ let resumes: { runId: string; request: ResumeRequest }[]
 let promotes: { runId: string; nodeId: string; request: PromoteRequest }[]
 /** The runs whose hold note a resume asked to be brought up to date. */
 let refreshed: string[]
+let openedForks: string[]
 let online: boolean
 let layoutsFetched: number
 /** The runs whose layouts were asked for, in order. */
@@ -301,7 +302,15 @@ function makeActions(): HoldActions {
     room: new AskTheRoom({ app, engine, withEngine, notify }),
     rerun: new RerunDownstream({ app, engine, withEngine, notify, reruns }),
     quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
-    resume: new Resume({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL, refresh: runId => Promise.resolve(refreshed.push(runId)) }),
+    resume: new Resume({
+      app,
+      engine,
+      withEngine,
+      notify,
+      engineUrl: () => ENGINE_URL,
+      refresh: runId => Promise.resolve(refreshed.push(runId)),
+      openFork: runId => Promise.resolve(openedForks.push(runId)),
+    }),
     engineUrl: () => ENGINE_URL,
     panels: new RunPanels(engine),
   })
@@ -324,6 +333,7 @@ beforeEach(() => {
   resumes = []
   promotes = []
   refreshed = []
+  openedForks = []
   online = true
   layoutsFetched = 0
   layoutsOf = []
@@ -964,9 +974,10 @@ describe('resume', () => {
     expect(await makeActions().resume(RUN)).toMatchObject({ runId: RESUMED })
   })
 
-  it('brings the hold note up to date with what the continued run wrote', async () => {
+  it('opens the fork own note and brings the answered hold up to date, since the engine forked', async () => {
     await makeActions().resume(RUN)
-    expect(refreshed).toEqual([RESUMED])
+    expect(openedForks).toEqual([RESUMED])
+    expect(refreshed).toEqual([RUN])
   })
 
   it('locks the hold’s ticked canon lines, and only those', async () => {

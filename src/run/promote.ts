@@ -1,5 +1,6 @@
 import { CANON_CONTEXT_KEY } from './canon'
-import { streamOrRefusal, type StreamedRun } from './headlessRun'
+import { underRunOfRecord, type ForkedRun } from './fork'
+import { streamOrRefusal } from './headlessRun'
 import { engineSaid } from '../engine/guard'
 import type { EngineHttpError } from '../engine/transport'
 import type { EngineClient } from '../engine/client'
@@ -36,9 +37,13 @@ export function promoteRequest(promote: PromotedReply): PromoteRequest {
  * the run it was called on, or under the fork the engine named instead. Every
  * refusal comes back as words to show; only an unreachable engine still throws.
  */
-export function runPromote(engine: EngineClient, promote: PromotedReply, onEvent?: (event: RunEvent) => void): Promise<StreamedRun> {
+export function runPromote(engine: EngineClient, promote: PromotedReply, onEvent?: (event: RunEvent) => void): Promise<ForkedRun> {
   const { runId, nodeId } = promote
-  return streamOrRefusal(() => engine.promoteNode({ runId, nodeId }, promoteRequest(promote)), error => refusal(error, promote), onEvent)
+  return underRunOfRecord(
+    runId,
+    heard => streamOrRefusal(() => engine.promoteNode({ runId, nodeId }, promoteRequest(promote)), error => refusal(error, promote), heard),
+    onEvent,
+  )
 }
 
 /** A node inside a loop, a `turn` out of range and a node that is no proposer all come back as 400. */

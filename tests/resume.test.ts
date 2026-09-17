@@ -104,7 +104,7 @@ describe('runResume', () => {
 
   it('reports the run id the stream names up front', async () => {
     const engine = stubEngine([{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-15-Ab3dE1' } })
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-15-Ab3dE1' }, forked: false })
   })
 
   it('takes the run id from the stream, not the run it was posted to, so a fork is followed', async () => {
@@ -112,7 +112,7 @@ describe('runResume', () => {
       { type: 'run_start', runId: '2026-09-20-Forked' },
       { type: 'run_complete', runId: '2026-09-20-Forked' },
     ])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-20-Forked' } })
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-20-Forked' }, forked: true })
   })
 
   it('reads the run event set, so a hold the continued run reaches names its run', async () => {
@@ -125,6 +125,7 @@ describe('runResume', () => {
     expect(await runResume(stubEngine([waiting]), '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'ran',
       outcome: { runId: '2026-09-15-Ab3dE1' },
+      forked: false,
     })
   })
 
@@ -136,12 +137,13 @@ describe('runResume', () => {
     expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'ran',
       outcome: { runId: '2026-09-15-Ab3dE1', error: 'the model refused' },
+      forked: false,
     })
   })
 
   it('answers with no run id at all when the stream never named one', async () => {
     const engine = stubEngine([{ type: 'error', error: 'nothing to resume' }])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { error: 'nothing to resume' } })
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { error: 'nothing to resume' }, forked: false })
   })
 
   it('says a still-running run cannot be resumed yet, rather than throwing', async () => {

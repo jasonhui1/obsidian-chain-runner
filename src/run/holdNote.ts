@@ -683,9 +683,13 @@ export function removeDirectionLines(content: string, lines: string[]): string {
 
 const RESUMED_HEADING = /^##\s+Resumed\s*$/m
 
-/** A link to the run a resume produced, appended under its own heading. */
-export function appendResumeLink(content: string, run: { runId: string; url?: string }): string {
-  const line = run.url ? `- [run ${run.runId}](${run.url})` : `- run ${run.runId}`
+/**
+ * A link to the run a resume produced, appended under its own heading. A fork
+ * says so: this note's own run is not the live one any more (#53).
+ */
+export function appendResumeLink(content: string, run: { runId: string; url?: string; forked?: boolean }): string {
+  const link = run.url ? `[run ${run.runId}](${run.url})` : `run ${run.runId}`
+  const line = run.forked ? `- forked as ${link} — the live run is there now` : `- ${link}`
   const trimmed = content.replace(/\s+$/, '')
   return RESUMED_HEADING.test(trimmed) ? `${trimmed}\n${line}\n` : `${trimmed}\n\n## Resumed\n${line}\n`
 }
