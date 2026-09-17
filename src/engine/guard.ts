@@ -14,6 +14,18 @@ export function engineFailureMessage(error: unknown): string | undefined {
   return undefined
 }
 
+/** What the engine said went wrong, from a body it sends as JSON or as plain text. */
+export function engineSaid(error: EngineHttpError): string {
+  try {
+    const parsed: unknown = JSON.parse(error.body)
+    const reason = (parsed as { error?: unknown }).error
+    if (typeof reason === 'string' && reason !== '') return reason
+  } catch {
+    // Not JSON; the body is the reason.
+  }
+  return error.body.trim() || `engine error ${error.status}`
+}
+
 export interface EngineGuardDeps {
   /** Checks the engine now; a stale poll is not good enough to act on. */
   refresh: () => Promise<EngineState>

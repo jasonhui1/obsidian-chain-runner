@@ -1030,6 +1030,12 @@
   background: var(--background-secondary);
 }
 
+/* Obsidian's status bar floats over the bottom-right corner of the window, over
+   the sidebar's foot, and names no height for the bar under it to clear. */
+body:not(.is-mobile) .chain-runner-directing-footer {
+  padding-bottom: calc(var(--size-4-3) + 2.5em);
+}
+
 .chain-runner-directing-footer button {
   width: 100%;
 }

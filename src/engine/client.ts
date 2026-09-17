@@ -17,6 +17,7 @@ import type {
   RunExistence,
   RunMeta,
   RunRequest,
+  ResumeRequest,
 } from './types'
 
 /** Shapes the engine returns that the client narrows before handing on. */
@@ -115,20 +116,18 @@ export class EngineClient {
    * thrown; only an unreachable engine or a rejected request throws.
    */
   async *launchRun(request: RunRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
-    const url = this.resolve('/api/run')
-    const stream = await this.transport.open({
-      url,
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify(request),
-      signal,
-    })
-    if (!ok(stream.status)) {
-      throw new EngineHttpError(stream.status, url, await collect(stream.body))
-    }
-    for await (const payload of parseSse(stream.body)) {
-      if (isRunEvent(payload)) yield payload
-    }
+    yield* this.streamRun('/api/run', request, signal)
+  }
+
+  /**
+   * Answers the run's hold and carries it on, yielding the same events a run
+   * does. A hold already answered forks instead, and the fork's id arrives as
+   * `run_start`, so the caller must not assume the id it posted to. A refusal —
+   * the run is running, the pick is not the hold's, no hold named — throws
+   * `EngineHttpError` for the caller to name.
+   */
+  async *resumeRun(runId: string, request: ResumeRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
+    yield* this.streamRun(`/api/runs/${encodeURIComponent(runId)}/resume`, request, signal)
   }
 
   /**
@@ -169,6 +168,24 @@ export class EngineClient {
     } catch (error) {
       if (error instanceof EngineOfflineError) return false
       throw error
+    }
+  }
+
+  /** A POST whose answer is the run event stream. */
+  private async *streamRun(path: string, request: unknown, signal?: AbortSignal): AsyncGenerator<RunEvent> {
+    const url = this.resolve(path)
+    const stream = await this.transport.open({
+      url,
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(request),
+      signal,
+    })
+    if (!ok(stream.status)) {
+      throw new EngineHttpError(stream.status, url, await collect(stream.body))
+    }
+    for await (const payload of parseSse(stream.body)) {
+      if (isRunEvent(payload)) yield payload
     }
   }
 

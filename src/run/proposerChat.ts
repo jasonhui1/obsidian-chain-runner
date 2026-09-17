@@ -1,4 +1,4 @@
-import { engineFailureMessage } from '../engine/guard'
+import { engineFailureMessage, engineSaid } from '../engine/guard'
 import { EngineHttpError } from '../engine/transport'
 import { latestOutput } from './chat'
 import type { EngineClient } from '../engine/client'
@@ -63,19 +63,7 @@ export async function chatReply(engine: EngineClient, capabilities: Capabilities
 function refusal(error: EngineHttpError, chat: ProposerChat): string {
   if (error.status === 409) return `Run ${chat.runId} is still running — chat with ${chat.name} once it stops`
   if (error.status === 404) return `Run ${chat.runId} no longer has a node for ${chat.name}`
-  if (error.status === 400) return `${chat.name} cannot be chatted with: ${said(error)}`
+  if (error.status === 400) return `${chat.name} cannot be chatted with: ${engineSaid(error)}`
   if (error.status === 422) return `${chat.name}'s agent file is gone from the workspace`
   return engineFailureMessage(error) ?? `Chat with ${chat.name} failed`
-}
-
-/** What the engine said went wrong, from a body it sends as JSON or as plain text. */
-function said(error: EngineHttpError): string {
-  try {
-    const parsed: unknown = JSON.parse(error.body)
-    const reason = (parsed as { error?: unknown }).error
-    if (typeof reason === 'string' && reason !== '') return reason
-  } catch {
-    // Not JSON; the body is the reason.
-  }
-  return error.body.trim() || `engine error ${error.status}`
 }

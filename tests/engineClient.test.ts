@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { EngineClient } from '@/engine/client'
 import { createNodeTransport } from '@/engine/nodeTransport'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
-import type { ChatEvent, RunEvent } from '@/engine/types'
+import type { ChatEvent, ResumeRequest, RunEvent } from '@/engine/types'
 import { FakeEngine, frame } from './fakeEngine'
 
 let engine: FakeEngine
@@ -266,6 +266,50 @@ describe('launchRun', () => {
       })(),
     ).rejects.toThrow()
     expect(events).toHaveLength(1)
+  })
+})
+
+describe('resumeRun', () => {
+  const resume = (request: ResumeRequest = { direction: 'KEEP: fast combat' }) => client.resumeRun('2026-09-15-Ab3dE1', request)
+
+  it('posts the answer to the run resume route', async () => {
+    engine.runFrames = [frame({ type: 'run_complete', runId: '2026-09-15-Ab3dE1' })]
+    await drain(resume({ direction: 'KEEP: fast combat', chosen: 'Candidate 2', holdId: 'decider' }))
+    const sent = engine.requests.at(-1)!
+    expect(sent.method).toBe('POST')
+    expect(sent.path).toBe('/api/runs/2026-09-15-Ab3dE1/resume')
+    expect(JSON.parse(sent.body)).toEqual({ direction: 'KEEP: fast combat', chosen: 'Candidate 2', holdId: 'decider' })
+  })
+
+  it('yields the run event set, not the chat stream', async () => {
+    engine.runFrames = [
+      frame({ type: 'run_start', runId: '2026-09-15-Ab3dE1' }),
+      frame({ type: 'agent_start', agentName: 'greenlighter', nodeId: 'greenlighter', step: 0 }),
+      frame({ type: 'run_complete', runId: '2026-09-15-Ab3dE1' }),
+    ]
+    expect((await drain(resume())).map(event => event.type)).toEqual(['run_start', 'agent_start', 'run_complete'])
+  })
+
+  it('names the forked run in run_start, which is not the run it was posted to', async () => {
+    engine.runFrames = [frame({ type: 'run_start', runId: '2026-09-20-Forked' })]
+    expect(await drain(resume())).toEqual([{ type: 'run_start', runId: '2026-09-20-Forked' }])
+  })
+
+  it('yields the engine error event rather than throwing', async () => {
+    engine.runFrames = [frame({ type: 'error', error: 'the model refused' })]
+    expect(await drain(resume())).toEqual([{ type: 'error', error: 'the model refused' }])
+  })
+
+  it('throws EngineHttpError carrying the refusal, so the caller can say which one it was', async () => {
+    engine.failWith = { status: 409, body: 'run is running' }
+    const error = await drain(resume()).catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(EngineHttpError)
+    expect((error as EngineHttpError).status).toBe(409)
+  })
+
+  it('throws EngineOfflineError when the engine is not running', async () => {
+    const client = await offlineClient()
+    await expect(drain(client.resumeRun('r1', { direction: 'KEEP: x' }))).rejects.toBeInstanceOf(EngineOfflineError)
   })
 })
 

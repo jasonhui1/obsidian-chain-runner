@@ -250,6 +250,7 @@ export default class ChainRunnerPlugin extends Plugin {
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       engineUrl: () => this.settings.engineUrl,
+      refresh: runId => directInPanel.refresh(runId),
     })
     const holds = new HoldActions({
       app: this.app,

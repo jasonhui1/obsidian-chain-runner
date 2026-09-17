@@ -821,7 +821,7 @@ describe('a proposal tab, side quests', () => {
     conversation: [
       { kind: 'quest', name: 'world', chainName: 'combat lab', runId: '2026-09-16-quest1', result: 'The test becomes an arena.' },
       { kind: 'quest', name: 'gameplay', chainName: 'combat lab', runId: '2026-09-16-quest2', result: 'Rotation lands.' },
-      { kind: 'quest', name: 'world', chainName: 'develop-direction' },
+      { kind: 'quest', name: 'world', chainName: 'world lab' },
     ],
   })
   const chainBox = (): HTMLInputElement => {
@@ -848,11 +848,11 @@ describe('a proposal tab, side quests', () => {
   })
 
   it('offers the engine’s chains to pick from', async () => {
-    chainNames = ['combat lab', 'develop-direction']
+    chainNames = ['combat lab', 'world lab']
     board().open(showing(), 'world')
     await settled()
     const list = root.querySelector<HTMLDataListElement>(`datalist#${chainBox().getAttribute('list')}`)
-    expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab', 'develop-direction'])
+    expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab', 'world lab'])
   })
 
   it('asks the engine for its chains when a tab opens, not on every redraw', async () => {
@@ -961,17 +961,17 @@ describe('without a hold', () => {
 })
 
 describe('resume', () => {
-  const resumed = (over: Partial<ResumeResult> = {}): ResumeResult => ({
-    runId: '2026-09-16-pitch1',
-    pitch: 'A combat trial in a void.',
-    canon: 'written',
-    ...over,
-  })
+  const RESUMED = '2026-09-16-Rs1Kq4'
+
+  const resumed = (over: Partial<ResumeResult> = {}): ResumeResult => ({ runId: RESUMED, canon: 'written', ...over })
 
   const land = async (result: ResumeResult | undefined): Promise<void> => {
     resumesWaiting.pop()?.(result)
     await settled()
   }
+
+  /** What the bar pinned under every tab says. */
+  const footer = (): string => root.querySelector('.chain-runner-directing-footer')?.textContent ?? ''
 
   it('names how many canon lines are ticked', () => {
     board().open(showing())
@@ -996,46 +996,35 @@ describe('resume', () => {
     expect(calls).toEqual([`resume ${RUN}`])
   })
 
-  it('shows the Greenlight Pitch, and the run it came from, without opening a browser', async () => {
+  it('says the hold was resumed, and that canon was written', async () => {
     board().open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
     await land(resumed())
-    expect(text()).toContain('Greenlight Pitch')
-    expect(text()).toContain('A combat trial in a void.')
-    expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe('http://engine/history/2026-09-16-pitch1')
+    expect(footer()).toContain('Resumed')
+    expect(footer()).toContain('canon written')
   })
 
-  it('opens the Run tab on landing, so the pitch is on screen', async () => {
+  it('names the run it carried on as, which a fork makes a different one', async () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    await land(resumed({ runId: '2026-09-16-Forked' }))
+    expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe('http://engine/history/2026-09-16-Forked')
+  })
+
+  it('keeps the reader on their tab — what the run wrote comes back in the hold itself', async () => {
     const made = board()
     made.open(showing(), 'gameplay')
     button('▶ Resume · 1 of 2 canon ticked').click()
     await land(resumed())
-    expect(selectedTab()).toBe('Run')
-    expect(text()).toContain('A combat trial in a void.')
+    expect(selectedTab()).toBe('gameplay')
   })
 
-  it('says canon was written', async () => {
+  it('says a run failed, and that its canon was held back', async () => {
     board().open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed())
-    expect(text()).toContain('canon written')
-  })
-
-  it('says a landed run pitched nothing, rather than passing off what else it wrote', async () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land({ runId: '2026-09-16-pitch1', canon: 'written' })
-    expect(text()).toContain('Greenlight Pitch')
-    expect(text()).toContain('The run pitched nothing.')
-  })
-
-  it('says a run failed, and that its canon was held back, instead of a pitch', async () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land({ runId: '2026-09-16-pitch1', error: 'the model refused', canon: 'held-back' })
+    await land({ runId: RESUMED, error: 'the model refused', canon: 'held-back' })
     expect(text()).toContain('Failed: the model refused')
     expect(text()).toContain('canon not written')
-    expect(text()).not.toContain('Greenlight Pitch')
   })
 
   it('says a resume that never ran did not run', async () => {
@@ -1046,12 +1035,12 @@ describe('resume', () => {
     expect(button('▶ Resume · 1 of 2 canon ticked').disabled).toBe(false)
   })
 
-  it('keeps the pitch when the hold is redrawn under it', async () => {
+  it('keeps what the last resume said when the hold is redrawn under it', async () => {
     const made = board()
     made.open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
     await land(resumed())
     made.draw(showing())
-    expect(text()).toContain('A combat trial in a void.')
+    expect(footer()).toContain('canon written')
   })
 })

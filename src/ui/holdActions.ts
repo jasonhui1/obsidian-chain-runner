@@ -147,9 +147,8 @@ export class HoldActions {
   }
 
   /**
-   * The hold's Direction run as `develop-direction`, its ticks locked and the
-   * run linked back; the pitch it landed on comes back with it. `undefined`
-   * when nothing ran.
+   * The hold answered and the run carried on, its ticks locked and the run it
+   * carried on as linked back; `undefined` when nothing ran.
    */
   async resume(runId: string): Promise<ResumeResult | undefined> {
     const file = this.deps.notes.find(runId)

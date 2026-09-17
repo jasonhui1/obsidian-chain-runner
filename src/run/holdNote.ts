@@ -613,7 +613,8 @@ export function rewriteProposal(content: string, name: string, text: string): st
 
 const EMPTY_VERB = new RegExp(`^(${DIRECTIONS.join('|')}):$`)
 
-function directionLines(direction: string): string[] {
+/** What the human actually wrote under Direction: its lines, minus the empty verb template and the CANON? checklist. */
+export function directionLines(direction: string): string[] {
   return direction
     .split('\n')
     .map(line => line.trim())
@@ -684,7 +685,7 @@ const RESUMED_HEADING = /^##\s+Resumed\s*$/m
 
 /** A link to the run a resume produced, appended under its own heading. */
 export function appendResumeLink(content: string, run: { runId: string; url?: string }): string {
-  const line = run.url ? `- [develop-direction run ${run.runId}](${run.url})` : `- develop-direction run ${run.runId}`
+  const line = run.url ? `- [run ${run.runId}](${run.url})` : `- run ${run.runId}`
   const trimmed = content.replace(/\s+$/, '')
   return RESUMED_HEADING.test(trimmed) ? `${trimmed}\n${line}\n` : `${trimmed}\n\n## Resumed\n${line}\n`
 }

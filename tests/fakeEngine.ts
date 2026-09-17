@@ -8,6 +8,7 @@ export interface RecordedRequest {
 }
 
 const CHAT_ROUTE = /^\/api\/runs\/[^/]+\/nodes\/[^/]+\/chat$/
+const RESUME_ROUTE = /^\/api\/runs\/[^/]+\/resume$/
 
 /**
  * A stand-in for maestro-playground over a real socket, so the client is
@@ -60,7 +61,7 @@ export class FakeEngine {
       if (this.failWith) {
         res.writeHead(this.failWith.status)
         res.end(this.failWith.body)
-      } else if (req.method === 'POST' && path === '/api/run') {
+      } else if (req.method === 'POST' && (path === '/api/run' || RESUME_ROUTE.test(path))) {
         this.stream(res, this.runFrames)
       } else if (req.method === 'POST' && CHAT_ROUTE.test(path)) {
         this.stream(res, this.chatFrames)

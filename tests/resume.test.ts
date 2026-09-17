@@ -1,92 +1,180 @@
 import { describe, it, expect } from 'vitest'
-import { greenlightPitch, resumeRequest, runResume } from '@/run/resume'
+import { resumeRequest, runResume } from '@/run/resume'
 import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, RunEvent } from '@/engine/types'
+import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
+import type { HoldPick } from '@/run/holdNote'
+import type { RunEvent } from '@/engine/types'
 
 /**
- * Resume's run, apart from the vault: what it asks the engine for, and what it
- * reads back out of the stream.
+ * Resume's call, apart from the vault: what it asks the engine for, what it
+ * reads back out of the run stream, and what it says to each refusal.
  */
+
+const DIRECTION = 'KEEP:\nCHANGE: faster combat\nKILL:\nCANON?\n- [x] halo = burden — character-director\n'
+
+function hold(nodeId: string, headings: string[], chosen?: string): HoldPick {
+  return {
+    nodeId,
+    candidates: headings.map(heading => ({ heading, body: 'words', ticked: heading === chosen })),
+    ...(chosen ? { chosen } : {}),
+  }
+}
 
 function stubEngine(events: RunEvent[]): EngineClient {
   return {
-    launchRun: async function* () {
+    resumeRun: async function* () {
       for (const event of events) yield event
     },
   } as unknown as EngineClient
 }
 
+function refusingEngine(thrown: unknown): EngineClient {
+  return {
+    resumeRun: function () {
+      throw thrown
+    },
+  } as unknown as EngineClient
+}
+
 describe('resumeRequest', () => {
-  it('runs develop-direction with the Direction block as the seed', () => {
-    expect(resumeRequest('KEEP: fast combat', undefined)).toMatchObject({
-      chainName: 'develop-direction',
-      seedPrompt: 'KEEP: fast combat',
-    })
+  it('sends the Direction block verbatim, which the engine refuses blank', () => {
+    expect(resumeRequest({ direction: DIRECTION, holds: [] })).toMatchObject({ direction: DIRECTION })
   })
 
-  it('sends canon as context under the chain’s context-node key, when there is one', () => {
-    expect(resumeRequest('KEEP: fast combat', '## LOCKED\n- halo = burden\n')).toMatchObject({
+  it('sends a ticked candidate as chosen, by its heading', () => {
+    const request = resumeRequest({ direction: DIRECTION, holds: [hold('decider', ['Candidate 1', 'Candidate 2'], 'Candidate 2')] })
+    expect(request.chosen).toBe('Candidate 2')
+  })
+
+  it('never sends both picks, since the engine refuses a request carrying the two', () => {
+    const request = resumeRequest({ direction: DIRECTION, holds: [hold('decider', ['Candidate 1'], 'Candidate 1')] })
+    expect(request.custom).toBeUndefined()
+  })
+
+  it('sends what the human wrote as custom when candidates were offered and none ticked', () => {
+    const request = resumeRequest({ direction: DIRECTION, holds: [hold('decider', ['Candidate 1', 'Candidate 2'])] })
+    expect(request.custom).toBe('CHANGE: faster combat')
+    expect(request.chosen).toBeUndefined()
+  })
+
+  it('sends no custom when the human wrote nothing under the verb template', () => {
+    const request = resumeRequest({ direction: 'KEEP:\nCHANGE:\n', holds: [hold('decider', ['Candidate 1'])] })
+    expect(request.custom).toBeUndefined()
+  })
+
+  it('answers a hold that offered no candidates with the human own words too', () => {
+    const request = resumeRequest({ direction: DIRECTION, holds: [hold('decider', [])] })
+    expect(request.custom).toBe('CHANGE: faster combat')
+    expect(request.chosen).toBeUndefined()
+  })
+
+  it('sends no pick at all for a run the note shows waiting at nothing', () => {
+    const request = resumeRequest({ direction: DIRECTION, holds: [] })
+    expect(request.chosen).toBeUndefined()
+    expect(request.custom).toBeUndefined()
+  })
+
+  it('names no hold when only one is open — the engine resumes its own', () => {
+    expect(resumeRequest({ direction: DIRECTION, holds: [hold('decider', ['Candidate 1'])] }).holdId).toBeUndefined()
+  })
+
+  it('names the ticked hold by its node id when several are open', () => {
+    const holds = [hold('first', ['Candidate 1']), hold('second', ['Candidate 1'], 'Candidate 1')]
+    expect(resumeRequest({ direction: DIRECTION, holds }).holdId).toBe('second')
+  })
+
+  it('names the last open hold, the engine own, when several are open and none is ticked', () => {
+    const holds = [hold('first', ['Candidate 1']), hold('second', ['Candidate 1'])]
+    expect(resumeRequest({ direction: DIRECTION, holds }).holdId).toBe('second')
+  })
+
+  it('sends canon as context under the chain context-node key, when there is one', () => {
+    expect(resumeRequest({ direction: DIRECTION, holds: [], canon: '## LOCKED\n- halo = burden\n' })).toMatchObject({
       context: { 'canon-anime-game': '## LOCKED\n- halo = burden\n' },
     })
   })
 
   it('sends no context at all when there is no canon file yet', () => {
-    expect(resumeRequest('KEEP: fast combat', undefined)).not.toHaveProperty('context')
+    expect(resumeRequest({ direction: DIRECTION, holds: [] })).not.toHaveProperty('context')
   })
 })
 
 describe('runResume', () => {
-  it('reports the run id the engine names up front', async () => {
+  const request = { direction: DIRECTION }
+
+  it('reports the run id the stream names up front', async () => {
     const engine = stubEngine([{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }])
-    expect(await runResume(engine, 'KEEP: fast combat', undefined)).toEqual({ runId: '2026-09-15-Ab3dE1' })
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-15-Ab3dE1' } })
   })
 
-  it('keeps the run id a later event confirms', async () => {
+  it('takes the run id from the stream, not the run it was posted to, so a fork is followed', async () => {
     const engine = stubEngine([
-      { type: 'run_start', runId: '2026-09-15-Ab3dE1' },
-      { type: 'run_complete', runId: '2026-09-15-Ab3dE1' },
+      { type: 'run_start', runId: '2026-09-20-Forked' },
+      { type: 'run_complete', runId: '2026-09-20-Forked' },
     ])
-    expect(await runResume(engine, 'KEEP: fast combat', undefined)).toEqual({ runId: '2026-09-15-Ab3dE1' })
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-20-Forked' } })
   })
 
-  it('carries the run id alongside a failure the chain hit partway through', async () => {
+  it('reads the run event set, so a hold the continued run reaches names its run', async () => {
+    const waiting: RunEvent = {
+      type: 'run_waiting',
+      runId: '2026-09-15-Ab3dE1',
+      nodeId: 'decider',
+      hold: { nodeId: 'decider', input: '', candidates: [], reachedAt: '' },
+    }
+    expect(await runResume(stubEngine([waiting]), '2026-09-15-Ab3dE1', request)).toEqual({
+      kind: 'ran',
+      outcome: { runId: '2026-09-15-Ab3dE1' },
+    })
+  })
+
+  it('carries the run id alongside a failure the run hit partway through', async () => {
     const engine = stubEngine([
       { type: 'run_start', runId: '2026-09-15-Ab3dE1' },
       { type: 'error', error: 'the model refused' },
     ])
-    expect(await runResume(engine, 'KEEP: fast combat', undefined)).toEqual({
-      runId: '2026-09-15-Ab3dE1',
-      error: 'the model refused',
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+      kind: 'ran',
+      outcome: { runId: '2026-09-15-Ab3dE1', error: 'the model refused' },
     })
   })
 
-  it('answers with no run id at all when the engine never named one', async () => {
-    const engine = stubEngine([{ type: 'error', error: 'no such chain' }])
-    expect(await runResume(engine, 'KEEP: fast combat', undefined)).toEqual({ error: 'no such chain' })
-  })
-})
-
-describe('greenlightPitch', () => {
-  const output = (text: string): AgentOutput => ({ agentName: 'greenlight', output: text, status: 'success', timestamp: '' })
-
-  it('takes the Greenlight Pitch section out of the run’s last output', () => {
-    const pitch = greenlightPitch([
-      output('## Notes\nEarlier thinking.'),
-      output('## Risks\nToo much Nier.\n\n## Greenlight Pitch\nA combat trial in a void.\n\n## Next\nBuild it.'),
-    ])
-    expect(pitch).toBe('A combat trial in a void.')
+  it('answers with no run id at all when the stream never named one', async () => {
+    const engine = stubEngine([{ type: 'error', error: 'nothing to resume' }])
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { error: 'nothing to resume' } })
   })
 
-  it('reaches back to an earlier output when the last one pitches nothing', () => {
-    const pitch = greenlightPitch([output('## Greenlight Pitch\nA combat trial.'), output('## Risks\nNone.')])
-    expect(pitch).toBe('A combat trial.')
+  it('says a still-running run cannot be resumed yet, rather than throwing', async () => {
+    const engine = refusingEngine(new EngineHttpError(409, '/resume', '{"error":"run is running"}'))
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+      kind: 'refused',
+      said: 'Run 2026-09-15-Ab3dE1 cannot be resumed yet: run is running',
+    })
   })
 
-  it('calls nothing a pitch when no output names that section', () => {
-    expect(greenlightPitch([output('Just some words.')])).toBeUndefined()
+  it('falls back to the status when a 409 carries no reason', async () => {
+    const engine = refusingEngine(new EngineHttpError(409, '/resume', ''))
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toMatchObject({ said: expect.stringContaining('engine error 409') })
   })
 
-  it('has no pitch for a run that wrote nothing', () => {
-    expect(greenlightPitch([])).toBeUndefined()
+  it('says the hold is gone on a 404', async () => {
+    const engine = refusingEngine(new EngineHttpError(404, '/resume', 'no such hold'))
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+      kind: 'refused',
+      said: 'Run 2026-09-15-Ab3dE1 no longer has the hold this note answers',
+    })
+  })
+
+  it('passes the engine own reason on for a 400 — a bad pick, both picks, a blank direction', async () => {
+    const engine = refusingEngine(new EngineHttpError(400, '/resume', '{"error":"chosen and custom are exclusive"}'))
+    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+      kind: 'refused',
+      said: 'The engine would not resume run 2026-09-15-Ab3dE1: chosen and custom are exclusive',
+    })
+  })
+
+  it('leaves an unreachable engine to the guard, which is not the hold business', async () => {
+    const engine = refusingEngine(new EngineOfflineError('http://engine', new Error('boom')))
+    await expect(runResume(engine, '2026-09-15-Ab3dE1', request)).rejects.toBeInstanceOf(EngineOfflineError)
   })
 })

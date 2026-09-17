@@ -10,7 +10,18 @@ import { RunPanels } from '@/ui/runPanels'
 import { Resume } from '@/ui/resume'
 import { SideQuest } from '@/ui/sideQuest'
 import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, Capabilities, ChatEvent, ChatMessage, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import type {
+  AgentOutput,
+  Capabilities,
+  ChatEvent,
+  ChatMessage,
+  LayoutModel,
+  LayoutPanel,
+  ResumeRequest,
+  RunEvent,
+  RunMeta,
+  RunRequest,
+} from '@/engine/types'
 import type { App, TAbstractFile, TFile } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
@@ -162,7 +173,7 @@ const answer = (agentName: string, text: string): RunEvent[] => [
 ]
 
 const QUEST = '2026-09-16-quest1'
-const RESUMED = '2026-09-16-pitch1'
+const RESUMED = '2026-09-16-Rs1Kq4'
 const ENGINE_URL = 'http://localhost:4000'
 
 const questRun: RunMeta = {
@@ -174,15 +185,6 @@ const questRun: RunMeta = {
   agentOutputs: [output('sparring', 'A first pass.'), output('combat-report', 'Rotation lands as a rhythm.\n\nKeep it.')],
 }
 
-const resumedRun: RunMeta = {
-  runId: RESUMED,
-  chainName: 'develop-direction',
-  seedPrompt: '',
-  startedAt: '',
-  status: 'complete',
-  agentOutputs: [output('greenlight', '## Risks\nToo much Nier.\n\n## Greenlight Pitch\nA combat trial in a void.')],
-}
-
 let notes: Record<string, string>
 let notices: string[]
 let listeners: { name: string; callback: (file: TAbstractFile) => void; removed: boolean }[]
@@ -192,6 +194,10 @@ let framesByAgent: Record<string, RunEvent[]>
 let rerunFrames: RunEvent[]
 let chainFrames: RunEvent[]
 let requests: RunRequest[]
+/** What each resume posted, and to which run. */
+let resumes: { runId: string; request: ResumeRequest }[]
+/** The runs whose hold note a resume asked to be brought up to date. */
+let refreshed: string[]
 let online: boolean
 let layoutsFetched: number
 /** The runs whose layouts were asked for, in order. */
@@ -247,11 +253,11 @@ function makeActions(): HoldActions {
   const engine = {
     getRun: (runId: string) => {
       if (runId === QUEST) return Promise.resolve(questRun)
-      return Promise.resolve(runId === RESUMED ? resumedRun : theRun(runId))
+      return Promise.resolve(theRun(runId))
     },
     listChains: () =>
       online
-        ? Promise.resolve([{ slug: 'combat-lab', name: 'combat lab' }, { slug: 'develop', name: 'develop-direction' }])
+        ? Promise.resolve([{ slug: 'combat-lab', name: 'combat lab' }, { slug: 'world-lab', name: 'world lab' }])
         : Promise.reject(new EngineOfflineError(ENGINE_URL)),
     getLayout: (runId: string): Promise<LayoutModel> => {
       if (!online) return Promise.reject(new EngineOfflineError('http://localhost:3000'))
@@ -266,6 +272,10 @@ function makeActions(): HoldActions {
       else yield* chainFrames
     },
     loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    resumeRun: async function* (runId: string, request: ResumeRequest) {
+      resumes.push({ runId, request })
+      yield* chainFrames
+    },
     chatWithNode: async function* (chat: { nodeId: string; message: string }) {
       chats.push(chat)
       if (chatFrames === undefined) throw new EngineHttpError(404, `${ENGINE_URL}/chat`, 'Not found')
@@ -284,7 +294,7 @@ function makeActions(): HoldActions {
     room: new AskTheRoom({ app, engine, withEngine, notify }),
     rerun: new RerunDownstream({ app, engine, withEngine, notify, reruns }),
     quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
-    resume: new Resume({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
+    resume: new Resume({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL, refresh: runId => Promise.resolve(refreshed.push(runId)) }),
     engineUrl: () => ENGINE_URL,
     panels: new RunPanels(engine),
   })
@@ -304,6 +314,8 @@ beforeEach(() => {
   rerunFrames = []
   chainFrames = []
   requests = []
+  resumes = []
+  refreshed = []
   online = true
   layoutsFetched = 0
   layoutsOf = []
@@ -667,10 +679,10 @@ describe('chat', () => {
   })
 
   it('keeps the chat inside the Conversation when a section follows it', async () => {
-    notes[PATH] = `${HOLD}\n## Resumed\n- develop-direction run 2026-09-15-t59rgo\n`
+    notes[PATH] = `${HOLD}\n## Resumed\n- run 2026-09-15-t59rgo\n`
     framesByAgent = { world: answer('world', 'Because it is.') }
     await makeActions().chat(RUN, 'world', 'really?')
-    expect(notes[PATH]).toBe(`${HOLD}\n@world really?\n> Because it is.\n\n## Resumed\n- develop-direction run 2026-09-15-t59rgo\n`)
+    expect(notes[PATH]).toBe(`${HOLD}\n@world really?\n> Because it is.\n\n## Resumed\n- run 2026-09-15-t59rgo\n`)
   })
 
   it('sends a message typed over several lines as one', async () => {
@@ -864,7 +876,7 @@ describe('sideQuest', () => {
 
 describe('chains', () => {
   it('names the chains on the engine', async () => {
-    expect(await makeActions().chains()).toEqual(['combat lab', 'develop-direction'])
+    expect(await makeActions().chains()).toEqual(['combat lab', 'world lab'])
   })
 
   it('names none, and says nothing, while the engine is offline', async () => {
@@ -925,20 +937,27 @@ describe('resume', () => {
     chainFrames = started(RESUMED)
   })
 
-  it('sends the Direction block through develop-direction, with canon as its context', async () => {
+  it('posts the Direction block to the hold’s own run, with canon as its context', async () => {
     notes['context/canon-anime-game.md'] = '## LOCKED\n- an older commitment\n'
     await makeActions().resume(RUN)
-    expect(requests).toEqual([
+    expect(resumes).toEqual([
       {
-        chainName: 'develop-direction',
-        seedPrompt: expect.stringContaining('KEEP: gameplay') as string,
-        context: { 'canon-anime-game': '## LOCKED\n- an older commitment\n' },
+        runId: RUN,
+        request: {
+          direction: expect.stringContaining('KEEP: gameplay') as string,
+          context: { 'canon-anime-game': '## LOCKED\n- an older commitment\n' },
+        },
       },
     ])
   })
 
-  it('brings back the Greenlight Pitch, not the whole output, with the run it landed on', async () => {
-    expect(await makeActions().resume(RUN)).toMatchObject({ runId: RESUMED, pitch: 'A combat trial in a void.' })
+  it('reports the run the resume carried on as', async () => {
+    expect(await makeActions().resume(RUN)).toMatchObject({ runId: RESUMED })
+  })
+
+  it('brings the hold note up to date with what the continued run wrote', async () => {
+    await makeActions().resume(RUN)
+    expect(refreshed).toEqual([RESUMED])
   })
 
   it('locks the hold’s ticked canon lines, and only those', async () => {
@@ -954,17 +973,16 @@ describe('resume', () => {
     expect(notes[PATH]).toContain(RESUMED)
   })
 
-  it('reports a failed run, holds its canon back, and asks for no pitch', async () => {
+  it('reports a failed run and holds its canon back', async () => {
     chainFrames = [...started(RESUMED), { type: 'error', error: 'the model refused' }]
     const result = await makeActions().resume(RUN)
     expect(result).toMatchObject({ runId: RESUMED, error: 'the model refused', canon: 'held-back' })
-    expect(result?.pitch).toBeUndefined()
     expect(notes['context/canon-anime-game.md']).toBeUndefined()
   })
 
   it('has nothing to report for a run with no hold note', async () => {
     expect(await makeActions().resume('2026-09-15-nothing')).toBeUndefined()
-    expect(requests).toEqual([])
+    expect(resumes).toEqual([])
   })
 
   it('has nothing to report while the engine is offline', async () => {

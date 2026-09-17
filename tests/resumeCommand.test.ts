@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NOT_A_HOLD_NOTE, Resume } from '@/ui/resume'
 import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, RunEvent } from '@/engine/types'
+import { EngineHttpError } from '@/engine/transport'
+import type { RunEvent } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
@@ -14,8 +15,22 @@ import { TFile as StubFile, TFolder } from './obsidian'
 
 const HOLD_PATH = 'Maestro/holds/2026-09-15-Ab3dE1.md'
 
-const holdNote = (direction = 'KEEP: fast combat\nCANON?\n- [x] halo = burden — character-director\n- [ ] permanent cost — gameplay-director\n') =>
-  `# Hold: run 2026-09-15-Ab3dE1 · creative-director\n\n## Direction\n${direction}\n## Conversation\n`
+const WAITING = [
+  '## Waiting at decider',
+  '',
+  'Reached 2026-09-15T10:00:00Z',
+  '',
+  '- [ ] Candidate 1',
+  '  a trial in a void',
+  '- [ ] Candidate 2',
+  '  a trial in a city',
+  '',
+].join('\n')
+
+const holdNote = (
+  direction = 'KEEP: fast combat\nCANON?\n- [x] halo = burden — character-director\n- [ ] permanent cost — gameplay-director\n',
+  waiting = WAITING,
+) => `# Hold: run 2026-09-15-Ab3dE1 · creative-director\n\n${waiting}\n## Direction\n${direction}\n## Conversation\n`
 
 let active: TFile | undefined
 let notes: Record<string, string>
@@ -24,7 +39,8 @@ let notices: string[]
 let runFrames: RunEvent[]
 let online: boolean
 let requests: unknown[]
-let landedOutputs: AgentOutput[]
+let refusal: unknown
+let refreshed: string[]
 let refuseWrites: boolean
 
 function file(path: string): TFile {
@@ -68,11 +84,11 @@ function makeResume(): Resume {
   } as unknown as App
 
   const engine = {
-    launchRun: async function* (request: unknown) {
-      requests.push(request)
-      for (const event of runFrames) yield event
+    resumeRun: function* (runId: string, request: unknown) {
+      requests.push({ runId, request })
+      if (refusal) throw refusal
+      return yield* runFrames
     },
-    getRun: (runId: string) => Promise.resolve({ runId, agentOutputs: landedOutputs }),
   } as unknown as EngineClient
 
   return new Resume({
@@ -81,6 +97,7 @@ function makeResume(): Resume {
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
     engineUrl: () => 'http://localhost:3000',
+    refresh: runId => Promise.resolve(refreshed.push(runId)),
   })
 }
 
@@ -92,7 +109,9 @@ beforeEach(() => {
   runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }]
   online = true
   requests = []
-  landedOutputs = [{ agentName: 'greenlight', output: '## Greenlight Pitch\nA combat trial in a void.', status: 'success', timestamp: '' }]
+  refusal = undefined
+  refreshed = []
+  refuseWrites = false
 })
 
 describe('start', () => {
@@ -108,14 +127,36 @@ describe('start', () => {
     expect(notices).toEqual([NOT_A_HOLD_NOTE])
   })
 
-  it('sends develop-direction the Direction block, verbatim, as its seed', async () => {
+  it('posts the Direction block, verbatim, to the run the note names', async () => {
     await makeResume().start()
     expect(requests).toEqual([
       {
-        chainName: 'develop-direction',
-        seedPrompt: 'KEEP: fast combat\nCANON?\n- [x] halo = burden — character-director\n- [ ] permanent cost — gameplay-director',
+        runId: '2026-09-15-Ab3dE1',
+        request: {
+          direction: 'KEEP: fast combat\nCANON?\n- [x] halo = burden — character-director\n- [ ] permanent cost — gameplay-director',
+          custom: 'KEEP: fast combat',
+        },
       },
     ])
+  })
+
+  it('sends the ticked candidate as chosen, and no custom alongside it', async () => {
+    notes[HOLD_PATH] = holdNote(undefined, WAITING.replace('- [ ] Candidate 2', '- [x] Candidate 2'))
+    await makeResume().start()
+    expect(requests).toEqual([expect.objectContaining({ request: expect.objectContaining({ chosen: 'Candidate 2' }) })])
+    expect((requests[0] as { request: { custom?: string } }).request.custom).toBeUndefined()
+  })
+
+  it('names the hold by its node id when the note shows the run waiting at more than one', async () => {
+    const second = '## Waiting at greenlighter\n\nReached 2026-09-15T10:01:00Z\n\n- [x] Candidate 1\n  ship it\n'
+    notes[HOLD_PATH] = holdNote(undefined, `${WAITING}\n${second}`)
+    await makeResume().start()
+    expect(requests).toEqual([expect.objectContaining({ request: expect.objectContaining({ holdId: 'greenlighter', chosen: 'Candidate 1' }) })])
+  })
+
+  it('names no hold when the note shows only one open', async () => {
+    await makeResume().start()
+    expect((requests[0] as { request: { holdId?: string } }).request.holdId).toBeUndefined()
   })
 
   it('sends the canon file’s text as context, when one already exists', async () => {
@@ -123,7 +164,7 @@ describe('start', () => {
     await makeResume().start()
     expect(requests).toEqual([
       expect.objectContaining({
-        context: { 'canon-anime-game': '## LOCKED\n- old commitment\n\n## UNRESOLVED\n\n## REJECTED\n' },
+        request: expect.objectContaining({ context: { 'canon-anime-game': '## LOCKED\n- old commitment\n\n## UNRESOLVED\n\n## REJECTED\n' } }),
       }),
     ])
   })
@@ -174,12 +215,31 @@ describe('start', () => {
     expect(notices).toEqual(['Resumed as run 2026-09-20-Xy9zW2, but it failed: the model refused'])
   })
 
-  it('writes nothing and says so when the engine never named a run', async () => {
-    runFrames = [{ type: 'error', error: 'no such chain' }]
+  it('writes nothing and says so when the stream never named a run', async () => {
+    runFrames = [{ type: 'error', error: 'nothing to resume' }]
     await makeResume().start()
     expect(notes[HOLD_PATH]).toBe(holdNote())
     expect(notes['context/canon-anime-game.md']).toBeUndefined()
-    expect(notices).toEqual(['Resume failed: no such chain'])
+    expect(notices).toEqual(['Resume failed: nothing to resume'])
+  })
+
+  it('says why a still-running run was refused, and writes nothing', async () => {
+    refusal = new EngineHttpError(409, '/resume', '{"error":"run is running"}')
+    await makeResume().start()
+    expect(notes[HOLD_PATH]).toBe(holdNote())
+    expect(notes['context/canon-anime-game.md']).toBeUndefined()
+    expect(notices).toEqual(['Run 2026-09-15-Ab3dE1 cannot be resumed yet: run is running'])
+  })
+
+  it('brings the hold note up to date with the run it carried on as, not the one it posted to', async () => {
+    await makeResume().start()
+    expect(refreshed).toEqual(['2026-09-20-Xy9zW2'])
+  })
+
+  it('leaves the note as it stands when the continued run failed', async () => {
+    runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
+    await makeResume().start()
+    expect(refreshed).toEqual([])
   })
 
   it('adds new ticks to an existing canon file without disturbing what is already LOCKED', async () => {
@@ -192,26 +252,35 @@ describe('start', () => {
 })
 
 describe('resumeNote', () => {
-  it('brings back the Greenlight Pitch the run landed on', async () => {
-    const result = await makeResume().resumeNote(file(HOLD_PATH))
-    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', pitch: 'A combat trial in a void.', canon: 'written' })
+  it('reports the run the resume carried on as', async () => {
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ runId: '2026-09-20-Xy9zW2', canon: 'written' })
   })
 
-  it('asks for no pitch at all when the run failed, and says the ticks were held back', async () => {
+  it('reports a forked run under the id the stream named, not the one it posted to', async () => {
+    runFrames = [{ type: 'run_start', runId: '2026-09-21-Forked' }]
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toMatchObject({ runId: '2026-09-21-Forked' })
+  })
+
+  it('says the ticks were held back when the run failed', async () => {
     runFrames = [{ type: 'run_start', runId: '2026-09-20-Xy9zW2' }, { type: 'error', error: 'the model refused' }]
     const result = await makeResume().resumeNote(file(HOLD_PATH))
-    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', error: 'the model refused', canon: 'held-back' })
-    expect(result?.pitch).toBeUndefined()
+    expect(result).toEqual({ runId: '2026-09-20-Xy9zW2', error: 'the model refused', canon: 'held-back' })
   })
 
-  it('carries the failure with no run when the engine never named one', async () => {
-    runFrames = [{ type: 'error', error: 'no such chain' }]
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ error: 'no such chain', canon: 'held-back' })
+  it('carries the failure with no run when the stream never named one', async () => {
+    runFrames = [{ type: 'error', error: 'nothing to resume' }]
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ error: 'nothing to resume', canon: 'held-back' })
   })
 
   it('has nothing to report when the engine is offline', async () => {
     online = false
     expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+  })
+
+  it('has nothing to report when the engine refused, which says why on its own', async () => {
+    refusal = new EngineHttpError(404, '/resume', 'no such hold')
+    expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+    expect(notices).toEqual(['Run 2026-09-15-Ab3dE1 no longer has the hold this note answers'])
   })
 
   it('says there is nothing to resume for a note that is not a hold', async () => {
@@ -220,17 +289,10 @@ describe('resumeNote', () => {
     expect(notices).toEqual([NOT_A_HOLD_NOTE])
   })
 
-  it('has no pitch for a run that landed without one', async () => {
-    landedOutputs = [{ agentName: 'greenlight', output: 'Nothing that names a pitch.', status: 'success', timestamp: '' }]
-    const result = await makeResume().resumeNote(file(HOLD_PATH))
-    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', canon: 'written' })
-    expect(result?.pitch).toBeUndefined()
-  })
-
-  it('still reports the run and its pitch when the hold note refuses the link', async () => {
+  it('still reports the run when the hold note refuses the link', async () => {
     refuseWrites = true
     const result = await makeResume().resumeNote(file(HOLD_PATH))
-    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2', pitch: 'A combat trial in a void.' })
+    expect(result).toMatchObject({ runId: '2026-09-20-Xy9zW2' })
     expect(notices).toContain('Could not write the hold note: the file is read-only')
   })
 })

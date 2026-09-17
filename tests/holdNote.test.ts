@@ -440,13 +440,13 @@ describe('appendResumeLink', () => {
   it('adds a Resumed heading with the run linked, when there is no such heading yet', () => {
     const content = appendResumeLink('# Hold: run x\n\n## Conversation\n', { runId: '2026-09-15-Ab3dE1', url: 'http://x/history/2026-09-15-Ab3dE1' })
     expect(content).toContain('## Resumed')
-    expect(content).toContain('[develop-direction run 2026-09-15-Ab3dE1](http://x/history/2026-09-15-Ab3dE1)')
+    expect(content).toContain('[run 2026-09-15-Ab3dE1](http://x/history/2026-09-15-Ab3dE1)')
   })
 
   it('names the run without a link when the engine URL will not resolve one', () => {
     const content = appendResumeLink('## Conversation\n', { runId: '2026-09-15-Ab3dE1' })
-    expect(content).toContain('develop-direction run 2026-09-15-Ab3dE1')
-    expect(content).not.toContain('[develop-direction')
+    expect(content).toContain('- run 2026-09-15-Ab3dE1')
+    expect(content).not.toContain('](')
   })
 
   it('adds a second resume under the same heading, rather than a second one', () => {

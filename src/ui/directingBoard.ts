@@ -39,7 +39,7 @@ export interface DirectingBoardDeps {
   editProposal: (proposal: string, text: string) => Promise<boolean>
   /** Reruns downstream of every edited proposal. */
   rerun: (onProgress: OnRerunProgress) => Promise<void>
-  /** Runs the hold's Direction as develop-direction; `undefined` when nothing ran. */
+  /** Answers the hold and carries the run on; `undefined` when nothing ran. */
   resume: (runId: string) => Promise<ResumeResult | undefined>
   /** Answers whether the side quest's result reached the hold. */
   sideQuest: (proposal: string, chain: string) => Promise<boolean>
@@ -171,7 +171,6 @@ export class DirectingBoard {
 
     if (!proposal) {
       for (const waiting of hold.holds) this.waitingAt(body, waiting)
-      this.pitch(body, hold.runId)
       this.verdict(body, hold)
       const direction = this.section(body, 'Direction so far')
       this.directionSoFar(direction, hold.direction)
@@ -288,16 +287,6 @@ export class DirectingBoard {
     button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, onProgress => this.deps.revise(turn, onProgress)))
   }
 
-  /** What the last resume landed on, shown where the Run tab opens. A failed run says so in the bar instead. */
-  private pitch(body: HTMLElement, runId: string): void {
-    const shown = this.resumes.get(runId)
-    if (shown?.kind !== 'landed' || shown.result.error !== undefined) return
-    const section = this.section(body, 'Greenlight Pitch')
-    if (shown.result.pitch === undefined) this.add(section, 'div', `${CLS}-faint`, 'The run pitched nothing.')
-    else this.markdown(section, shown.result.pitch)
-    if (shown.result.runId) this.runLink(section, shown.result.runId)
-  }
-
   /** Pinned under every tab: the Direction run as it stands, and what the last run of it landed on. */
   private resumeBar(hold: HoldReading): void {
     const bar = this.add(this.root, 'div', `${CLS}-footer`)
@@ -319,7 +308,7 @@ export class DirectingBoard {
     if (result.runId) this.runLink(line, result.runId)
   }
 
-  /** One resume at a time per run; what it lands on shows on the Run tab, so that is where the panel goes. */
+  /** One resume at a time per run. */
   private async startResume(runId: string): Promise<void> {
     if (this.resumes.get(runId)?.kind === 'running') return
     this.resumes.set(runId, { kind: 'running' })
@@ -328,7 +317,6 @@ export class DirectingBoard {
     try {
       const result = await this.deps.resume(runId)
       if (result) outcome = { kind: 'landed', result }
-      if (result && result.error === undefined) this.tab = undefined
     } finally {
       this.resumes.set(runId, outcome)
       this.draw(this.state)

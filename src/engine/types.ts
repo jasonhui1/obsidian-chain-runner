@@ -205,6 +205,23 @@ export interface RunRequest {
   branchOutputs?: AgentOutput[]
 }
 
+/**
+ * What `POST /api/runs/:id/resume` is asked for: the hold's answer, and the
+ * direction the run carries on under.
+ */
+export interface ResumeRequest {
+  /** Required, and refused blank: what the run is told to do next. */
+  direction: string
+  /** The ticked candidate's heading. Exclusive with `custom`. */
+  chosen?: string
+  /** The human's own idea, when no candidate was ticked. Exclusive with `chosen`. */
+  custom?: string
+  /** The hold to answer, which is its `nodeId`; needed only when the engine cannot tell which. */
+  holdId?: string
+  /** Overrides a `context` node's file, keyed by the node's declared `file`. */
+  context?: Record<string, string>
+}
+
 export interface AgentStartEvent {
   type: 'agent_start'
   agentName: string

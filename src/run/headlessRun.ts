@@ -10,13 +10,18 @@ export interface RunOutcome {
 }
 
 /** Runs a request to completion and reports what it landed on, passing `onEvent` every event on the way. */
-export async function runHeadless(
+export function runHeadless(
   engine: EngineClient,
   request: RunRequest,
   onEvent: (event: RunEvent) => void = () => {},
 ): Promise<RunOutcome> {
+  return drainRun(engine.launchRun(request), onEvent)
+}
+
+/** A run stream read to its end, reporting the run it names and the failure it hit. */
+export async function drainRun(events: AsyncIterable<RunEvent>, onEvent: (event: RunEvent) => void = () => {}): Promise<RunOutcome> {
   let outcome: RunOutcome = {}
-  for await (const event of engine.launchRun(request)) {
+  for await (const event of events) {
     onEvent(event)
     const runId = runIdOf(event)
     if (runId) outcome = { ...outcome, runId }
