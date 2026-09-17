@@ -17,6 +17,8 @@ export interface QuickRunDeps {
   notify: (message: string) => void
   /** Moves the status pill offline on first-hand evidence, rather than at the next poll. */
   markOffline: () => void
+  /** Writes the hold note of a run that reached a hold. */
+  holdReached: (runId: string, nodeId: string) => Promise<void>
 }
 
 /** One run, as the reader assembled it: what to run, on what, with what set. */
@@ -133,6 +135,7 @@ export class QuickRunner {
         state = next
         show()
       },
+      holdReached: this.deps.holdReached,
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
     })

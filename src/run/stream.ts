@@ -2,7 +2,7 @@ import { engineFailureMessage } from '../engine/guard'
 import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
 import { applyRunEvent, emptyRunState, type RunState } from './session'
 import type { EngineClient } from '../engine/client'
-import type { Capabilities, RunRequest } from '../engine/types'
+import { isEvent, type Capabilities, type RunRequest } from '../engine/types'
 
 /** One run, from launch to the last event, for both surfaces that show one. */
 
@@ -49,6 +49,8 @@ export async function streamRun(input: {
   request: RunRequest
   signal: AbortSignal
   onState: (state: RunState) => void | Promise<void>
+  /** Each hold the run reaches; several can open in one wave. */
+  holdReached: (runId: string, nodeId: string) => Promise<void>
   notify: (message: string) => void
   markOffline: () => void
 }): Promise<RunOutcome> {
@@ -57,6 +59,7 @@ export async function streamRun(input: {
     for await (const event of input.engine.launchRun(input.request, input.signal)) {
       state = applyRunEvent(state, event)
       await input.onState(state)
+      if (isEvent(event, 'run_waiting')) await input.holdReached(event.runId, event.nodeId)
     }
   } catch (error) {
     if (error instanceof RequestAbortedError) return { state, aborted: true }

@@ -43,6 +43,8 @@ const SURVIVOR = `chains/runs/${RUN_ID}/Survivor.md`
 
 let reading: NodeReading | undefined
 let events: RunEvent[]
+/** Each hold the run reached, as the node run handed it on. */
+let held: string[]
 let launchError: unknown
 let capabilities: Capabilities
 let chains: ChainSummary[]
@@ -210,6 +212,7 @@ function makeRun(): NodeRun {
     withEngine: async action => (online ? action() : undefined),
     notify,
     markOffline: () => void offline++,
+    holdReached: (runId, nodeId) => Promise.resolve(void held.push(`${runId} ${nodeId}`)),
     surface,
     notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
   })
@@ -224,6 +227,8 @@ const finishes = (): RunEvent[] => [
   { type: 'run_complete', runId: RUN_ID },
 ]
 
+const HOLD = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
+
 const start = (): Promise<void> => makeRun().run(nodeData, { groupIds: ['g-1'] })
 
 beforeEach(() => {
@@ -233,6 +238,7 @@ beforeEach(() => {
     drawing: 'boards/wall.excalidraw.md',
   }
   events = finishes()
+  held = []
   launchError = undefined
   capabilities = { runLayoutFrames: true, runStartEvent: true, runFailureFrame: true }
   chains = [relay]
@@ -410,6 +416,19 @@ describe('what the node says', () => {
       runLabel({ kind: 'running', done: 2, total: 2 }),
       runLabel({ kind: 'done' }),
     ])
+  })
+
+  it('hands on each hold a run reached, and says it is done', async () => {
+    const waitingAt = (nodeId: string): RunEvent => ({ type: 'run_waiting', runId: RUN_ID, nodeId, hold: { ...HOLD, nodeId } })
+    events = [...finishes().slice(0, -1), waitingAt('pick'), waitingAt('pick-2')]
+    await start()
+    expect(held).toEqual([`${RUN_ID} pick`, `${RUN_ID} pick-2`])
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'done' }))
+  })
+
+  it('hands on no hold for a run that completed', async () => {
+    await start()
+    expect(held).toEqual([])
   })
 
   it('carries the engine’s own message onto the node when a hop fails', async () => {

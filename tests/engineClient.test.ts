@@ -116,6 +116,30 @@ describe('getRun', () => {
   })
 })
 
+describe('waitingRun', () => {
+  const hold = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
+
+  it('asks the engine for the runs waiting on a human, and answers the one named', async () => {
+    engine.runs = [
+      { runId: 'other', chainName: 'c', status: 'waiting', agentOutputs: [], holds: [hold] },
+      { runId: 'r1', chainName: 'c', status: 'waiting', agentOutputs: [], holds: [hold] },
+    ]
+    const run = await client.waitingRun('r1')
+    expect(run?.holds).toEqual([hold])
+    expect(engine.requests.at(-1)?.path).toBe('/api/runs?status=waiting')
+  })
+
+  it('answers nothing for a run that is not waiting', async () => {
+    engine.runs = [{ runId: 'other', chainName: 'c', status: 'waiting', agentOutputs: [] }]
+    expect(await client.waitingRun('r1')).toBeUndefined()
+  })
+
+  it('throws EngineOfflineError when the engine is not running', async () => {
+    const client = await offlineClient()
+    await expect(client.waitingRun('r1')).rejects.toBeInstanceOf(EngineOfflineError)
+  })
+})
+
 describe('runExists', () => {
   it('finds a run the engine still holds', async () => {
     engine.runMeta = { runId: 'r1', chainName: 'c', status: 'complete', agentOutputs: [] }

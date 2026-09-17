@@ -1,6 +1,6 @@
 import { buildRunPanels, emptyRunNodes, type RunLayout, type RunNodes } from './panels'
 import type { SeedOrigin } from './seed'
-import { isEvent, momentOf, type ChainSummary, type LayoutModel, type RunEvent } from '../engine/types'
+import { isEvent, momentOf, runIdOf, type ChainSummary, type LayoutModel, type RunEvent } from '../engine/types'
 
 /**
  * A run as the result view watches it happen. The fold is kept apart from the
@@ -80,9 +80,9 @@ export function applyRunEvent(state: RunState, event: RunEvent): RunState {
   // The engine's own projection, not one recomputed here (ADR-0017).
   if (isEvent(event, 'layout')) return { ...state, layout: event.model }
 
-  // Both carry the same id; the first arrives early enough to file outputs mid-run.
-  if (isEvent(event, 'run_start')) return { ...state, runId: event.runId }
-  if (isEvent(event, 'run_complete')) return { ...state, runId: event.runId }
+  // Every event naming the run carries the same id; the first arrives early enough to file outputs mid-run.
+  const runId = runIdOf(event)
+  if (runId) return { ...state, runId }
   if (isEvent(event, 'error')) return { ...state, error: event.error }
 
   // Tool turns and section warnings reach here and are not modelled.

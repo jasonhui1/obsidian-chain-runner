@@ -47,6 +47,8 @@ export interface NodeRunDeps {
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
   markOffline: () => void
+  /** Writes the hold note of a run that reached a hold. */
+  holdReached: (runId: string, nodeId: string) => Promise<void>
   surface: NodeSurface
   notes: OutputNotes
 }
@@ -192,6 +194,7 @@ export class NodeRun {
       signal: controller.signal,
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
+      holdReached: this.deps.holdReached,
       onProgress: model => say(progress(model)),
       place: (runId, layout) => this.open(runId, layout, plan),
     })

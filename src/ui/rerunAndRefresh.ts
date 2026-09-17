@@ -1,7 +1,7 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite } from './vaultWrite'
 import { runHeadless } from '../run/headlessRun'
-import { editsToCarry, holdNotePath, reranFrom, refreshHoldNote, rewriteProposal, thoughtsByNode, type HoldHeading, type RerunEdits } from '../run/holdNote'
+import { editsToCarry, holdNotePath, holdNoteInput, reranFrom, refreshHoldNote, rewriteProposal, type HoldHeading, type RerunEdits } from '../run/holdNote'
 import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
 import type { RerunReport, RerunWatch } from '../run/rerunWatch'
 import type { EngineClient } from '../engine/client'
@@ -102,12 +102,7 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
     // An edit to a proposal the rerun only replayed is put back, so it can go in the next rerun.
     const refreshed = Object.entries(kept.carried).reduce(
       (content, [name, text]) => rewriteProposal(content, name, text),
-      refreshHoldNote(beforeRefresh(current, newRunId), {
-        runId: landed.run.runId,
-        chainName: heading.chainName,
-        panels: landed.layout.panels,
-        thoughts: thoughtsByNode(landed.run.agentOutputs),
-      }),
+      refreshHoldNote(beforeRefresh(current, newRunId), holdNoteInput(landed.run, landed.layout.panels, heading.chainName)),
     )
     await app.vault.modify(file, refreshed)
 

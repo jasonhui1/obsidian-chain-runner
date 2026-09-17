@@ -27,6 +27,7 @@ const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
     { id: 'LOCKED: A test. — world', text: 'LOCKED: A test.', proposer: 'world', ticked: false },
   ],
   conversation: [],
+  holds: [],
   ...over,
 })
 
@@ -86,6 +87,7 @@ function board(): DirectingBoard {
     direct: (verb, proposal, other) => void calls.push(`direct ${verb} ${proposal}${other ? ` ${other}` : ''}`),
     undirect: (verb, proposal, other) => void calls.push(`undirect ${verb} ${proposal}${other ? ` ${other}` : ''}`),
     tickCanon: (id, ticked) => void calls.push(`tick ${id} ${ticked}`),
+    tickCandidate: (nodeId, heading, ticked) => void calls.push(`pick ${nodeId} ${heading} ${ticked}`),
     writeHold: () => void calls.push('write hold'),
     openMenu: () => void calls.push('menu'),
     chat: (proposal, message) => answered(`chat ${proposal} ${message}`),
@@ -642,6 +644,53 @@ describe('the Run tab', () => {
   it('has no verb buttons', () => {
     board().open(showing())
     expect(buttons().some(b => b.textContent === 'KEEP')).toBe(false)
+  })
+})
+
+describe('the Run tab, waiting at a hold', () => {
+  const waitingAt = hold({
+    canon: [],
+    holds: [
+      {
+        nodeId: 'pick',
+        prompt: 'Which pitch goes forward?',
+        candidates: [
+          { heading: 'Candidate 1', body: 'A combat trial.', ticked: false },
+          { heading: 'Candidate 2', body: 'A quiet shrine.', ticked: true },
+        ],
+        chosen: 'Candidate 2',
+      },
+    ],
+  })
+  const section = (): string => root.querySelector('.chain-runner-directing-hold')?.textContent ?? ''
+
+  it('names the node, asks its question, and shows each candidate', () => {
+    board().open(showing(waitingAt))
+    expect(section()).toContain('Waiting at pick')
+    expect(section()).toContain('Which pitch goes forward?')
+    expect(section()).toContain('A combat trial.')
+    expect(boxes().map(box => box.checked)).toEqual([false, true])
+  })
+
+  it('hands a tick to the hold actions by the candidate’s heading', () => {
+    board().open(showing(waitingAt))
+    boxes()[0]!.click()
+    expect(calls).toEqual(['pick pick Candidate 1 true'])
+  })
+
+  it('says a hold offered no candidates', () => {
+    board().open(showing(hold({ holds: [{ nodeId: 'pick', candidates: [] }] })))
+    expect(section()).toContain('No candidates')
+  })
+
+  it('shows nothing of a hold on a run that ended', () => {
+    board().open(showing())
+    expect(root.querySelector('.chain-runner-directing-hold')).toBeNull()
+  })
+
+  it('shows nothing of the hold on a proposal tab', () => {
+    board().open(showing(waitingAt), 'world')
+    expect(section()).toBe('')
   })
 })
 

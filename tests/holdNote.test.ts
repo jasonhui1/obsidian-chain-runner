@@ -11,10 +11,12 @@ import {
   editsToCarry,
   proposalEdits,
   refreshHoldNote,
+  readHold,
   reranFrom,
+  tickCandidate,
   type HoldNoteInput,
 } from '@/run/holdNote'
-import type { LayoutPanel } from '@/engine/types'
+import { waitingHolds, type HoldRecord, type LayoutPanel } from '@/engine/types'
 
 /**
  * The hold-note convention: a run's panels in, the note's markdown out. Nothing
@@ -453,5 +455,153 @@ describe('appendResumeLink', () => {
     expect(twice.match(/## Resumed/g)).toHaveLength(1)
     expect(twice).toContain('run-1')
     expect(twice).toContain('run-2')
+  })
+})
+
+describe('waitingHolds', () => {
+  const hold = (over: Partial<HoldRecord> = {}): HoldRecord => ({ nodeId: 'pick', input: '', candidates: [], reachedAt: '', ...over })
+
+  it('is the entries with no resolvedAt', () => {
+    expect(waitingHolds([hold({ nodeId: 'a', resolvedAt: 'then' }), hold({ nodeId: 'b' })]).map(one => one.nodeId)).toEqual(['b'])
+  })
+
+  it('keeps every hold a wave opened, the engine’s open hold last', () => {
+    expect(waitingHolds([hold({ nodeId: 'a' }), hold({ nodeId: 'b' })]).map(one => one.nodeId)).toEqual(['a', 'b'])
+  })
+
+  it('reads a node by its last entry', () => {
+    expect(waitingHolds([hold({ input: 'old' }), hold({ input: 'new' })]).map(one => one.input)).toEqual(['new'])
+    expect(waitingHolds([hold(), hold({ resolvedAt: 'then' })])).toEqual([])
+  })
+
+  it('is none for a run that never reached a hold', () => {
+    expect(waitingHolds(undefined)).toEqual([])
+  })
+})
+
+describe('a waiting run’s hold note', () => {
+  const pick = (over: Partial<HoldRecord> = {}): HoldRecord => ({
+    nodeId: 'pick',
+    prompt: 'Which pitch goes forward?',
+    input: '## Candidate 1\nA combat trial.\n\n## Candidate 2\nA quiet shrine.',
+    candidates: [
+      { heading: 'Candidate 1', body: 'A combat trial.\n\n## Why\nIt moves.' },
+      { heading: 'Candidate 2', body: 'A quiet shrine.' },
+    ],
+    reachedAt: '2026-09-17T10:00:00.000Z',
+    ...over,
+  })
+  const waiting = (holds: HoldRecord[]) => holdNoteContent(input({ holds }))
+
+  it('says which node it is waiting at', () => {
+    expect(waiting([pick()])).toContain('Stopped because: waiting at pick.')
+    expect(waiting([pick()])).not.toContain('chain ended')
+  })
+
+  it('still says the chain ended when every hold is answered', () => {
+    expect(waiting([pick({ resolvedAt: 'then', chosen: 'Candidate 1' })])).toContain('Stopped because: chain ended at its declared outputs.')
+  })
+
+  it('gives each candidate a tickable line, its body under it', () => {
+    const content = waiting([pick()])
+    expect(content).toContain('## Waiting at pick')
+    expect(content).toContain('Which pitch goes forward?')
+    expect(content).toContain('Reached 2026-09-17T10:00:00.000Z')
+    expect(content).toContain('- [ ] Candidate 1\n  A combat trial.\n\n  ## Why\n  It moves.\n- [ ] Candidate 2\n  A quiet shrine.')
+  })
+
+  it('reads back as its node, prompt and candidates, nothing ticked', () => {
+    expect(readHold(waiting([pick()]), [])?.holds).toEqual([
+      {
+        nodeId: 'pick',
+        prompt: 'Which pitch goes forward?',
+        candidates: [
+          { heading: 'Candidate 1', body: 'A combat trial.\n\n## Why\nIt moves.', ticked: false },
+          { heading: 'Candidate 2', body: 'A quiet shrine.', ticked: false },
+        ],
+      },
+    ])
+  })
+
+  it('keeps the decider’s words out of the note’s own sections', () => {
+    const content = waiting([pick({ candidates: [{ heading: 'Candidate 1', body: '## Direction\nnot this one' }] })])
+    expect(directionBlock(content)).toBe(directionBlock(holdNoteContent(input())))
+    expect(readHold(content, [])?.proposals.map(one => one.name)).toEqual(['character-director'])
+  })
+
+  it('shows the decider’s words when it wrote no candidates', () => {
+    const content = waiting([pick({ candidates: [], input: 'No options.\n## Proposals' })])
+    expect(content).toContain('> No options.\n> ## Proposals')
+    expect(readHold(content, [])?.holds[0]?.candidates).toEqual([])
+    expect(readHold(content, [])?.proposals.map(one => one.name)).toEqual(['character-director'])
+  })
+
+  it('lists both holds a wave opened', () => {
+    const content = waiting([pick(), pick({ nodeId: 'pick-2', prompt: undefined })])
+    expect(content).toContain('Stopped because: waiting at pick, pick-2.')
+    expect(readHold(content, [])?.holds.map(one => one.nodeId)).toEqual(['pick', 'pick-2'])
+    expect(readHold(content, [])?.holds[1]?.prompt).toBeUndefined()
+  })
+
+  it('shows the verdict and proposals as ever', () => {
+    const verdict = panel({ name: 'creative-director', node: 'decider', text: 'Halo.', emphasis: 'join' })
+    const content = holdNoteContent(input({ panels: [panel(), verdict], holds: [pick()] }))
+    expect(readHold(content, [])?.verdict).toBe('Halo.')
+    expect(readHold(content, [])?.proposals.map(one => one.name)).toEqual(['character-director'])
+  })
+
+  it('has no holds when the run is not waiting', () => {
+    expect(readHold(holdNoteContent(input()), [])?.holds).toEqual([])
+  })
+
+  describe('tickCandidate', () => {
+    const chosen = (content: string) => readHold(content, [])?.holds.map(one => one.chosen)
+
+    it('records the ticked candidate by its heading', () => {
+      const content = tickCandidate(waiting([pick()]), 'pick', 'Candidate 2', true)
+      expect(content).toContain('- [x] Candidate 2')
+      expect(chosen(content)).toEqual(['Candidate 2'])
+      expect(readHold(content, [])?.holds[0]?.candidates.map(one => one.ticked)).toEqual([false, true])
+    })
+
+    it('unticks the other candidates of that hold only', () => {
+      const both = waiting([pick(), pick({ nodeId: 'pick-2' })])
+      const first = tickCandidate(tickCandidate(both, 'pick-2', 'Candidate 1', true), 'pick', 'Candidate 1', true)
+      expect(chosen(tickCandidate(first, 'pick', 'Candidate 2', true))).toEqual(['Candidate 2', 'Candidate 1'])
+    })
+
+    it('unticks a candidate', () => {
+      const ticked = tickCandidate(waiting([pick()]), 'pick', 'Candidate 1', true)
+      expect(chosen(tickCandidate(ticked, 'pick', 'Candidate 1', false))).toEqual([undefined])
+    })
+
+    it('reads a tick Obsidian made in the note', () => {
+      expect(chosen(waiting([pick()]).replace('- [ ] Candidate 1', '- [x] Candidate 1'))).toEqual(['Candidate 1'])
+    })
+
+    it('leaves the note alone for a hold or candidate it does not show', () => {
+      const content = waiting([pick()])
+      expect(tickCandidate(content, 'other', 'Candidate 1', true)).toBe(content)
+      expect(tickCandidate(content, 'pick', 'Candidate 9', true)).toBe(content)
+    })
+  })
+
+  describe('refreshed', () => {
+    it('keeps a tick on a candidate the hold still offers', () => {
+      const previous = tickCandidate(waiting([pick()]), 'pick', 'Candidate 2', true)
+      expect(readHold(mergeHoldNote(waiting([pick()]), previous), [])?.holds[0]?.chosen).toBe('Candidate 2')
+    })
+
+    it('drops a tick on a candidate the hold no longer offers', () => {
+      const previous = tickCandidate(waiting([pick()]), 'pick', 'Candidate 2', true)
+      const fresh = waiting([pick({ candidates: [{ heading: 'Candidate 1', body: 'Other.' }] })])
+      expect(readHold(mergeHoldNote(fresh, previous), [])?.holds[0]?.chosen).toBeUndefined()
+    })
+
+    it('shows the hold a completed note now waits at', () => {
+      const merged = mergeHoldNote(waiting([pick()]), holdNoteContent(input()).replace('KEEP:\n', 'KEEP: this\n'))
+      expect(merged).toContain('Stopped because: waiting at pick.')
+      expect(merged).toContain('KEEP: this')
+    })
   })
 })

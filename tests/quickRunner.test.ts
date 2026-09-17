@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { QuickRunner } from '@/ui/quickRun'
 import type { EngineClient } from '@/engine/client'
+import type { RunEvent } from '@/engine/types'
 import type { RunResult } from '@/run/session'
 import type { App } from 'obsidian'
 // The test-time `obsidian` stub, imported by path so `tsc` still checks the
@@ -27,6 +28,8 @@ const note = (name: string): Note => ({ name, path: name, extension: 'md' })
 
 /** What the run was launched with, and every state the view was shown. */
 let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
+let events: RunEvent[]
+let held: string[]
 let shown: RunResult[]
 let notices: string[]
 let files: Record<string, string>
@@ -51,6 +54,7 @@ function makeRunner(): QuickRunner {
     loadWorkspace: () => Promise.resolve({ chains: CHAINS, capabilities: { runLayoutFrames: true } }),
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
       launched.push(request)
+      for (const event of events) yield event
     },
   } as unknown as EngineClient
 
@@ -64,6 +68,7 @@ function makeRunner(): QuickRunner {
       } as unknown as Awaited<ReturnType<() => Promise<never>>>),
     notify: message => notices.push(message),
     markOffline: () => {},
+    holdReached: (runId, nodeId) => Promise.resolve(void held.push(`${runId} ${nodeId}`)),
   })
 }
 
@@ -83,6 +88,8 @@ async function run(...picks: number[]): Promise<void> {
 beforeEach(() => {
   resetModals()
   launched = []
+  events = []
+  held = []
   shown = []
   notices = []
   files = { 'premise.md': '---\ntags: [x]\n---\nthe whole note' }
@@ -152,5 +159,26 @@ describe('the dropdown a chain declares', () => {
   it('shows the name and the value in the header', async () => {
     await run(1, 1)
     expect(shown[0].parameter).toEqual({ name: 'lens', value: 'builder' })
+  })
+})
+
+describe('a run that reaches a hold', () => {
+  it('hands on each hold, once the view shows the run', async () => {
+    const hold = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
+    events = [
+      { type: 'run_start', runId: 'r1' },
+      { type: 'run_waiting', runId: 'r1', nodeId: 'pick', hold },
+      { type: 'run_waiting', runId: 'r1', nodeId: 'pick-2', hold: { ...hold, nodeId: 'pick-2' } },
+    ]
+    await run(0)
+    await vi.waitFor(() => expect(held).toEqual(['r1 pick', 'r1 pick-2']))
+    expect(shown.at(-1)?.runId).toBe('r1')
+  })
+
+  it('hands on nothing for a run that completed', async () => {
+    events = [{ type: 'run_start', runId: 'r1' }, { type: 'run_complete', runId: 'r1' }]
+    await run(0)
+    await vi.waitFor(() => expect(shown.at(-1)?.status).toBe('done'))
+    expect(held).toEqual([])
   })
 })

@@ -16,6 +16,7 @@ import {
   readHold,
   removeDirectionLines,
   rewriteProposal,
+  tickCandidate,
   tickCanonLine,
   type DirectionVerb,
   type HoldHeading,
@@ -30,7 +31,7 @@ import { appendSideQuest } from '../run/sideQuest'
  * as plain data. Backed by the hold note; only this module knows that.
  */
 
-export { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldProposal, type HoldReading } from '../run/holdNote'
+export { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldPick, type HoldProposal, type HoldReading } from '../run/holdNote'
 export type { ConversationEntry } from '../run/conversation'
 export { sameTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
@@ -90,6 +91,11 @@ export class HoldActions {
   /** A canon line, by its `id`, ticked or unticked. */
   tickCanon(runId: string, id: string, ticked: boolean): Promise<boolean> {
     return this.edit(runId, content => tickCanonLine(content, id, ticked))
+  }
+
+  /** A hold's candidate picked, by its heading — what a resume sends as `chosen` — or unpicked. */
+  tickCandidate(runId: string, nodeId: string, heading: string, ticked: boolean): Promise<boolean> {
+    return this.edit(runId, content => tickCandidate(content, nodeId, heading, ticked))
   }
 
   /** A proposal's words, rewritten; whether they were written. */

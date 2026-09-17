@@ -551,6 +551,26 @@ describe('tickCanon', () => {
   })
 })
 
+describe('tickCandidate', () => {
+  const WAITING = HOLD.replace(
+    'Stopped because: chain ended at its declared outputs.\n',
+    'Stopped because: waiting at pick.\n\n## Waiting at pick\n\nReached then\n\n- [ ] Candidate 1\n  A trial.\n- [ ] Candidate 2\n  A shrine.\n',
+  )
+
+  it('picks a candidate on disk, which the hold then reads as chosen', async () => {
+    notes[PATH] = WAITING
+    const actions = makeActions()
+    await actions.tickCandidate(RUN, 'pick', 'Candidate 2', true)
+    expect(notes[PATH]).toBe(WAITING.replace('- [ ] Candidate 2', '- [x] Candidate 2'))
+    expect((await actions.read(RUN))?.holds.map(hold => hold.chosen)).toEqual(['Candidate 2'])
+  })
+
+  it('leaves a note with no such hold as it was', async () => {
+    await makeActions().tickCandidate(RUN, 'pick', 'Candidate 2', true)
+    expect(notes[PATH]).toBe(HOLD)
+  })
+})
+
 describe('read, the conversation', () => {
   it('reads each chat and question in order: replies, answers, and the run a reply was revised as', async () => {
     const hold = await makeActions().read(RUN)

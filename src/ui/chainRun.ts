@@ -31,6 +31,7 @@ export async function runIntoNotes<P extends PlacedPanel>(input: {
   markOffline: () => void
   /** Where the outputs land. An empty list is a run whose notes were all refused. */
   place: (runId: string, layout: RunLayout) => Promise<LiveOutput<P>[]>
+  holdReached: (runId: string, nodeId: string) => Promise<void>
   /** Said as the run goes, for a surface with somewhere to say it. */
   onProgress?: (model: LayoutModel | undefined) => Promise<void>
 }): Promise<ChainRunOutcome<P>> {
@@ -49,6 +50,7 @@ export async function runIntoNotes<P extends PlacedPanel>(input: {
       }
       if (live) await fillLiveOutputs(live, layout, false)
     },
+    holdReached: input.holdReached,
     notify: input.notify,
     markOffline: input.markOffline,
   })

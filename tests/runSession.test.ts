@@ -104,6 +104,11 @@ describe('applyRunEvent', () => {
     expect(fold({ type: 'run_complete', runId: '2026-09-02-ab12c' }).runId).toBe('2026-09-02-ab12c')
   })
 
+  it('takes the run id from run_waiting, the last event of a run that reached a hold', () => {
+    const hold = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
+    expect(fold({ type: 'run_waiting', runId: '2026-09-02-ab12c', nodeId: 'pick', hold }).runId).toBe('2026-09-02-ab12c')
+  })
+
   it('takes the message from an engine error event', () => {
     expect(fold({ type: 'error', error: 'no such chain' }).error).toBe('no such chain')
   })

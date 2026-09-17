@@ -1,12 +1,12 @@
 import { readConversation, type ConversationEntry } from './conversation'
 import { fileName } from './outputNote'
 import { extractSection } from './section'
-import type { AgentOutput, LayoutPanel } from '../engine/types'
+import { waitingHolds, type AgentOutput, type HoldCandidate, type HoldRecord, type LayoutPanel, type RunMeta } from '../engine/types'
 
 /**
- * The hold-note convention: what a finished run's layout becomes on disk, for a
- * human to direct. Every hold lives under one fixed folder, keyed by run id
- * alone — there is one hold per run, renamed to the newest run a rerun lands on.
+ * The hold-note convention: what a run that finished or waits at a hold becomes
+ * on disk, for a human to direct. Every hold lives under one fixed folder, keyed by run id
+ * alone — there is one hold note per run, renamed to the newest run a rerun lands on.
  */
 
 const HOLD_FOLDER = 'Maestro/holds'
@@ -29,10 +29,23 @@ export interface HoldNoteInput {
   thoughts: Record<string, string>
   /** Verdicts of the runs this hold was rerun from, already folded, newest first. */
   previousVerdicts?: string
+  /** The run's holds as the engine recorded them; the open ones are shown. */
+  holds?: readonly HoldRecord[]
 }
 
 export function holdNotePath(runId: string): string {
   return `${HOLD_FOLDER}/${fileName(runId)}.md`
+}
+
+/** The note's input for a run as the engine recorded it, and the panels its layout projects. */
+export function holdNoteInput(run: RunMeta, panels: LayoutPanel[], chainName = run.chainName): HoldNoteInput {
+  return {
+    runId: run.runId,
+    chainName,
+    panels,
+    thoughts: thoughtsByNode(run.agentOutputs),
+    ...(run.holds ? { holds: run.holds } : {}),
+  }
 }
 
 /** Each node's stored thought; last write wins, matching how the engine resolves a node's outputs. */
@@ -74,21 +87,24 @@ export function verdictPanel(panels: LayoutPanel[]): LayoutPanel | undefined {
 }
 
 /**
- * A fresh hold note for a finished run: the join panel as the verdict (a
- * `columns` chain's converging panel; absent under any other layout), every
- * other panel as a proposal with its thought folded read-only, a Direction
- * template, and an empty Conversation.
+ * A fresh hold note: each open hold with its candidates, the join panel as the
+ * verdict (a `columns` chain's converging panel; absent under any other
+ * layout), every other panel as a proposal with its thought folded read-only, a
+ * Direction template, and an empty Conversation.
  */
 export function holdNoteContent(input: HoldNoteInput): string {
   const verdict = verdictPanel(input.panels)
   const proposers = proposerPanels(input.panels)
+  const holds = waitingHolds(input.holds)
+  const stopped = holds.length > 0 ? `waiting at ${holds.map(hold => hold.nodeId).join(', ')}` : 'chain ended at its declared outputs'
 
   return (
     [
       `# Hold: run ${input.runId} · ${input.chainName}`,
       '',
-      'Stopped because: chain ended at its declared outputs.',
+      `Stopped because: ${stopped}.`,
       '',
+      ...holds.flatMap(waitingSection),
       ...(verdict ? [verdictHeading(input.chainName), '', verdict.text.trim(), ''] : []),
       ...(input.previousVerdicts ? [PREVIOUS_VERDICT, '', input.previousVerdicts, ''] : []),
       PROPOSALS,
@@ -101,6 +117,38 @@ export function holdNoteContent(input: HoldNoteInput): string {
       '',
     ].join('\n') + '\n'
   )
+}
+
+const WAITING_AT = '## Waiting at '
+
+/**
+ * A hold's candidates as tick lines. The decider's words are indented or quoted,
+ * so no heading of theirs can end a section of the note's own.
+ */
+function waitingSection(hold: HoldRecord): string[] {
+  return [
+    `${WAITING_AT}${hold.nodeId}`,
+    '',
+    ...(hold.prompt ? [`*${hold.prompt.replace(/\s+/g, ' ').trim()}*`] : []),
+    `Reached ${hold.reachedAt}`,
+    '',
+    ...(hold.candidates.length === 0 ? quoted(hold.input) : hold.candidates.flatMap(candidateLines)),
+    '',
+  ]
+}
+
+function candidateLines(candidate: HoldCandidate): string[] {
+  return [`- [ ] ${candidate.heading}`, ...linesOf(candidate.body).map(line => (line === '' ? '' : `  ${line}`))]
+}
+
+function quoted(text: string): string[] {
+  return linesOf(text).map(line => (line === '' ? '>' : `> ${line}`))
+}
+
+/** The text's lines, without the blank lines around it. */
+function linesOf(text: string): string[] {
+  const trimmed = text.replace(/^\s*\n/, '').trimEnd()
+  return trimmed === '' ? [] : trimmed.split('\n').map(line => line.trimEnd())
 }
 
 function proposalSection(panel: LayoutPanel, thought: string | undefined): string[] {
@@ -146,10 +194,93 @@ function directionOnward(content: string): string | undefined {
  * except the CANON? checklist, which is rebuilt from the fresh note's proposals.
  */
 export function mergeHoldNote(fresh: string, previous: string | undefined): string {
-  const kept = previous === undefined ? undefined : directionOnward(previous)
-  if (kept === undefined) return fresh
+  if (previous === undefined) return fresh
+  const kept = directionOnward(previous)
   const match = DIRECTION_HEADING.exec(fresh)
-  return match ? fresh.slice(0, match.index) + mergedDirection(fresh, kept) : fresh
+  if (kept === undefined || !match) return fresh
+  const merged = fresh.slice(0, match.index) + mergedDirection(fresh, kept)
+  // A pick the hold still offers stays picked.
+  return waitingHoldsIn(previous).reduce((content, hold) => (hold.chosen ? tickCandidate(content, hold.nodeId, hold.chosen, true) : content), merged)
+}
+
+/** An open hold as the note shows it. */
+export interface HoldPick {
+  /** What a resume names the hold by. */
+  nodeId: string
+  prompt?: string
+  candidates: CandidateChoice[]
+  /** The ticked candidate's heading, which a resume sends as `chosen`. */
+  chosen?: string
+}
+
+export interface CandidateChoice {
+  heading: string
+  body: string
+  ticked: boolean
+}
+
+const CANDIDATE_LINE = /^- \[([ xX])\] (.+?)\s*$/
+const PROMPT_LINE = /^\*(.+)\*$/
+
+interface WaitingSection {
+  nodeId: string
+  start: number
+  end: number
+}
+
+/** Where each hold's section sits: from its heading to the next heading of the note's own. */
+function waitingSections(content: string): WaitingSection[] {
+  // The sections come before the verdict and proposals, whose words are not the note's.
+  const stop = /^## (Verdict \(|Previous verdict\s*$|Proposals\s*$|Direction\s*$)/m.exec(content)?.index ?? content.length
+  const sections: WaitingSection[] = []
+  for (let at = 0; at < stop; at = afterLine(content, at)) {
+    const line = content.slice(at, lineEndAt(content, at))
+    if (!/^#{1,6} /.test(line)) continue
+    const last = sections[sections.length - 1]
+    if (last?.end === stop) last.end = at
+    if (line.startsWith(WAITING_AT)) sections.push({ nodeId: line.slice(WAITING_AT.length).trim(), start: at, end: stop })
+  }
+  return sections
+}
+
+/** The holds a note shows the run waiting at. */
+export function waitingHoldsIn(content: string): HoldPick[] {
+  return waitingSections(content).map(({ nodeId, start, end }) => {
+    const lines = content.slice(afterLine(content, start), end).split('\n')
+    const prompt = PROMPT_LINE.exec(lines.find(line => line.trim() !== '')?.trim() ?? '')?.[1]
+    const candidates = candidatesIn(lines)
+    const chosen = candidates.find(candidate => candidate.ticked)?.heading
+    return { nodeId, ...(prompt ? { prompt } : {}), candidates, ...(chosen ? { chosen } : {}) }
+  })
+}
+
+/** Each tick line, and the indented body under it. */
+function candidatesIn(lines: string[]): CandidateChoice[] {
+  const candidates: { choice: CandidateChoice; body: string[] }[] = []
+  for (const line of lines) {
+    const tick = CANDIDATE_LINE.exec(line)
+    if (tick) candidates.push({ choice: { heading: tick[2], body: '', ticked: tick[1] !== ' ' }, body: [] })
+    else candidates[candidates.length - 1]?.body.push(line.replace(/^ {2}/, ''))
+  }
+  return candidates.map(({ choice, body }) => ({ ...choice, body: body.join('\n').trim() }))
+}
+
+/**
+ * The hold `nodeId`'s candidate `heading` ticked, the hold's others unticked, or
+ * it unticked; unchanged when the note does not offer it.
+ */
+export function tickCandidate(content: string, nodeId: string, heading: string, ticked: boolean): string {
+  const section = waitingSections(content).find(one => one.nodeId === nodeId)
+  if (!section) return content
+  const lines = content.slice(section.start, section.end).split('\n')
+  if (!lines.some(line => CANDIDATE_LINE.exec(line)?.[2] === heading)) return content
+  const edited = lines.map(line => {
+    const tick = CANDIDATE_LINE.exec(line)
+    if (!tick) return line
+    const on = tick[2] === heading ? ticked : !ticked && tick[1] !== ' '
+    return `- [${on ? 'x' : ' '}] ${tick[2]}`
+  })
+  return content.slice(0, section.start) + edited.join('\n') + content.slice(section.end)
 }
 
 interface CanonEntry {
@@ -392,6 +523,8 @@ export interface HoldReading {
   direction: string[]
   canon: CanonChoice[]
   conversation: ConversationEntry[]
+  /** The holds the run waits at; none for a run that ended. */
+  holds: HoldPick[]
 }
 
 export interface HoldProposal {
@@ -441,6 +574,7 @@ export function readHold(content: string, panels: LayoutPanel[]): HoldReading | 
     direction: lines,
     canon: (canonBlock(direction)?.entries ?? []).map(canonChoice),
     conversation: readConversation(content, proposals.map(proposal => proposal.name)),
+    holds: waitingHoldsIn(content),
   }
 }
 

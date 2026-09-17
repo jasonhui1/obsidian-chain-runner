@@ -4,7 +4,7 @@ import { holdNoteContent, proposalEdits } from '@/run/holdNote'
 import { RerunWatch, type RerunLanding } from '@/run/rerunWatch'
 import type { RerunProgress } from '@/run/rerunProgress'
 import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import type { AgentOutput, HoldRecord, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
 import { TFile as StubFile } from './obsidian'
 
@@ -74,6 +74,8 @@ let runFrames: RunEvent[]
 let online: boolean
 let requests: RunRequest[]
 let watch: RerunWatch
+/** The holds the run a rerun lands on reached. */
+let newHolds: HoldRecord[]
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -104,7 +106,7 @@ function makeRerun(): RerunDownstream {
   } as unknown as App
 
   const engine = {
-    getRun: (runId: string) => Promise.resolve(runId === OLD ? oldRun : { ...oldRun, runId: NEW }),
+    getRun: (runId: string) => Promise.resolve(runId === OLD ? oldRun : { ...oldRun, runId: NEW, holds: newHolds }),
     getLayout: (runId: string): Promise<LayoutModel> =>
       Promise.resolve({ kind: 'columns', panels: runId === OLD ? oldPanels : newPanels }),
     launchRun: async function* (request: RunRequest) {
@@ -143,6 +145,7 @@ beforeEach(() => {
   online = true
   requests = []
   watch = new RerunWatch()
+  newHolds = []
 })
 
 describe('start', () => {
@@ -185,6 +188,14 @@ describe('start', () => {
     expect(note).toContain('Stance-switching combat.')
     expect(note).toContain('KEEP: fast combat')
     expect(notices).toEqual([`Reran downstream as run ${NEW}`])
+  })
+
+  it('shows the hold the new run waits at', async () => {
+    newHolds = [{ nodeId: 'pick', input: '', candidates: [{ heading: 'Candidate 1', body: 'A trial.' }], reachedAt: 'now' }]
+    runFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_waiting', runId: NEW, nodeId: 'pick', hold: newHolds[0]! }]
+    await makeRerun().start()
+    expect(notes[RENAMED_PATH]).toContain('Stopped because: waiting at pick.')
+    expect(notes[RENAMED_PATH]).toContain('- [ ] Candidate 1')
   })
 
   it('renames the note to the new run, so directing that run finds it', async () => {

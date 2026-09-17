@@ -21,6 +21,8 @@ export class FakeEngine {
   /** What the engine says it can do; a version too old to say reports nothing. */
   capabilities: unknown = { runLayoutFrames: true }
   runMeta: unknown = {}
+  /** What `GET /api/runs` lists, whatever it was filtered by. */
+  runs: unknown = []
   layout: unknown = { kind: 'undeclared', panels: [] }
   /** When set, every route answers with this status and body instead. */
   failWith?: { status: number; body: string }
@@ -62,6 +64,8 @@ export class FakeEngine {
         this.json(res, this.layout)
       } else if (path.startsWith('/api/runs/')) {
         this.json(res, this.runMeta)
+      } else if (path.startsWith('/api/runs?')) {
+        this.json(res, this.runs)
       } else {
         res.writeHead(404)
         res.end('Not found')

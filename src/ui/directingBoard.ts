@@ -4,6 +4,7 @@ import {
   type CanonChoice,
   type ConversationEntry,
   type DirectionVerb,
+  type HoldPick,
   type HoldProposal,
   type HoldReading,
   type RepliedTurn,
@@ -24,6 +25,8 @@ export interface DirectingBoardDeps {
   direct: (verb: DirectionVerb, proposal: string, other?: string) => void
   undirect: (verb: DirectionVerb, proposal: string, other?: string) => void
   tickCanon: (id: string, ticked: boolean) => void
+  /** A hold's candidate, by its heading, picked or unpicked. */
+  tickCandidate: (nodeId: string, heading: string, ticked: boolean) => void
   /** Writes the hold for a run that has none. */
   writeHold: () => void
   /** Each answers whether what was typed reached the hold. */
@@ -167,6 +170,7 @@ export class DirectingBoard {
     if (going && rewritten) this.progress(body, going)
 
     if (!proposal) {
+      for (const waiting of hold.holds) this.waitingAt(body, waiting)
       this.pitch(body, hold.runId)
       this.verdict(body, hold)
       const direction = this.section(body, 'Direction so far')
@@ -530,18 +534,34 @@ export class DirectingBoard {
     for (const line of lines) this.add(list, 'li', '', line)
   }
 
+  /** A hold the run waits at: its question, and a checkbox per candidate. */
+  private waitingAt(body: HTMLElement, hold: HoldPick): void {
+    const el = this.section(body, `Waiting at ${hold.nodeId}`)
+    el.classList.add(`${CLS}-hold`)
+    if (hold.prompt) this.add(el, 'div', '', hold.prompt)
+    if (hold.candidates.length === 0) this.add(el, 'div', `${CLS}-faint`, 'No candidates')
+    for (const candidate of hold.candidates) {
+      this.checkbox(el, candidate.heading, candidate.ticked, ticked => this.deps.tickCandidate(hold.nodeId, candidate.heading, ticked))
+      this.markdown(el, candidate.body)
+    }
+  }
+
   /** Checkboxes, grouped under who offered each line when more than one proposal is shown. */
   private canon(el: HTMLElement, lines: CanonChoice[], grouped: boolean): void {
     let proposer: string | undefined
     for (const line of lines) {
       if (grouped && line.proposer !== proposer) this.add(el, 'div', `${CLS}-faint`, (proposer = line.proposer))
-      const label = this.add(el, 'label', `${CLS}-canon`)
-      const box = this.add(label, 'input')
-      box.type = 'checkbox'
-      box.checked = line.ticked
-      box.addEventListener('change', () => this.deps.tickCanon(line.id, box.checked))
-      this.add(label, 'span', '', line.text)
+      this.checkbox(el, line.text, line.ticked, ticked => this.deps.tickCanon(line.id, ticked))
     }
+  }
+
+  private checkbox(el: HTMLElement, text: string, ticked: boolean, changed: (ticked: boolean) => void): void {
+    const label = this.add(el, 'label', `${CLS}-canon`)
+    const box = this.add(label, 'input')
+    box.type = 'checkbox'
+    box.checked = ticked
+    box.addEventListener('change', () => changed(box.checked))
+    this.add(label, 'span', '', text)
   }
 
   private section(el: HTMLElement, title?: string): HTMLElement {

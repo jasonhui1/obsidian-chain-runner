@@ -30,6 +30,7 @@ const SKEPTIC = `chains/runs/${RUN_ID}/Skeptic.md`
 
 let block: BlockReading | undefined
 let events: RunEvent[]
+let held: string[]
 let capabilities: Capabilities
 let chains: ChainSummary[]
 let online: boolean
@@ -156,6 +157,7 @@ function makeExpand(): Expand {
     withEngine: async action => (online ? action() : void notices.push(OFFLINE_NOTICE)),
     notify,
     markOffline: () => {},
+    holdReached: (runId, nodeId) => Promise.resolve(void held.push(`${runId} ${nodeId}`)),
     surface,
     notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
     newProposalId: () => `p-${++proposalIds}`,
@@ -203,6 +205,7 @@ beforeEach(() => {
     drawing: 'boards/wall.excalidraw.md',
   }
   events = finishes()
+  held = []
   capabilities = { runLayoutFrames: true, runStartEvent: true, runFailureFrame: true }
   chains = [personas]
   online = true
@@ -333,6 +336,12 @@ describe('what lands on the drawing', () => {
     expect(vault[OPTIMIST]).toContain('chain: "Five Personas"')
     expect(vault[OPTIMIST]).toContain('output: "Optimist"')
     expect(vault[OPTIMIST]).toContain('Optimist said something')
+  })
+
+  it('hands on a hold the run reached', async () => {
+    events = [...finishes().slice(0, -1), { type: 'run_waiting', runId: RUN_ID, nodeId: 'pick', hold: { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' } }]
+    await expandWith()
+    expect(held).toEqual([`${RUN_ID} pick`])
   })
 
   it('says so when the run produced no panels at all', async () => {

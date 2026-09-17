@@ -83,6 +83,12 @@ export class EngineClient {
     return this.getJson<RunMeta>(`/api/runs/${encodeURIComponent(runId)}`)
   }
 
+  /** The run, if it waits at a hold, with the holds it reached; `undefined` for a run that does not. */
+  async waitingRun(runId: string): Promise<RunMeta | undefined> {
+    const waiting = await this.getJson<RunMeta[]>('/api/runs?status=waiting')
+    return waiting.find(run => run.runId === runId)
+  }
+
   /**
    * Whether the engine still has a run, for a note that says it came from one.
    * It answers instead of throwing: an unreachable engine is not a deleted run

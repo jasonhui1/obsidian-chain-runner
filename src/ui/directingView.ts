@@ -93,6 +93,7 @@ export class DirectingView extends ItemView {
       direct: (verb, proposal, other) => this.onRun(runId => this.holds.direct(runId, verb, proposal, other)),
       undirect: (verb, proposal, other) => this.onRun(runId => this.holds.undirect(runId, verb, proposal, other)),
       tickCanon: (id, ticked) => this.onRun(runId => this.holds.tickCanon(runId, id, ticked)),
+      tickCandidate: (nodeId, heading, ticked) => this.onRun(runId => this.holds.tickCandidate(runId, nodeId, heading, ticked)),
       writeHold: () => this.onRun(runId => this.holds.writeHold(runId)),
       chat: (proposal, message) => this.written(runId => this.holds.chat(runId, proposal, message)),
       askRoom: question => this.written(runId => this.holds.askRoom(runId, question)),

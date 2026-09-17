@@ -92,6 +92,40 @@ export interface RunGraph {
   edges: { fromNode: string; toNode: string }[]
 }
 
+/** One option a hold's decider wrote, as its `## Candidate N` section. */
+export interface HoldCandidate {
+  /** What a resume sends back as `chosen`. */
+  heading: string
+  body: string
+}
+
+/** A hold the run reached. There is no separate id: a hold is named by its `nodeId`. */
+export interface HoldRecord {
+  nodeId: string
+  prompt?: string
+  /** The decider's text, verbatim. */
+  input: string
+  candidates: HoldCandidate[]
+  reachedAt: string
+  chosen?: string
+  custom?: string
+  direction?: string
+  resolvedAt?: string
+}
+
+/**
+ * The holds still waiting on a human, one per node, in the order reached. The
+ * engine's own "open hold", the one a resume answers, is the last of them.
+ */
+export function waitingHolds(holds: readonly HoldRecord[] = []): HoldRecord[] {
+  const open = new Map<string, HoldRecord>()
+  for (const hold of holds) {
+    open.delete(hold.nodeId)
+    if (!hold.resolvedAt) open.set(hold.nodeId, hold)
+  }
+  return [...open.values()]
+}
+
 export interface RunMeta {
   runId: string
   chainName: string
@@ -99,8 +133,11 @@ export interface RunMeta {
   parameter?: { name: string; value: string }
   startedAt: string
   completedAt?: string
-  status: 'running' | 'complete' | 'error'
+  /** `waiting` is a run paused at a hold node until a human answers it. */
+  status: 'running' | 'waiting' | 'complete' | 'error'
   agentOutputs: AgentOutput[]
+  /** Every hold reached, answered or not. */
+  holds?: HoldRecord[]
   graph?: RunGraph
   branchedFromRunId?: string
   [key: string]: unknown
@@ -205,6 +242,14 @@ export interface RunCompleteEvent {
   runId: string
 }
 
+/** A hold reached; the stream ends after the last of a wave's, with no `run_complete`. */
+export interface RunWaitingEvent {
+  type: 'run_waiting'
+  runId: string
+  nodeId: string
+  hold: HoldRecord
+}
+
 export interface RunErrorEvent {
   type: 'error'
   error: string
@@ -224,9 +269,16 @@ export type KnownRunEvent =
   | LayoutFrameEvent
   | RunStartEvent
   | RunCompleteEvent
+  | RunWaitingEvent
   | RunErrorEvent
 
 export type RunEvent = KnownRunEvent | UnknownRunEvent
+
+/** The run's id, from any event that names the run. */
+export function runIdOf(event: RunEvent): string | undefined {
+  const named = isEvent(event, 'run_start') || isEvent(event, 'run_complete') || isEvent(event, 'run_waiting')
+  return named ? event.runId : undefined
+}
 
 /**
  * Narrows an event to one of the modelled kinds. Needed because `UnknownRunEvent`'s

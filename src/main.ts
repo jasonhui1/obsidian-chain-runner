@@ -119,6 +119,26 @@ export default class ChainRunnerPlugin extends Plugin {
           keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
         }),
     )
+    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
+    const directRun = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => this.activeResultView()?.currentResult(),
+      open: note => this.app.workspace.getLeaf('tab').openFile(note),
+    })
+    // From the drawing, a hold opens in the directing panel rather than a tab.
+    const directInPanel = new DirectRun({
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify: message => new Notice(message),
+      holdNotes,
+      currentRun: () => undefined,
+      open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
+    })
+    // A run watched live writes its hold note as it reaches each hold.
+    const holdReached = (runId: string, nodeId: string): Promise<void> => directInPanel.holdReached(runId, nodeId)
     this.quickRun = new QuickRunner({
       app: this.app,
       engine: this.engine,
@@ -126,6 +146,7 @@ export default class ChainRunnerPlugin extends Plugin {
       openResultView: () => this.openResultView(),
       notify: message => new Notice(message),
       markOffline: () => this.status.markOffline(),
+      holdReached,
     })
     // A run outlives the command that started it; unloading the plugin ends it.
     this.register(() => this.quickRun.stop())
@@ -140,6 +161,7 @@ export default class ChainRunnerPlugin extends Plugin {
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       markOffline: () => this.status.markOffline(),
+      holdReached,
       surface,
       notes,
     })
@@ -187,6 +209,7 @@ export default class ChainRunnerPlugin extends Plugin {
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       markOffline: () => this.status.markOffline(),
+      holdReached,
       surface,
       notes,
       newProposalId,
@@ -194,24 +217,6 @@ export default class ChainRunnerPlugin extends Plugin {
     // An expansion outlives the command that started it; unloading the plugin ends it.
     this.register(() => expand.stop())
 
-    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
-    const directRun = new DirectRun({
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      holdNotes,
-      currentRun: () => this.activeResultView()?.currentResult(),
-      open: note => this.app.workspace.getLeaf('tab').openFile(note),
-    })
-    // From the drawing, a hold opens in the directing panel rather than a tab.
-    const directInPanel = new DirectRun({
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      holdNotes,
-      currentRun: () => undefined,
-      open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
-    })
     const chat = new ChatWithProposer({
       app: this.app,
       engine: this.engine,
@@ -267,7 +272,10 @@ export default class ChainRunnerPlugin extends Plugin {
         cardProposal: (element, view) => surface.cardProposal(element, view),
       },
       direct: runId => directInPanel.openHold(runId),
-      showProposal: async (runId, proposal) => void (await this.openDirectingPanel())?.show(runId, proposal),
+      showProposal: async (runId, proposal) => {
+        await directInPanel.refresh(runId)
+        await (await this.openDirectingPanel())?.show(runId, proposal)
+      },
       notify: message => new Notice(message),
       clickSpot: settled => clicks.onSettled(settled),
     })

@@ -1,5 +1,5 @@
 import { normalizePath, TFile, type App } from 'obsidian'
-import { holdHeading, holdNoteContent, holdNotePath, mergeHoldNote, reranFrom, type HoldNoteInput } from '../run/holdNote'
+import { holdHeading, holdNoteContent, holdNotePath, mergeHoldNote, reranFrom, waitingHoldsIn, type HoldNoteInput } from '../run/holdNote'
 import { ensureFolder, guardWrite } from './vaultWrite'
 
 /**
@@ -42,6 +42,13 @@ export class HoldNotes {
       if (heading && reranFrom(content).includes(runId)) return heading.runId
     }
     return runId
+  }
+
+  /** The nodes whose holds the run's note shows as waiting; none without a note. */
+  async holdsShown(runId: string): Promise<string[]> {
+    const file = this.find(runId)
+    const content = file ? await this.deps.app.vault.cachedRead(file) : ''
+    return waitingHoldsIn(content).map(hold => hold.nodeId)
   }
 
   async write(input: HoldNoteInput): Promise<TFile | undefined> {
