@@ -251,7 +251,9 @@ export class DirectingBoard {
       if (turn.reply === undefined) this.add(shown, 'div', `${CLS}-faint`, 'No reply')
       else this.markdown(shown, turn.reply)
       if (turn.revisedAs) this.add(shown, 'div', `${CLS}-faint`, `Used as the revision · run ${shortId(turn.revisedAs)}`)
-      else if (turn.reply !== undefined) this.reviseButton(shown, hold, { name, message: turn.message, reply: turn.reply })
+      else if (turn.reply !== undefined) {
+        this.reviseButton(shown, hold, { name, message: turn.message, reply: turn.reply, ...(turn.turn !== undefined ? { turn: turn.turn } : {}) })
+      }
     }
     if (pending !== undefined) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
     this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.deps.chat(name, text) })

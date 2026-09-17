@@ -222,6 +222,17 @@ export interface ResumeRequest {
   context?: Record<string, string>
 }
 
+/**
+ * What `POST /api/runs/:id/nodes/:nodeId/promote` is asked for: which reply of
+ * the node's transcript becomes its output.
+ */
+export interface PromoteRequest {
+  /** The 1-based `### Turn N` of the node's log; omitted promotes its last reply. */
+  turn?: number
+  /** Overrides a `context` node's file, keyed by the node's declared `file`. */
+  context?: Record<string, string>
+}
+
 export interface AgentStartEvent {
   type: 'agent_start'
   agentName: string

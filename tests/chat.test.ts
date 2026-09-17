@@ -106,8 +106,12 @@ describe('the turn a reply came back as', () => {
     expect(chatEntries(replied())[0].entry.turn).toBeUndefined()
   })
 
-  it('leaves a bare `revise` under it still referring to that reply', () => {
-    expect(pendingRevise(replied(3) + 'revise\n')).toEqual({ name: 'gameplay-director', message: 'defend it.', reply: 'Halo is a burden.' })
+  it('goes with the reply a bare `revise` under it refers to — which turn promote is asked for', () => {
+    expect(pendingRevise(replied(3) + 'revise\n')).toEqual({ name: 'gameplay-director', message: 'defend it.', reply: 'Halo is a burden.', turn: 3 })
+  })
+
+  it('is absent from a `revise` on an approximate reply, which the engine never counted', () => {
+    expect(pendingRevise(replied() + 'revise\n')?.turn).toBeUndefined()
   })
 
   it('keeps a reply that is nothing but a turn line out of the way of the next one', () => {

@@ -1,3 +1,5 @@
+import { engineFailureMessage } from '../engine/guard'
+import { EngineHttpError } from '../engine/transport'
 import type { EngineClient } from '../engine/client'
 import { isEvent, runIdOf, type AgentOutput, type RunEvent, type RunRequest } from '../engine/types'
 
@@ -7,6 +9,27 @@ export interface RunOutcome {
   /** Set as soon as the engine names the run; a run that fails still gets one. */
   runId?: string
   error?: string
+}
+
+/** What a call that answers with a run stream came back with: the run it landed on, or a refusal already worded for the human. */
+export type StreamedRun = { kind: 'ran'; outcome: RunOutcome } | { kind: 'refused'; said: string }
+
+/**
+ * A run stream drained to its end, with every refusal the engine answered
+ * turned into words by `said` — which may leave a status it has nothing of its
+ * own to say about. Only an unreachable engine still throws.
+ */
+export async function streamOrRefusal(
+  open: () => AsyncIterable<RunEvent>,
+  said: (error: EngineHttpError) => string | undefined,
+  onEvent?: (event: RunEvent) => void,
+): Promise<StreamedRun> {
+  try {
+    return { kind: 'ran', outcome: await drainRun(open(), onEvent) }
+  } catch (error) {
+    if (!(error instanceof EngineHttpError)) throw error
+    return { kind: 'refused', said: said(error) ?? engineFailureMessage(error) ?? `Engine error ${error.status}` }
+  }
 }
 
 /** Runs a request to completion and reports what it landed on, passing `onEvent` every event on the way. */

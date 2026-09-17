@@ -13,6 +13,7 @@ import type {
   ChainView,
   ChatEvent,
   LayoutModel,
+  PromoteRequest,
   RunEvent,
   RunExistence,
   RunMeta,
@@ -55,7 +56,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 const PROBE_PATH = '/api/runs/chain-runner-probe'
 
 /**
- * The engine as this plugin sees it: four calls, and a reachability check. The
+ * The engine as this plugin sees it: a handful of calls, and a reachability check. The
  * base URL is read per call, so a settings change takes effect on the next one.
  * Every failure to reach it surfaces as `EngineOfflineError`.
  */
@@ -128,6 +129,18 @@ export class EngineClient {
    */
   async *resumeRun(runId: string, request: ResumeRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
     yield* this.streamRun(`/api/runs/${encodeURIComponent(runId)}/resume`, request, signal)
+  }
+
+  /**
+   * Makes one of a node's chat replies its output, yielding the run events that
+   * follow. The engine decides whether that reruns the run in place or forks a
+   * new one, so the id in the stream's first `run_start` is the run of record —
+   * never the id posted to (#53). A refusal — the node is in a loop, `turn` is
+   * out of range, it is not a proposer, the run is running — throws
+   * `EngineHttpError` for the caller to name.
+   */
+  async *promoteNode(node: { runId: string; nodeId: string }, request: PromoteRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
+    yield* this.streamRun(`/api/runs/${encodeURIComponent(node.runId)}/nodes/${encodeURIComponent(node.nodeId)}/promote`, request, signal)
   }
 
   /**

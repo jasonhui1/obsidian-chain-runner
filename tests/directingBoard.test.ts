@@ -95,7 +95,7 @@ function board(): DirectingBoard {
     change: text => answered(`change ${text}`),
     revise: (turn, onProgress) => {
       progressTo = onProgress
-      return answered(`revise ${turn.name} ${turn.reply}`).then(() => {})
+      return answered(`revise ${turn.name} ${turn.reply} turn ${turn.turn ?? 'none'}`).then(() => {})
     },
     editProposal: (proposal, words) => answered(`edit ${proposal} ${words}`),
     rerun: onProgress => {
@@ -700,7 +700,7 @@ describe('a proposal tab, chatting', () => {
       { kind: 'chat', name: 'world', message: 'why a test?', reply: 'Someone is watching.', revisedAs: '2026-09-16-Xy9zW2' },
       { kind: 'room', question: 'too much Nier?', answers: [{ name: 'world', answer: 'No.' }] },
       { kind: 'chat', name: 'gameplay', message: 'why rotate?', reply: 'Fresh fights.' },
-      { kind: 'chat', name: 'world', message: 'who watches?', reply: 'The player.' },
+      { kind: 'chat', name: 'world', message: 'who watches?', reply: 'The player.', turn: 2 },
       { kind: 'chat', name: 'world', message: 'and then?' },
     ],
   })
@@ -723,7 +723,8 @@ describe('a proposal tab, chatting', () => {
     expect(turns[0]?.textContent).toContain('Used as the revision · run Xy9zW2')
     expect(Array.from(turns[0]!.querySelectorAll('button'))).toEqual([])
     button('Use this reply as the revision & rerun').click()
-    expect(calls).toEqual(['revise world The player.'])
+    // The turn goes with the reply: it is the `### Turn N` promote is asked for.
+    expect(calls).toEqual(['revise world The player. turn 2'])
   })
 
   it('says a rerun is going, and starts no second one, until it is done', async () => {

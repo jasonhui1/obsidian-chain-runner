@@ -17,6 +17,7 @@ import type {
   ChatMessage,
   LayoutModel,
   LayoutPanel,
+  PromoteRequest,
   ResumeRequest,
   RunEvent,
   RunMeta,
@@ -196,6 +197,8 @@ let chainFrames: RunEvent[]
 let requests: RunRequest[]
 /** What each resume posted, and to which run. */
 let resumes: { runId: string; request: ResumeRequest }[]
+/** What each promote posted, and to which node of which run. */
+let promotes: { runId: string; nodeId: string; request: PromoteRequest }[]
 /** The runs whose hold note a resume asked to be brought up to date. */
 let refreshed: string[]
 let online: boolean
@@ -276,6 +279,10 @@ function makeActions(): HoldActions {
       resumes.push({ runId, request })
       yield* chainFrames
     },
+    promoteNode: async function* (node: { runId: string; nodeId: string }, request: PromoteRequest) {
+      promotes.push({ ...node, request })
+      yield* rerunFrames
+    },
     chatWithNode: async function* (chat: { nodeId: string; message: string }) {
       chats.push(chat)
       if (chatFrames === undefined) throw new EngineHttpError(404, `${ENGINE_URL}/chat`, 'Not found')
@@ -315,6 +322,7 @@ beforeEach(() => {
   chainFrames = []
   requests = []
   resumes = []
+  promotes = []
   refreshed = []
   online = true
   layoutsFetched = 0
@@ -714,14 +722,15 @@ describe('chat', () => {
 })
 
 describe('revise', () => {
-  const turn = { name: 'world', message: 'why a test?', reply: 'Someone is watching.' }
+  const said = { name: 'world', message: 'why a test?', reply: 'Someone is watching.' }
+  /** The reply as the engine counted it; only a turn it recorded can be promoted. */
+  const turn = { ...said, turn: 2 }
 
-  it('reruns downstream with the reply as that proposal’s output', async () => {
+  it('promotes that reply on the proposal’s own node, rather than replaying it as an edit', async () => {
     rerunFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_complete', runId: NEW }]
     await makeActions().revise(RUN, turn)
-    expect(requests).toHaveLength(1)
-    expect(requests[0]?.branchedFromRunId).toBe(RUN)
-    expect(requests[0]?.branchOutputs).toContainEqual(revision('world', 'Someone is watching.'))
+    expect(promotes).toEqual([{ runId: RUN, nodeId: 'world', request: { turn: 2 } }])
+    expect(requests).toEqual([])
   })
 
   it('says which run the hold now lives under, and marks that reply revised as it', async () => {
@@ -730,7 +739,7 @@ describe('revise', () => {
     expect(await actions.revise(RUN, turn)).toBe(NEW)
     const conversation = (await actions.read(NEW))?.conversation
     expect(conversation?.[0]).toMatchObject({ revisedAs: '2026-09-14-old' })
-    expect(conversation?.at(-1)).toEqual({ kind: 'chat', ...turn, revisedAs: NEW })
+    expect(conversation?.at(-1)).toEqual({ kind: 'chat', ...said, revisedAs: NEW })
     expect(Object.keys(notes)).toEqual([NEW_PATH])
   })
 
@@ -750,7 +759,7 @@ describe('revise', () => {
     rerunFrames = [{ type: 'run_start', runId: NEW }, { type: 'error', error: 'the chain broke' }]
     expect(await makeActions().revise(RUN, turn)).toBeUndefined()
     expect(notes[PATH]).toBe(HOLD)
-    expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
+    expect(notices).toEqual([`Run ${NEW} failed after using world's reply: the chain broke`])
   })
 })
 

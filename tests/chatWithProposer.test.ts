@@ -1,10 +1,21 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ChatWithProposer, NOTHING_TO_SEND, NOT_A_HOLD_NOTE, NOT_A_PROPOSER } from '@/ui/chatWithProposer'
+import { ChatWithProposer, NOTHING_TO_SEND, NOT_A_HOLD_NOTE, NOT_A_PROPOSER, NOT_THE_ENGINE_S } from '@/ui/chatWithProposer'
 import { holdNoteContent } from '@/run/holdNote'
 import { RerunWatch } from '@/run/rerunWatch'
 import type { EngineClient } from '@/engine/client'
 import { EngineHttpError } from '@/engine/transport'
-import type { AgentOutput, Capabilities, ChatEvent, ChatMessage, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import type {
+  AgentOutput,
+  Capabilities,
+  ChatEvent,
+  ChatMessage,
+  LayoutModel,
+  LayoutPanel,
+  PromoteRequest,
+  RunEvent,
+  RunMeta,
+  RunRequest,
+} from '@/engine/types'
 import type { App, TFile } from 'obsidian'
 import { TFile as StubFile } from './obsidian'
 
@@ -24,9 +35,6 @@ const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
 })
 
 const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
-
-/** A human's words replayed in place of a node's output: nothing ran, so nothing was spent. */
-const revision = (nodeId: string, text: string): AgentOutput => ({ ...output(nodeId, text), tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 })
 
 const panels = [
   panel('character-director', 'Shrine-maiden silhouette.'),
@@ -79,6 +87,11 @@ let chats: { runId: string; nodeId: string; message: string }[]
 let conversations: Record<string, ChatMessage[]>
 /** Whether the engine records the turn it just gave, the way a real one does. */
 let recordsTurns: boolean
+/** What the promote endpoint streams; the run it names is the run of record. */
+let promoteFrames: RunEvent[]
+/** What the promote endpoint refuses with, in place of streaming anything. */
+let promoteRefusal: EngineHttpError | undefined
+let promotes: { runId: string; nodeId: string; request: PromoteRequest }[]
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -116,6 +129,11 @@ function makeCommand(): ChatWithProposer {
       for (const event of runFrames) yield event
     },
     loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    promoteNode: async function* (node: { runId: string; nodeId: string }, request: PromoteRequest) {
+      promotes.push({ ...node, request })
+      if (promoteRefusal) throw promoteRefusal
+      for (const event of promoteFrames) yield event
+    },
     chatWithNode: async function* (chat: { runId: string; nodeId: string; message: string }) {
       chats.push(chat)
       if (chatRefusal) throw chatRefusal
@@ -150,6 +168,9 @@ beforeEach(() => {
   chats = []
   conversations = {}
   recordsTurns = true
+  promoteFrames = []
+  promoteRefusal = undefined
+  promotes = []
 })
 
 describe('start, addressing a proposer', () => {
@@ -307,13 +328,67 @@ describe('an engine with no chat endpoint, which falls back to approximate chat'
 })
 
 describe('start, revising from a reply', () => {
-  it('reruns downstream with the reply as that node’s output, and marks the revise line done', async () => {
-    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n> Halo is a burden, not a toolkit.\nrevise\n'
-    runFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_complete', runId: NEW }]
+  /** A Conversation ending in a bare `revise`, on a reply the engine counted as `turn` when it gave it one. */
+  const toRevise = (turn?: number): string =>
+    written() +
+    `@gameplay-director defend the sleeves\n${turn === undefined ? '' : `> [turn ${turn}]\n> \n`}> Halo is a burden, not a toolkit.\nrevise\n`
+
+  it('promotes that reply on the proposer’s own node, rather than replaying it as an edit', async () => {
+    notes[HOLD_PATH] = toRevise(2)
+    promoteFrames = [{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }]
     await makeCommand().start()
-    expect(requests).toHaveLength(1)
-    expect(requests[0].branchedFromRunId).toBe(RUN)
-    expect(requests[0].branchOutputs).toContainEqual(revision('gameplay-director', 'Halo is a burden, not a toolkit.'))
+    expect(promotes).toEqual([{ runId: RUN, nodeId: 'gameplay-director', request: { turn: 2 } }])
+    // Nothing is launched: the engine decides what rerunning the promotion means.
+    expect(requests).toEqual([])
+  })
+
+  it('refuses a reply the engine never counted, which it holds nothing to promote for', async () => {
+    notes[HOLD_PATH] = toRevise()
+    const before = notes[HOLD_PATH]
+    await makeCommand().start()
+    expect(promotes).toEqual([])
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([NOT_THE_ENGINE_S('gameplay-director')])
+  })
+
+  it('keeps the note under the run it was called on when the engine reran to the hold in place', async () => {
+    notes[HOLD_PATH] = toRevise(2)
+    promoteFrames = [{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }]
+    await makeCommand().start()
+    expect(Object.keys(notes)).toEqual([HOLD_PATH])
+    expect(notes[HOLD_PATH]).toContain(`revise → reran as run ${RUN}`)
+    expect(notices).toEqual([`gameplay-director's reply is now the proposal — run ${RUN} reran`])
+  })
+
+  it('moves the note to the fork when the engine named a run other than the one called', async () => {
+    notes[HOLD_PATH] = toRevise(2)
+    promoteFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_complete', runId: NEW }]
+    await makeCommand().start()
+    expect(Object.keys(notes)).toEqual([`Maestro/holds/${NEW}.md`])
     expect(notes[`Maestro/holds/${NEW}.md`]).toContain(`revise → reran as run ${NEW}`)
+    expect(notices).toEqual([`gameplay-director's reply is now the proposal — forked as run ${NEW}`])
+  })
+
+  it.each([
+    [400, 'node is inside a loop', "gameplay-director's reply cannot be used as the revision: node is inside a loop"],
+    [400, 'turn 4 is out of range', "gameplay-director's reply cannot be used as the revision: turn 4 is out of range"],
+    [404, 'unknown node', `Run ${RUN} no longer has a node for gameplay-director`],
+    [409, 'run is running', `Run ${RUN} is still running — use gameplay-director's reply once it stops`],
+  ])('leaves the note as it was and says why when the engine refuses with %i', async (status, said, notice) => {
+    notes[HOLD_PATH] = toRevise(2)
+    const before = notes[HOLD_PATH]
+    promoteRefusal = new EngineHttpError(status, 'http://engine/promote', JSON.stringify({ error: said }))
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([notice])
+  })
+
+  it('leaves the note as it was when the run the promotion started failed', async () => {
+    notes[HOLD_PATH] = toRevise(2)
+    const before = notes[HOLD_PATH]
+    promoteFrames = [{ type: 'run_start', runId: NEW }, { type: 'error', error: 'the chain broke' }]
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([`Run ${NEW} failed after using gameplay-director's reply: the chain broke`])
   })
 })

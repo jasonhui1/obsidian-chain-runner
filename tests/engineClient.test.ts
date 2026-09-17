@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { EngineClient } from '@/engine/client'
 import { createNodeTransport } from '@/engine/nodeTransport'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
-import type { ChatEvent, ResumeRequest, RunEvent } from '@/engine/types'
+import type { ChatEvent, PromoteRequest, ResumeRequest, RunEvent } from '@/engine/types'
 import { FakeEngine, frame } from './fakeEngine'
 
 let engine: FakeEngine
@@ -310,6 +310,46 @@ describe('resumeRun', () => {
   it('throws EngineOfflineError when the engine is not running', async () => {
     const client = await offlineClient()
     await expect(drain(client.resumeRun('r1', { direction: 'KEEP: x' }))).rejects.toBeInstanceOf(EngineOfflineError)
+  })
+})
+
+describe('promoteNode', () => {
+  const node = { runId: '2026-09-15-Ab3dE1', nodeId: 'gameplay-director' }
+  const promote = (request: PromoteRequest = {}) => client.promoteNode(node, request)
+
+  it('posts the turn to the node promote route', async () => {
+    engine.runFrames = [frame({ type: 'run_complete', runId: '2026-09-15-Ab3dE1' })]
+    await drain(promote({ turn: 2 }))
+    const sent = engine.requests.at(-1)!
+    expect(sent.method).toBe('POST')
+    expect(sent.path).toBe('/api/runs/2026-09-15-Ab3dE1/nodes/gameplay-director/promote')
+    expect(JSON.parse(sent.body)).toEqual({ turn: 2 })
+  })
+
+  it('yields the run event set, not the chat stream', async () => {
+    engine.runFrames = [
+      frame({ type: 'run_start', runId: '2026-09-15-Ab3dE1' }),
+      frame({ type: 'agent_start', agentName: 'creative-director', nodeId: 'creative-director', step: 0 }),
+      frame({ type: 'run_complete', runId: '2026-09-15-Ab3dE1' }),
+    ]
+    expect((await drain(promote())).map(event => event.type)).toEqual(['run_start', 'agent_start', 'run_complete'])
+  })
+
+  it('names the forked run in run_start, which is not the run it was posted to', async () => {
+    engine.runFrames = [frame({ type: 'run_start', runId: '2026-09-20-Forked' })]
+    expect(await drain(promote())).toEqual([{ type: 'run_start', runId: '2026-09-20-Forked' }])
+  })
+
+  it('throws EngineHttpError carrying the refusal, so the caller can say which one it was', async () => {
+    engine.failWith = { status: 400, body: '{"error":"node is inside a loop"}' }
+    const error = await drain(promote()).catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(EngineHttpError)
+    expect((error as EngineHttpError).status).toBe(400)
+  })
+
+  it('throws EngineOfflineError when the engine is not running', async () => {
+    const client = await offlineClient()
+    await expect(drain(client.promoteNode({ runId: 'r1', nodeId: 'n1' }, {}))).rejects.toBeInstanceOf(EngineOfflineError)
   })
 })
 

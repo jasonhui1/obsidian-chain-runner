@@ -1,8 +1,8 @@
 import { CANON_CONTEXT_KEY } from './canon'
-import { drainRun, type RunOutcome } from './headlessRun'
+import { streamOrRefusal, type StreamedRun } from './headlessRun'
 import { directionLines, type HoldPick } from './holdNote'
-import { engineFailureMessage, engineSaid } from '../engine/guard'
-import { EngineHttpError } from '../engine/transport'
+import { engineSaid } from '../engine/guard'
+import type { EngineHttpError } from '../engine/transport'
 import type { EngineClient } from '../engine/client'
 import type { ResumeRequest } from '../engine/types'
 
@@ -46,25 +46,20 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
   }
 }
 
-/** What a resume came back with: the run it carried on as, or why the engine would not. */
-export type ResumeOutcome = { kind: 'ran'; outcome: RunOutcome } | { kind: 'refused'; said: string }
+/** What a resume came back with: the run it carried on as — which may be a fork — or why the engine would not. */
+export type ResumeOutcome = StreamedRun
 
 /**
  * The hold answered and the run carried on, read as a run stream. Every refusal
  * comes back as words to show; only an unreachable engine still throws.
  */
-export async function runResume(engine: EngineClient, runId: string, request: ResumeRequest): Promise<ResumeOutcome> {
-  try {
-    return { kind: 'ran', outcome: await drainRun(engine.resumeRun(runId, request)) }
-  } catch (error) {
-    if (!(error instanceof EngineHttpError)) throw error
-    return { kind: 'refused', said: refusal(error, runId) }
-  }
+export function runResume(engine: EngineClient, runId: string, request: ResumeRequest): Promise<ResumeOutcome> {
+  return streamOrRefusal(() => engine.resumeRun(runId, request), error => refusal(error, runId))
 }
 
-function refusal(error: EngineHttpError, runId: string): string {
+function refusal(error: EngineHttpError, runId: string): string | undefined {
   if (error.status === 409) return `Run ${runId} cannot be resumed yet: ${engineSaid(error)}`
   if (error.status === 404) return `Run ${runId} no longer has the hold this note answers`
   if (error.status === 400) return `The engine would not resume run ${runId}: ${engineSaid(error)}`
-  return engineFailureMessage(error) ?? `Resume of run ${runId} failed`
+  return undefined
 }

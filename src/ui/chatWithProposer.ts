@@ -1,12 +1,12 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite, readIfPresent } from './vaultWrite'
-import { fetchRun, rerunAndRefresh, type FetchedRun } from './rerunAndRefresh'
+import { fetchRun, streamIntoHold, type FetchedRun, type RerunWording } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
-import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatReply, type ChatTurn } from '../run/chat'
+import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatReply, type RepliedTurn } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
 import { chatReply, repliesSoFar } from '../run/proposerChat'
 import { holdHeading, proposerPanels, type HoldHeading } from '../run/holdNote'
-import { rerunRequest } from '../run/rerun'
+import { runPromote, type PromotedReply } from '../run/promote'
 import type { OnRerunProgress } from '../run/rerunProgress'
 import type { EngineClient } from '../engine/client'
 import type { RerunWatch } from '../run/rerunWatch'
@@ -20,6 +20,21 @@ import type { RerunWatch } from '../run/rerunWatch'
 export const NOT_A_HOLD_NOTE = 'Open a hold note to chat with a proposer'
 export const NOTHING_TO_SEND = 'Nothing new in the Conversation section to send'
 export const NOT_A_PROPOSER = (name: string): string => `@${name} is not a proposer — only proposers can be chatted with`
+export const NOT_THE_ENGINE_S = (name: string): string =>
+  `This reply never reached the engine, so it cannot become ${name}'s proposal — ask ${name} again first`
+
+/** How a revise names what it did, in the words the Conversation's `revise` line asks for. */
+function reviseWording(name: string): RerunWording {
+  const became = `${name}'s reply is now the proposal`
+  return {
+    landed: (runId, forked) => (forked ? `${became} — forked as run ${runId}` : `${became} — run ${runId} reran`),
+    heldBack: runId => `${became}, and run ${runId} reran`,
+    failed: (runId, error) => {
+      if (runId) return `Run ${runId} failed after using ${name}'s reply: ${error}`
+      return error ? `Using ${name}'s reply as the revision failed: ${error}` : `Using ${name}'s reply as the revision produced no run`
+    },
+  }
+}
 
 export interface ChatWithProposerDeps {
   app: App
@@ -133,13 +148,16 @@ export class ChatWithProposer {
   }
 
   /**
-   * A reply becomes the proposer's revision, rerun downstream; `mark` notes in the
-   * hold which reply it was, and `onProgress` hears each step. Answers the run the hold now lives under.
+   * A reply becomes the proposer's own output, through the engine's promote
+   * endpoint: it reruns the run to its hold in place, or forks a new one, and
+   * the note follows whichever the stream names. `mark` notes in the hold which
+   * reply it was, and `onProgress` hears each step. Answers the run the hold now
+   * lives under.
    */
   async revise(
     file: TFile,
     heading: HoldHeading,
-    turn: Required<ChatTurn>,
+    turn: RepliedTurn,
     mark: (content: string, newRunId: string) => string = markRevised,
     onProgress?: OnRerunProgress,
   ): Promise<string | undefined> {
@@ -153,17 +171,27 @@ export class ChatWithProposer {
       return undefined
     }
 
-    const canon = await readIfPresent(this.deps.app, normalizePath(CANON_PATH))
-    const request = rerunRequest(source.run, source.layout.panels, { [panel.node]: turn.reply }, canon)
-    if (!request) {
-      notify(`Run ${heading.runId} carries no graph to rerun from`)
+    // Only the engine's own chat records a turn, and only a turn it recorded can
+    // be promoted; an approximate reply lives in the note alone (#52).
+    if (turn.turn === undefined) {
+      notify(NOT_THE_ENGINE_S(turn.name))
       return undefined
     }
 
-    return rerunAndRefresh(this.deps, file, heading, request, {
+    const canon = await readIfPresent(this.deps.app, normalizePath(CANON_PATH))
+    const promote: PromotedReply = {
+      runId: heading.runId,
+      nodeId: panel.node,
+      name: turn.name,
+      turn: turn.turn,
+      ...(canon !== undefined ? { canon } : {}),
+    }
+
+    return streamIntoHold(this.deps, file, heading, onEvent => runPromote(engine, promote, onEvent), {
       beforeRefresh: mark,
       onProgress,
       edits: { before: source.layout.panels, sent: {}, revised: panel.node },
+      wording: reviseWording(turn.name),
     })
   }
 }

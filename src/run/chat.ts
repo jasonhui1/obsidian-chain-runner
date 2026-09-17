@@ -26,6 +26,9 @@ export interface ChatEntry extends ChatTurn {
   turn?: number
 }
 
+/** A chat turn whose reply can be made its proposal's output: an entry that has one. */
+export type RepliedTurn = ChatEntry & { reply: string }
+
 /** A proposer's answer, and which turn of its transcript that answer was. */
 export interface ChatReply {
   text: string
@@ -90,14 +93,15 @@ export function pendingMessage(content: string): ChatTurn | undefined {
 }
 
 /** The turn a trailing bare `revise` line refers to, or undefined when there is none to revise. */
-export function pendingRevise(content: string): ChatTurn | undefined {
+export function pendingRevise(content: string): ChatEntry | undefined {
   const tail = content.slice(conversationStart(content)).trimEnd()
   const lastLine = tail.slice(tail.lastIndexOf('\n') + 1).trim()
   if (!REVISE_LINE.test(lastLine)) return undefined
 
   const turns = locatedTurns(content)
   const last = turns[turns.length - 1]?.entry
-  return last?.reply !== undefined ? { name: last.name, message: last.message, reply: last.reply } : undefined
+  if (last?.reply === undefined) return undefined
+  return { name: last.name, message: last.message, reply: last.reply, ...(last.turn !== undefined ? { turn: last.turn } : {}) }
 }
 
 /** The reply inserted as a blockquote right under the message it answers; unchanged if that turn is gone. */

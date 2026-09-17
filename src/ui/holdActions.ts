@@ -8,7 +8,7 @@ import type { RunPanels } from './runPanels'
 import type { SideQuest } from './sideQuest'
 import { guardWrite } from './vaultWrite'
 import { appendRoomQuestion } from '../run/askRoom'
-import { appendChatTurn, markTurnRevised, type ChatTurn } from '../run/chat'
+import { appendChatTurn, markTurnRevised, type RepliedTurn } from '../run/chat'
 import {
   appendDirectionLine,
   directionLine,
@@ -33,13 +33,10 @@ import { appendSideQuest } from '../run/sideQuest'
 
 export { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldPick, type HoldProposal, type HoldReading } from '../run/holdNote'
 export type { ConversationEntry } from '../run/conversation'
-export { sameTurn } from '../run/chat'
+export { sameTurn, type RepliedTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
 export { canonNote, type CanonOutcome, type ResumeResult } from './resume'
 export { rerunDoing, type OnRerunProgress, type RerunProgress, type RerunStep } from '../run/rerunProgress'
-
-/** A chat reply that can become its proposal's revision. */
-export type RepliedTurn = Required<ChatTurn>
 
 export const PROPOSAL_HEADING = 'A proposal cannot hold a “### ” heading: the hold note starts the next proposal there'
 
