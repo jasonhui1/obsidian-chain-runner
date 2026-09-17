@@ -1,4 +1,5 @@
 import { parseSse } from './sse'
+import { isChatEvent } from './types'
 import {
   EngineHttpError,
   EngineOfflineError,
@@ -10,6 +11,7 @@ import type {
   ChainPort,
   ChainSummary,
   ChainView,
+  ChatEvent,
   LayoutModel,
   RunEvent,
   RunExistence,
@@ -126,6 +128,29 @@ export class EngineClient {
     }
     for await (const payload of parseSse(stream.body)) {
       if (isRunEvent(payload)) yield payload
+    }
+  }
+
+  /**
+   * Continues one node's own transcript with `message`, yielding the chat
+   * stream's own events. An engine `error` event is yielded, not thrown; a
+   * refusal — the run is running, the node is unknown, it is not a proposer,
+   * its agent file is gone — throws `EngineHttpError` for the caller to name.
+   */
+  async *chatWithNode(chat: { runId: string; nodeId: string; message: string }, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
+    const url = this.resolve(`/api/runs/${encodeURIComponent(chat.runId)}/nodes/${encodeURIComponent(chat.nodeId)}/chat`)
+    const stream = await this.transport.open({
+      url,
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ message: chat.message }),
+      signal,
+    })
+    if (!ok(stream.status)) {
+      throw new EngineHttpError(stream.status, url, await collect(stream.body))
+    }
+    for await (const payload of parseSse(stream.body)) {
+      if (isChatEvent(payload)) yield payload
     }
   }
 

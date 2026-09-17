@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { appendChatReply, chatSeed, markRevised, pendingMessage, pendingRevise } from '@/run/chat'
+import { appendChatReply, chatEntries, chatSeed, markRevised, pendingMessage, pendingRevise } from '@/run/chat'
 import type { AgentOutput, RunGraph, RunMeta } from '@/engine/types'
 
 /**
@@ -70,19 +70,48 @@ describe('pendingRevise', () => {
 describe('appendChatReply', () => {
   it('inserts the reply as a blockquote right under the message', () => {
     const content = HOLD + '@gameplay-director defend it.\n'
-    const appended = appendChatReply(content, { name: 'gameplay-director', message: 'defend it.' }, 'Halo is a burden.')
+    const appended = appendChatReply(content, { name: 'gameplay-director', message: 'defend it.' }, { text: 'Halo is a burden.' })
     expect(appended).toBe(HOLD + '@gameplay-director defend it.\n> Halo is a burden.\n')
   })
 
   it('quotes every line of a multi-line reply', () => {
     const content = HOLD + '@gameplay-director defend it.\n'
-    const appended = appendChatReply(content, { name: 'gameplay-director', message: 'defend it.' }, 'Line one.\nLine two.')
+    const appended = appendChatReply(content, { name: 'gameplay-director', message: 'defend it.' }, { text: 'Line one.\nLine two.' })
     expect(appended).toContain('> Line one.\n> Line two.\n')
   })
 
   it('leaves the note as it was when the turn is no longer there to reply to', () => {
     const content = HOLD + '@gameplay-director defend it.\n'
-    expect(appendChatReply(content, { name: 'gameplay-director', message: 'a different message' }, 'reply')).toBe(content)
+    expect(appendChatReply(content, { name: 'gameplay-director', message: 'a different message' }, { text: 'reply' })).toBe(content)
+  })
+})
+
+describe('the turn a reply came back as', () => {
+  const replied = (turn?: number): string =>
+    appendChatReply(
+      HOLD + '@gameplay-director defend it.\n',
+      { name: 'gameplay-director', message: 'defend it.' },
+      { text: 'Halo is a burden.', ...(turn ? { turn } : {}) },
+    )
+
+  it('is written above the reply, inside the same quote', () => {
+    expect(replied(3)).toContain('@gameplay-director defend it.\n> [turn 3]\n> \n> Halo is a burden.\n')
+  })
+
+  it('reads back as the turn, and stays out of the reply itself', () => {
+    expect(chatEntries(replied(3))[0].entry).toMatchObject({ reply: 'Halo is a burden.', turn: 3 })
+  })
+
+  it('is absent on an approximate reply, which the engine gave no turn', () => {
+    expect(chatEntries(replied())[0].entry.turn).toBeUndefined()
+  })
+
+  it('leaves a bare `revise` under it still referring to that reply', () => {
+    expect(pendingRevise(replied(3) + 'revise\n')).toEqual({ name: 'gameplay-director', message: 'defend it.', reply: 'Halo is a burden.' })
+  })
+
+  it('keeps a reply that is nothing but a turn line out of the way of the next one', () => {
+    expect(chatEntries(HOLD + '@gameplay-director defend it.\n> [turn 2]\n')[0].entry).toMatchObject({ reply: '', turn: 2 })
   })
 })
 

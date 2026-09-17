@@ -3,10 +3,13 @@ import { joinSeed } from './seed'
 import type { AgentOutput, RunMeta } from '../engine/types'
 
 /**
- * The approximate chat with a proposer: a `@name message` line in the
- * Conversation section, and a bare `revise` that turns the reply above it into
- * that proposer's revision. Not the real thing — this is a fresh agent call
- * with the prior output pasted in, not the agent's own transcript continued.
+ * Chat with a proposer as the hold note writes it: a `@name message` line in
+ * the Conversation section, the reply quoted under it, and a bare `revise` that
+ * turns that reply into the proposer's revision. A reply the engine's chat
+ * endpoint gave carries its turn number on a `[turn N]` line of its own at the
+ * top of the quote — that is where the note remembers it, so nothing has to be
+ * matched back against the transcript later (#49). `./proposerChat.ts` is the
+ * call; `chatSeed` below is the approximate chat it falls back to.
  */
 
 /** One `@name message` line, and its reply once there is one. */
@@ -19,9 +22,18 @@ export interface ChatTurn {
 /** A chat turn as the Conversation reads back, with the run its reply was revised as. */
 export interface ChatEntry extends ChatTurn {
   revisedAs?: string
+  /** Which turn of the node's transcript the reply is, 1-based; absent on an approximate reply. */
+  turn?: number
+}
+
+/** A proposer's answer, and which turn of its transcript that answer was. */
+export interface ChatReply {
+  text: string
+  turn?: number
 }
 
 const MESSAGE_LINE = /^@(\S+)\s+(.+)$/
+const TURN_LINE = /^\[turn (\d+)\]$/
 const REVISE_LINE = /^revise$/i
 const REVISED = 'revise → reran as run '
 const REVISED_LINE = new RegExp(`^${REVISED}(\\S+)$`)
@@ -41,9 +53,23 @@ function locatedTurns(content: string): LocatedTurn[] {
   return locatedTriggers(content, MESSAGE_LINE, match => ({ name: match[1], message: match[2].trim() })).map(
     ({ fields, insertAt, end, reply }) => {
       const revisedAs = REVISED_LINE.exec(content.slice(end, lineEnd(content, end)).trim())?.[1]
-      return { entry: { ...fields, ...(reply !== undefined ? { reply } : {}), ...(revisedAs ? { revisedAs } : {}) }, insertAt, end }
+      const answered = reply === undefined ? {} : readReply(reply)
+      return { entry: { ...fields, ...answered, ...(revisedAs ? { revisedAs } : {}) }, insertAt, end }
     },
   )
+}
+
+/** A quoted reply split from the `[turn N]` line the note wrote above it, when it has one. */
+function readReply(quote: string): { reply: string; turn?: number } {
+  const newline = quote.indexOf('\n')
+  const turn = TURN_LINE.exec((newline === -1 ? quote : quote.slice(0, newline)).trim())?.[1]
+  if (turn === undefined) return { reply: quote }
+  return { reply: quote.slice(newline === -1 ? quote.length : newline + 1).replace(/^\s*\n/, ''), turn: Number(turn) }
+}
+
+/** A reply as it is written under its message: its turn number first, when the engine gave it one. */
+function replyBlock(reply: ChatReply): string {
+  return quoted(reply.turn === undefined ? reply.text : `[turn ${reply.turn}]\n\n${reply.text}`)
 }
 
 /** Every chat turn under Conversation, in order, each with where it sits in the note. */
@@ -75,15 +101,15 @@ export function pendingRevise(content: string): ChatTurn | undefined {
 }
 
 /** The reply inserted as a blockquote right under the message it answers; unchanged if that turn is gone. */
-export function appendChatReply(content: string, turn: { name: string; message: string }, reply: string): string {
+export function appendChatReply(content: string, turn: { name: string; message: string }, reply: ChatReply): string {
   const found = locatedTurns(content).find(t => sameTurn(t.entry, turn))
   if (!found) return content
-  return content.slice(0, found.insertAt) + quoted(reply) + '\n' + content.slice(found.insertAt)
+  return content.slice(0, found.insertAt) + replyBlock(reply) + '\n' + content.slice(found.insertAt)
 }
 
 /** A message and its reply written together, as the Conversation's last entry. */
-export function appendChatTurn(content: string, turn: { name: string; message: string }, reply: string): string {
-  return appendToConversation(content, `@${turn.name} ${turn.message}\n${quoted(reply)}`)
+export function appendChatTurn(content: string, turn: { name: string; message: string }, reply: ChatReply): string {
+  return appendToConversation(content, `@${turn.name} ${turn.message}\n${replyBlock(reply)}`)
 }
 
 /** The trailing bare `revise` replaced with which run it produced, so it is not acted on twice. */

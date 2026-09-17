@@ -7,6 +7,8 @@ export interface RecordedRequest {
   body: string
 }
 
+const CHAT_ROUTE = /^\/api\/runs\/[^/]+\/nodes\/[^/]+\/chat$/
+
 /**
  * A stand-in for maestro-playground over a real socket, so the client is
  * exercised through its real transport. The routes are the engine's own.
@@ -17,6 +19,8 @@ export class FakeEngine {
 
   /** Frames `POST /api/run` writes, in order. `null` closes the stream. */
   runFrames: (string | null)[] = []
+  /** Frames the node chat route writes, in order. `null` closes the stream. */
+  chatFrames: (string | null)[] = []
   chains: unknown[] = []
   /** What the engine says it can do; a version too old to say reports nothing. */
   capabilities: unknown = { runLayoutFrames: true }
@@ -57,7 +61,9 @@ export class FakeEngine {
         res.writeHead(this.failWith.status)
         res.end(this.failWith.body)
       } else if (req.method === 'POST' && path === '/api/run') {
-        this.streamRun(res)
+        this.stream(res, this.runFrames)
+      } else if (req.method === 'POST' && CHAT_ROUTE.test(path)) {
+        this.stream(res, this.chatFrames)
       } else if (path === '/api/workspace') {
         this.json(res, { chains: this.chains, agents: [], capabilities: this.capabilities })
       } else if (path.endsWith('/layout')) {
@@ -78,9 +84,9 @@ export class FakeEngine {
     res.end(JSON.stringify(value))
   }
 
-  private streamRun(res: http.ServerResponse): void {
+  private stream(res: http.ServerResponse, frames: (string | null)[]): void {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-    for (const frame of this.runFrames) {
+    for (const frame of frames) {
       if (frame === null) {
         res.end()
         return

@@ -70,6 +70,13 @@ export function parameterToAsk(chain: ChainSummary): ChainParameter | undefined 
   return parameter && parameter.options.length > 0 ? parameter : undefined
 }
 
+/** One turn of a node's own transcript, as the chat endpoint keeps it. */
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  thought?: string
+}
+
 export interface AgentOutput {
   nodeId?: string
   agentName: string
@@ -81,6 +88,8 @@ export interface AgentOutput {
   round?: number
   /** The node's reasoning, stored but never replayed to a model — read-only in a hold note. */
   thought?: string
+  /** The node's chat transcript; its assistant entries are the turns promote counts. */
+  conversation?: ChatMessage[]
   [key: string]: unknown
 }
 
@@ -175,6 +184,8 @@ export interface Capabilities {
   runStartEvent?: boolean
   /** A failed run's last frame moves every pending panel to `errored` with its message. */
   runFailureFrame?: boolean
+  /** `POST /api/runs/:id/nodes/:nodeId/chat` continues a node's own transcript (#54). */
+  proposerChat?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
@@ -289,4 +300,21 @@ export function isEvent<T extends KnownRunEvent['type']>(
   type: T,
 ): event is Extract<KnownRunEvent, { type: T }> {
   return event.type === type
+}
+
+/**
+ * The chat endpoint's own stream. It shares `token` and `error` with the run
+ * stream by name only: nothing here names a run, a node or a step, so the run
+ * stream's parser must not be pointed at it.
+ */
+export type ChatEvent =
+  | { type: 'token'; token: string; tokenType?: string }
+  | { type: 'chat_done'; message: ChatMessage }
+  | { type: 'error'; error: string }
+
+const CHAT_EVENTS = ['token', 'chat_done', 'error']
+
+/** The engine sends only these three down a chat stream; anything else on the wire is not ours. */
+export function isChatEvent(payload: unknown): payload is ChatEvent {
+  return typeof payload === 'object' && payload !== null && CHAT_EVENTS.includes((payload as ChatEvent).type)
 }

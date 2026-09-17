@@ -3,7 +3,8 @@ import { ChatWithProposer, NOTHING_TO_SEND, NOT_A_HOLD_NOTE, NOT_A_PROPOSER } fr
 import { holdNoteContent } from '@/run/holdNote'
 import { RerunWatch } from '@/run/rerunWatch'
 import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import { EngineHttpError } from '@/engine/transport'
+import type { AgentOutput, Capabilities, ChatEvent, ChatMessage, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
 import { TFile as StubFile } from './obsidian'
 
@@ -33,7 +34,13 @@ const panels = [
   panel('creative-director', 'Stance-switching combat.', 'join'),
 ]
 
-const theRun: RunMeta = {
+/** A node's output, carrying whatever transcript the engine has for it. */
+const chatted = (one: AgentOutput): AgentOutput => {
+  const conversation = one.nodeId ? conversations[one.nodeId] : undefined
+  return conversation ? { ...one, conversation } : one
+}
+
+const theRun = (): RunMeta => ({
   runId: RUN,
   chainName: 'creative-director',
   seedPrompt: 'anime girl with a halo',
@@ -41,7 +48,7 @@ const theRun: RunMeta = {
   status: 'complete',
   agentOutputs: [
     output('character-director', 'Shrine-maiden silhouette.'),
-    output('gameplay-director', 'Stances mapped to segments.'),
+    chatted(output('gameplay-director', 'Stances mapped to segments.')),
     output('join', 'room'),
     output('creative-director', 'Stance-switching combat.'),
   ],
@@ -52,7 +59,7 @@ const theRun: RunMeta = {
       { fromNode: 'join', toNode: 'creative-director' },
     ],
   },
-}
+})
 
 const written = () => holdNoteContent({ runId: RUN, chainName: 'creative-director', panels, thoughts: {} })
 
@@ -62,6 +69,16 @@ let notices: string[]
 let runFrames: RunEvent[]
 let online: boolean
 let requests: RunRequest[]
+let capabilities: Capabilities
+/** What the chat endpoint streams; `undefined` is an engine with no such route. */
+let chatFrames: ChatEvent[] | undefined
+/** What the chat endpoint refuses with, in place of streaming anything. */
+let chatRefusal: EngineHttpError | undefined
+let chats: { runId: string; nodeId: string; message: string }[]
+/** The transcript the engine already holds for a node, by node id. */
+let conversations: Record<string, ChatMessage[]>
+/** Whether the engine records the turn it just gave, the way a real one does. */
+let recordsTurns: boolean
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -92,11 +109,22 @@ function makeCommand(): ChatWithProposer {
   } as unknown as App
 
   const engine = {
-    getRun: (runId: string) => Promise.resolve(runId === RUN ? theRun : { ...theRun, runId: NEW }),
+    getRun: (runId: string) => Promise.resolve(runId === RUN ? theRun() : { ...theRun(), runId: NEW }),
     getLayout: (runId: string): Promise<LayoutModel> => Promise.resolve({ kind: 'columns', panels: runId === RUN ? panels : panels }),
     launchRun: async function* (request: RunRequest) {
       requests.push(request)
       for (const event of runFrames) yield event
+    },
+    loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    chatWithNode: async function* (chat: { runId: string; nodeId: string; message: string }) {
+      chats.push(chat)
+      if (chatRefusal) throw chatRefusal
+      if (chatFrames === undefined) throw new EngineHttpError(404, 'http://engine/chat', 'Not found')
+      yield* chatFrames
+      // The engine appends the turn to the node's transcript, where a re-read finds it.
+      for (const event of recordsTurns ? chatFrames : []) {
+        if (event.type === 'chat_done') conversations[chat.nodeId] = [...(conversations[chat.nodeId] ?? []), event.message]
+      }
     },
   } as unknown as EngineClient
 
@@ -116,6 +144,12 @@ beforeEach(() => {
   runFrames = []
   online = true
   requests = []
+  capabilities = { proposerChat: true }
+  chatFrames = []
+  chatRefusal = undefined
+  chats = []
+  conversations = {}
+  recordsTurns = true
 })
 
 describe('start, addressing a proposer', () => {
@@ -136,7 +170,101 @@ describe('start, addressing a proposer', () => {
     notes[HOLD_PATH] = written() + '@creative-director defend this.\n'
     await makeCommand().start()
     expect(notices).toEqual([NOT_A_PROPOSER('creative-director')])
+    expect(chats).toEqual([])
     expect(requests).toEqual([])
+  })
+
+  it('sends the message to the proposer’s own node, continuing its transcript', async () => {
+    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Stances read as intent, not a burden.' } }]
+    await makeCommand().start()
+    expect(chats).toEqual([{ runId: RUN, nodeId: 'gameplay-director', message: 'defend the sleeves' }])
+    // Nothing is launched: the node's own transcript is what continues.
+    expect(requests).toEqual([])
+  })
+
+  it('appends the reply under the message, with the turn the engine counted it as', async () => {
+    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Stances defend the sleeves fine.' } }]
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toContain('@gameplay-director defend the sleeves\n> [turn 1]\n> \n> Stances defend the sleeves fine.\n')
+  })
+
+  it('counts the reply onto the turns the node’s transcript already holds', async () => {
+    conversations = {
+      'gameplay-director': [
+        { role: 'user', content: 'defend the sleeves' },
+        { role: 'assistant', content: 'They read as intent.' },
+        { role: 'user', content: 'again' },
+        { role: 'assistant', content: 'Still intent.' },
+      ],
+    }
+    notes[HOLD_PATH] = written() + '@gameplay-director once more\n'
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'And again.' } }]
+    await makeCommand().start()
+    // Two replies already, so this is the third — the human's own lines are not turns.
+    expect(notes[HOLD_PATH]).toContain('> [turn 3]\n')
+  })
+
+  it('takes the turn from the engine’s own transcript, not from a count made before the call', async () => {
+    // A turn landed on the node between the run being read and the reply coming back.
+    conversations = { 'gameplay-director': [{ role: 'assistant', content: 'From elsewhere.' }] }
+    notes[HOLD_PATH] = written() + '@gameplay-director once more\n'
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'And again.' } }]
+    const command = makeCommand()
+    conversations['gameplay-director'] = [
+      { role: 'assistant', content: 'From elsewhere.' },
+      { role: 'assistant', content: 'And another.' },
+    ]
+    await command.start()
+    expect(notes[HOLD_PATH]).toContain('> [turn 3]\n')
+  })
+
+  it('counts on from what it read when the engine records no transcript', async () => {
+    recordsTurns = false
+    conversations = { 'gameplay-director': [{ role: 'assistant', content: 'Once.' }] }
+    notes[HOLD_PATH] = written() + '@gameplay-director once more\n'
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'And again.' } }]
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toContain('> [turn 2]\n')
+  })
+
+  it('says nothing was sent when the engine is offline', async () => {
+    online = false
+    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
+    const before = notes[HOLD_PATH]
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toBe(before)
+  })
+
+  it('leaves the note as it was and says so when the model failed', async () => {
+    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
+    const before = notes[HOLD_PATH]
+    chatFrames = [{ type: 'error', error: 'the model refused' }]
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([`Chat with gameplay-director failed: the model refused`])
+  })
+
+  it.each([
+    [409, `Run ${RUN} is still running — chat with gameplay-director once it stops`],
+    [404, `Run ${RUN} no longer has a node for gameplay-director`],
+    [400, 'gameplay-director cannot be chatted with: node is not a proposer'],
+    [422, "gameplay-director's agent file is gone from the workspace"],
+  ])('writes nothing and says why when the engine refuses with %i', async (status, said) => {
+    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
+    const before = notes[HOLD_PATH]
+    chatRefusal = new EngineHttpError(status, 'http://engine/chat', '{"error":"node is not a proposer"}')
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([said])
+  })
+})
+
+describe('an engine with no chat endpoint, which falls back to approximate chat', () => {
+  beforeEach(() => {
+    capabilities = {}
+    chatFrames = undefined
   })
 
   it('runs the proposer’s agent alone, seeded with its prior output and the message', async () => {
@@ -157,7 +285,7 @@ describe('start, addressing a proposer', () => {
     expect(requests[0]).toMatchObject({ agentName: 'gameplay-director', seedPrompt: 'Stances mapped to segments.\n\ndefend the sleeves' })
   })
 
-  it('appends the reply under the message, referencing the prior proposal', async () => {
+  it('writes the reply with no turn, since nothing was continued', async () => {
     notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
     runFrames = [
       { type: 'run_start', runId: NEW },
@@ -168,21 +296,13 @@ describe('start, addressing a proposer', () => {
     expect(notes[HOLD_PATH]).toContain('@gameplay-director defend the sleeves\n> Stances defend the sleeves fine.\n')
   })
 
-  it('says nothing was sent when the engine is offline', async () => {
-    online = false
+  it('is not reached by an engine that has the endpoint, however old the run is', async () => {
+    capabilities = { proposerChat: true }
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Still here.' } }]
     notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
-    const before = notes[HOLD_PATH]
     await makeCommand().start()
-    expect(notes[HOLD_PATH]).toBe(before)
-  })
-
-  it('leaves the note as it was and says so when the chat run failed', async () => {
-    notes[HOLD_PATH] = written() + '@gameplay-director defend the sleeves\n'
-    const before = notes[HOLD_PATH]
-    runFrames = [{ type: 'run_start', runId: NEW }, { type: 'error', error: 'the model refused' }]
-    await makeCommand().start()
-    expect(notes[HOLD_PATH]).toBe(before)
-    expect(notices).toEqual([`Chat with gameplay-director failed: the model refused`])
+    expect(requests).toEqual([])
+    expect(notes[HOLD_PATH]).toContain('> [turn 1]\n')
   })
 })
 

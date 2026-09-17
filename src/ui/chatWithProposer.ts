@@ -1,16 +1,21 @@
 import { normalizePath, type App, type TFile } from 'obsidian'
 import { guardWrite, readIfPresent } from './vaultWrite'
-import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
+import { fetchRun, rerunAndRefresh, type FetchedRun } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
-import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatTurn } from '../run/chat'
+import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatReply, type ChatTurn } from '../run/chat'
 import { runAgentOnce } from '../run/headlessRun'
+import { chatReply, repliesSoFar } from '../run/proposerChat'
 import { holdHeading, proposerPanels, type HoldHeading } from '../run/holdNote'
 import { rerunRequest } from '../run/rerun'
 import type { OnRerunProgress } from '../run/rerunProgress'
 import type { EngineClient } from '../engine/client'
 import type { RerunWatch } from '../run/rerunWatch'
 
-/** The "Chat with proposer" command: the vault half of `src/run/chat.ts`. */
+/**
+ * The "Chat with proposer" command: the vault half of `src/run/chat.ts`. The
+ * call itself is `src/run/proposerChat.ts` — the engine continuing that node's
+ * own transcript, or, on an engine without that endpoint, an approximate chat.
+ */
 
 export const NOT_A_HOLD_NOTE = 'Open a hold note to chat with a proposer'
 export const NOTHING_TO_SEND = 'Nothing new in the Conversation section to send'
@@ -60,16 +65,56 @@ export class ChatWithProposer {
     if (wrote) notify(`${pending.name} replied`)
   }
 
-  /** A fresh, standalone call to the proposer's agent; `undefined`, once it has said why, when there is no reply. */
-  async reply(runId: string, name: string, message: string): Promise<string | undefined> {
+  /**
+   * One more turn of the proposer's own transcript, with the turn number the
+   * engine counted it as; `undefined`, once it has said why, when there is no
+   * reply. An engine without the chat endpoint falls back to `approximate`.
+   */
+  async reply(runId: string, name: string, message: string): Promise<ChatReply | undefined> {
     const { engine, notify } = this.deps
     const source = await this.deps.withEngine(() => fetchRun(engine, runId))
     if (!source) return undefined
 
     const panel = proposerPanels(source.layout.panels).find(candidate => candidate.name === name)
-    const seed = panel && chatSeed(source.run, panel.node, message)
-    const agentName = panel && latestOutput(source.run.agentOutputs, panel.node)?.agentName
-    if (!panel || seed === undefined || agentName === undefined) {
+    if (!panel) {
+      notify(NOT_A_PROPOSER(name))
+      return undefined
+    }
+
+    const outcome = await this.deps.withEngine(async () => {
+      const { capabilities } = await engine.loadWorkspace()
+      return chatReply(engine, capabilities, { runId, nodeId: panel.node, name, message })
+    })
+    if (!outcome) return undefined
+    if (outcome.kind === 'unsupported') return this.approximate(source, panel.node, name, message)
+    if (outcome.kind === 'refused') {
+      notify(outcome.said)
+      return undefined
+    }
+    return { text: outcome.text, turn: await this.turnOf(runId, panel.node, repliesSoFar(source.run.agentOutputs, panel.node)) }
+  }
+
+  /**
+   * Which turn of the node's transcript the reply just written is. The engine's
+   * own count, re-read once it has recorded the turn; only an engine that has
+   * not is counted on from `before`, the replies it held when the message went.
+   */
+  private async turnOf(runId: string, nodeId: string, before: number): Promise<number> {
+    const after = await this.deps.withEngine(() => this.deps.engine.getRun(runId))
+    const counted = after ? repliesSoFar(after.agentOutputs, nodeId) : 0
+    return counted > before ? counted : before + 1
+  }
+
+  /**
+   * Approximate chat, for an engine with no chat endpoint (#54): a fresh,
+   * standalone call to the proposer's agent, seeded with what fed it last time
+   * and what it answered. Nothing is continued, so the reply has no turn.
+   */
+  private async approximate(source: FetchedRun, nodeId: string, name: string, message: string): Promise<ChatReply | undefined> {
+    const { engine, notify } = this.deps
+    const seed = chatSeed(source.run, nodeId, message)
+    const agentName = latestOutput(source.run.agentOutputs, nodeId)?.agentName
+    if (seed === undefined || agentName === undefined) {
       notify(NOT_A_PROPOSER(name))
       return undefined
     }
@@ -84,7 +129,7 @@ export class ChatWithProposer {
       notify(`Chat with ${name} produced no reply`)
       return undefined
     }
-    return outcome.output.output
+    return { text: outcome.output.output }
   }
 
   /**

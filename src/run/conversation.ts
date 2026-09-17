@@ -5,7 +5,7 @@ import { sideQuestEntries, type SideQuestEntry } from './sideQuest'
 /** A hold note's Conversation read back as plain data: chats, questions to the room and side quests, in the order they were written. */
 
 export type ConversationEntry =
-  | { kind: 'chat'; name: string; message: string; reply?: string; revisedAs?: string }
+  | { kind: 'chat'; name: string; message: string; reply?: string; revisedAs?: string; turn?: number }
   | { kind: 'room'; question: string; answers: RoomAnswer[] }
   | ({ kind: 'quest' } & SideQuestEntry)
 

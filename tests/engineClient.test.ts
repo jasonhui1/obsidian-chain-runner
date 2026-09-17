@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { EngineClient } from '@/engine/client'
 import { createNodeTransport } from '@/engine/nodeTransport'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
-import type { RunEvent } from '@/engine/types'
+import type { ChatEvent, RunEvent } from '@/engine/types'
 import { FakeEngine, frame } from './fakeEngine'
 
 let engine: FakeEngine
@@ -19,6 +19,12 @@ afterEach(async () => {
 
 async function drain(source: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
   const events: RunEvent[] = []
+  for await (const event of source) events.push(event)
+  return events
+}
+
+async function drainChat(source: AsyncIterable<ChatEvent>): Promise<ChatEvent[]> {
+  const events: ChatEvent[] = []
   for await (const event of source) events.push(event)
   return events
 }
@@ -260,6 +266,56 @@ describe('launchRun', () => {
       })(),
     ).rejects.toThrow()
     expect(events).toHaveLength(1)
+  })
+})
+
+describe('chatWithNode', () => {
+  const chat = () => client.chatWithNode({ runId: '2026-09-15-Ab3dE1', nodeId: 'gameplay-director', message: 'defend the sleeves' })
+
+  it('posts the message to the node chat route', async () => {
+    engine.chatFrames = [frame({ type: 'chat_done', message: { role: 'assistant', content: 'fair' } })]
+    await drainChat(chat())
+    const sent = engine.requests.at(-1)!
+    expect(sent.method).toBe('POST')
+    expect(sent.path).toBe('/api/runs/2026-09-15-Ab3dE1/nodes/gameplay-director/chat')
+    expect(JSON.parse(sent.body)).toEqual({ message: 'defend the sleeves' })
+  })
+
+  it('yields the chat stream own events, not the run event set', async () => {
+    engine.chatFrames = [
+      frame({ type: 'token', token: 'weigh', tokenType: 'thought' }),
+      frame({ type: 'token', token: 'fair ' }),
+      frame({ type: 'token', token: 'point' }),
+      frame({ type: 'chat_done', message: { role: 'assistant', content: 'fair point', thought: 'weigh' } }),
+    ]
+    const events = await drainChat(chat())
+    expect(events.map(event => event.type)).toEqual(['token', 'token', 'token', 'chat_done'])
+    expect(events[0]).toEqual({ type: 'token', token: 'weigh', tokenType: 'thought' })
+    expect(events[3]).toEqual({ type: 'chat_done', message: { role: 'assistant', content: 'fair point', thought: 'weigh' } })
+  })
+
+  it('yields the engine error event rather than throwing', async () => {
+    engine.chatFrames = [frame({ type: 'error', error: 'the model refused' })]
+    expect(await drainChat(chat())).toEqual([{ type: 'error', error: 'the model refused' }])
+  })
+
+  it('drops a frame that is not one of the three events this stream sends', async () => {
+    engine.chatFrames = [frame({ type: 'agent_start', agentName: 'a', nodeId: 'a', step: 0 }), frame({ type: 'chat_done', message: { role: 'assistant', content: 'x' } })]
+    expect((await drainChat(chat())).map(event => event.type)).toEqual(['chat_done'])
+  })
+
+  it('throws EngineHttpError carrying the refusal, so the caller can say which one it was', async () => {
+    engine.failWith = { status: 409, body: 'run is running' }
+    const error = await drainChat(chat()).catch((thrown: unknown) => thrown)
+    expect(error).toBeInstanceOf(EngineHttpError)
+    expect((error as EngineHttpError).status).toBe(409)
+  })
+
+  it('throws EngineOfflineError when the engine is not running', async () => {
+    const client = await offlineClient()
+    await expect(
+      drainChat(client.chatWithNode({ runId: 'r1', nodeId: 'n1', message: 'hi' })),
+    ).rejects.toBeInstanceOf(EngineOfflineError)
   })
 })
 

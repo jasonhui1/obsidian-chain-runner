@@ -5,12 +5,12 @@ import { HoldNotes } from '@/ui/holdNotes'
 import { AskTheRoom, NOBODY_ANSWERED } from '@/ui/askTheRoom'
 import { ChatWithProposer } from '@/ui/chatWithProposer'
 import { NO_EDITED_PROPOSAL, RerunDownstream } from '@/ui/rerunDownstream'
-import { EngineOfflineError } from '@/engine/transport'
+import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
 import { RunPanels } from '@/ui/runPanels'
 import { Resume } from '@/ui/resume'
 import { SideQuest } from '@/ui/sideQuest'
 import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import type { AgentOutput, Capabilities, ChatEvent, ChatMessage, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import type { App, TAbstractFile, TFile } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
@@ -132,6 +132,12 @@ const layoutFrame = (...waiting: string[]): RunEvent => ({
   model: { kind: 'columns', panels: panels.map(one => (waiting.includes(one.node) ? { ...one, state: 'pending' as const } : one)) },
 })
 
+/** A node's output, carrying whatever transcript the engine has for it. */
+const chatted = (one: AgentOutput): AgentOutput => {
+  const conversation = one.nodeId ? conversations[one.nodeId] : undefined
+  return conversation ? { ...one, conversation } : one
+}
+
 const theRun = (runId: string): RunMeta => ({
   runId,
   chainName: 'creative-director',
@@ -139,7 +145,7 @@ const theRun = (runId: string): RunMeta => ({
   startedAt: '',
   status: 'complete',
   agentOutputs: [
-    output('gameplay', '## Core verb\nRotate abilities mid-fight.'),
+    chatted(output('gameplay', '## Core verb\nRotate abilities mid-fight.')),
     output('world', '## The rule\nThe world is a test.'),
     output('creative-director', 'A combat trial in a void.'),
   ],
@@ -191,6 +197,12 @@ let layoutsFetched: number
 /** The runs whose layouts were asked for, in order. */
 let layoutsOf: string[]
 let folders: string[]
+let capabilities: Capabilities
+/** What the chat endpoint streams; `undefined` is an engine that has no such route. */
+let chatFrames: ChatEvent[] | undefined
+let chats: { nodeId: string; message: string }[]
+/** The transcript the engine already holds for a node, by node id. */
+let conversations: Record<string, ChatMessage[]>
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -253,6 +265,12 @@ function makeActions(): HoldActions {
       else if (request.agentName) yield* framesByAgent[request.agentName] ?? []
       else yield* chainFrames
     },
+    loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    chatWithNode: async function* (chat: { nodeId: string; message: string }) {
+      chats.push(chat)
+      if (chatFrames === undefined) throw new EngineHttpError(404, `${ENGINE_URL}/chat`, 'Not found')
+      yield* chatFrames
+    },
   } as unknown as EngineClient
   const notify = (message: string): void => void notices.push(message)
   const withEngine = async <T>(action: () => Promise<T>): Promise<T | undefined> => (online ? action() : undefined)
@@ -290,6 +308,10 @@ beforeEach(() => {
   layoutsFetched = 0
   layoutsOf = []
   folders = []
+  capabilities = {}
+  chatFrames = undefined
+  chats = []
+  conversations = {}
 })
 
 describe('read', () => {
@@ -599,6 +621,31 @@ describe('read, the conversation', () => {
 })
 
 describe('chat', () => {
+  it('continues the proposer’s own transcript, and keeps the turn it came back as', async () => {
+    capabilities = { proposerChat: true }
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'It keeps fights fresh.' } }]
+    expect(await makeActions().chat(RUN, 'gameplay', 'why rotate?')).toBe(true)
+    expect(chats).toEqual([{ runId: RUN, nodeId: 'gameplay', message: 'why rotate?' }])
+    expect(requests).toEqual([])
+    expect(notes[PATH]).toContain('@gameplay why rotate?\n> [turn 1]\n> \n> It keeps fights fresh.\n')
+  })
+
+  it('counts a reply onto the turns the node transcript already holds', async () => {
+    capabilities = { proposerChat: true }
+    chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Still fresh.' } }]
+    conversations = { gameplay: [{ role: 'user', content: 'why?' }, { role: 'assistant', content: 'because' }] }
+    await makeActions().chat(RUN, 'gameplay', 'why rotate?')
+    expect(notes[PATH]).toContain('> [turn 2]\n')
+  })
+
+  it('says why the engine refused, and writes nothing', async () => {
+    capabilities = { proposerChat: true }
+    chatFrames = [{ type: 'error', error: 'the model refused' }]
+    expect(await makeActions().chat(RUN, 'gameplay', 'why rotate?')).toBe(false)
+    expect(notes[PATH]).toBe(HOLD)
+    expect(notices).toEqual(['Chat with gameplay failed: the model refused'])
+  })
+
   it('asks the proposer’s agent alone, seeded with its proposal and the message', async () => {
     framesByAgent = { gameplay: answer('gameplay', 'It keeps fights fresh.') }
     await makeActions().chat(RUN, 'gameplay', 'why rotate?')
