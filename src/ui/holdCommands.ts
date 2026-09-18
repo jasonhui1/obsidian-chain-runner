@@ -1,4 +1,4 @@
-import { canonNote, type Hold, type Holds, type Resumed, type TriggerKind } from './holds'
+import { canonNote, isLanding, type Hold, type Holds, type Resumed, type TriggerKind } from './holds'
 import type { RunResult } from '../run/session'
 
 /** The palette commands on a hold: each finds its hold and hands it to the hold module, which does the rest. */
@@ -26,7 +26,7 @@ export async function resumeFront(holds: Holds, notify: Notify): Promise<void> {
 }
 
 /** "Rerun downstream" on the note in front; the hold module says how it landed. */
-export async function rerunFront(holds: Holds, notify: Notify): Promise<void> {
+export async function rerunDownstreamFront(holds: Holds, notify: Notify): Promise<void> {
   const hold = await holds.front()
   if (hold) await holds.rerun(hold.runId)
   else notify(NOT_A_HOLD_NOTE)
@@ -37,7 +37,7 @@ export async function sendFront(holds: Holds, notify: Notify, kind: TriggerKind)
   const hold = await holds.front()
   if (!hold) return notify(NOT_A_HOLD_NOTE)
   const answered = await holds.send(hold.runId, kind)
-  const said = answered && 'conversation' in answered ? answeredNotice(answered, kind) : undefined
+  const said = answered && !isLanding(answered) ? answeredNotice(answered, kind) : undefined
   if (said) notify(said)
 }
 

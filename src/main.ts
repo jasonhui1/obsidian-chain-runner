@@ -21,7 +21,7 @@ import {
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
-import { directRun, rerunFront, resumeFront, sendFront } from './ui/holdCommands'
+import { directRun, rerunDownstreamFront, resumeFront, sendFront } from './ui/holdCommands'
 import { Holds } from './ui/holds'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
@@ -94,13 +94,14 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(sourceRun.stop)
     // The one owner of every hold note: the panel, the palette and the buttons all go through it.
     const notify = (message: string): void => void new Notice(message)
+    const runUrl = (runId: string): string | undefined => runViewUrl(this.settings.engineUrl, runId)
     const holds = new Holds({
       store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify,
       reruns,
-      engineUrl: () => this.settings.engineUrl,
+      runUrl,
     })
     // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
     this.registerMarkdownPostProcessor(createDirectionButtons({ app: this.app, holds }))
@@ -221,24 +222,22 @@ export default class ChainRunnerPlugin extends Plugin {
             chains => chains.map(chain => chain.name),
             () => [],
           ),
-          runUrl: runId => runViewUrl(this.settings.engineUrl, runId),
+          runUrl,
         }),
     )
+    // From the drawing, a hold opens in the directing panel, brought up to date or written first.
+    const showOnPanel = async (runId: string, proposal?: string): Promise<void> => {
+      const hold = (await holds.refresh(runId)) ?? (await holds.write(runId))
+      ;(await this.openDirectingPanel())?.show(runId, hold, proposal)
+    }
     const directFromDrawing = new DirectFromDrawing({
       surface: {
         unavailable: () => surface.unavailable(),
         selectedRun: () => surface.selectedRun(),
         cardProposal: (element, view) => surface.cardProposal(element, view),
       },
-      // From the drawing, a hold opens in the directing panel, brought up to date or written first.
-      direct: async runId => {
-        const hold = (await holds.refresh(runId)) ?? (await holds.write(runId))
-        if (hold) await (await this.openDirectingPanel())?.show(hold.runId)
-      },
-      showProposal: async (runId, proposal) => {
-        await holds.refresh(runId)
-        await (await this.openDirectingPanel())?.show(runId, proposal)
-      },
+      direct: runId => showOnPanel(runId),
+      showProposal: (runId, proposal) => showOnPanel(runId, proposal),
       notify: message => new Notice(message),
       clickSpot: settled => clicks.onSettled(settled),
     })
@@ -345,7 +344,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.addCommand({
       id: 'rerun-downstream',
       name: 'Rerun downstream',
-      callback: () => void rerunFront(holds, notify),
+      callback: () => void rerunDownstreamFront(holds, notify),
     })
 
     this.addCommand({

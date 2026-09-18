@@ -103,7 +103,8 @@ function board(): DirectingBoard {
       progressTo = onProgress
       return answered('rerun').then(() => {})
     },
-    resume: runId => {
+    resume: (runId, onProgress) => {
+      progressTo = onProgress
       calls.push(`resume ${runId}`)
       return new Promise(resolve => resumesWaiting.push(resolve))
     },
@@ -1052,6 +1053,13 @@ describe('resume', () => {
     button('▶ Resume · 1 of 2 canon ticked').click()
     await land(resumed())
     expect(selectedTab()).toBe('gameplay')
+  })
+
+  it('says what the run is doing while it goes', () => {
+    board().open(showing())
+    button('▶ Resume · 1 of 2 canon ticked').click()
+    progressTo({ verdict: true, proposals: [], cards: ['creative-director'], step: { name: 'creative-director', writesVerdict: true } })
+    expect(footer()).toContain('⟳ Writing a new verdict…')
   })
 
   it('says a run failed, and that its canon was held back', async () => {

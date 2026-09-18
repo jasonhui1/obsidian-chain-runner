@@ -1,6 +1,5 @@
 import { answer, type Answer, type OnEvent } from './answer'
 import { CANON_CONTEXT_KEY } from './canon'
-import { directionLines, type HoldPick } from './holdNote'
 import type { EngineClient } from '../engine/client'
 import type { ResumeRequest } from '../engine/types'
 
@@ -11,10 +10,18 @@ import type { ResumeRequest } from '../engine/types'
 
 export const UNSUPPORTED_RESUME = 'This engine cannot resume a hold. Update maestro-playground.'
 
-/** What the note offers a resume: its Direction, the holds it shows open, and canon as it stands. */
+/** An open hold as a resume answers it: by its name, with the candidate ticked, if one is. */
+export interface ResumedHold {
+  nodeId: string
+  chosen?: string
+}
+
+/** What the note offers a resume: its Direction, what the human wrote in it, the holds it shows open, and canon as it stands. */
 export interface ResumeSource {
   direction: string
-  holds: readonly HoldPick[]
+  /** The Direction's own lines, verb template and canon checklist aside. */
+  said: readonly string[]
+  holds: readonly ResumedHold[]
   canon?: string
 }
 
@@ -23,7 +30,7 @@ export interface ResumeSource {
  * open one — which is the engine's own open hold. A note showing none leaves
  * the engine to pick, and to fork when what it picks is already answered (#53).
  */
-function answeredHold(holds: readonly HoldPick[]): HoldPick | undefined {
+function answeredHold(holds: readonly ResumedHold[]): ResumedHold | undefined {
   return holds.find(hold => hold.chosen) ?? holds[holds.length - 1]
 }
 
@@ -34,7 +41,7 @@ function answeredHold(holds: readonly HoldPick[]): HoldPick | undefined {
  */
 export function resumeRequest(source: ResumeSource): ResumeRequest {
   const hold = answeredHold(source.holds)
-  const own = hold && !hold.chosen ? directionLines(source.direction).join('\n') : ''
+  const own = hold && !hold.chosen ? source.said.join('\n') : ''
   return {
     direction: source.direction,
     ...(hold?.chosen ? { chosen: hold.chosen } : {}),

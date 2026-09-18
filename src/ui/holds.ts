@@ -3,7 +3,7 @@ import { folderOf, type NoteStore } from './noteStore'
 import { RunPanels } from './runPanels'
 import { ensureFolder, guardWrite } from './vaultWrite'
 import { launch, type Answer, type OnEvent } from '../run/answer'
-import { appendRoomAnswers, appendRoomTrigger, pendingRoomQuestion, type RoomAnswer } from '../run/askRoom'
+import { appendRoomAnswers, appendRoomTrigger, type RoomAnswer } from '../run/askRoom'
 import { appendCanon, CANON_PATH, tickedCanonLines } from '../run/canon'
 import {
   appendChatReply,
@@ -12,10 +12,8 @@ import {
   latestOutput,
   markRevised,
   markTurnRevised,
-  pendingMessage,
   pendingRevise,
   type ChatReply,
-  type ChatTurn,
   type RepliedTurn,
 } from '../run/chat'
 import type { ConversationEntry } from '../run/conversation'
@@ -24,6 +22,7 @@ import {
   appendResumeLink,
   directionBlock,
   directionLine,
+  directionLines,
   editsToCarry,
   holdHeading,
   holdNoteContent,
@@ -34,7 +33,7 @@ import {
   readHold,
   refreshHoldNote,
   removeDirectionLines,
-  reranFrom,
+  earlierRunsIn,
   rewriteProposal,
   tickCandidate,
   tickCanonLine,
@@ -47,12 +46,11 @@ import {
 import { proposerPanels } from '../run/panels'
 import { runPromote } from '../run/promote'
 import { chatReply, repliesSoFar } from '../run/proposerChat'
-import { runViewUrl } from '../run/provenance'
 import { rerunRequest } from '../run/rerun'
 import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
 import type { RerunReport, RerunWatch } from '../run/rerunWatch'
 import { resumeRequest, runResume } from '../run/resume'
-import { appendSideQuestResult, appendSideQuestTrigger, pendingSideQuest, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
+import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
 import type { EngineClient } from '../engine/client'
 import { engineFailureMessage } from '../engine/guard'
 import { waitingHolds, type LayoutModel, type LayoutPanel, type RunMeta } from '../engine/types'
@@ -65,16 +63,21 @@ import { waitingHolds, type LayoutModel, type LayoutPanel, type RunMeta } from '
 
 export { DIRECTION_VERBS, type DirectionVerb } from '../run/holdNote'
 
+/** Which trigger line a palette send answers. */
+export type TriggerKind = 'chat' | 'room' | 'quest'
+
 export const NO_HOLD_NOTE = (runId: string): string => `Run ${runId} has no hold note yet`
 export const NO_SUCH_PROPOSAL = (name: string): string => `This hold has no proposal named ${name}`
 export const NOTHING_TYPED = 'Nothing to write in the hold note'
 export const PROPOSAL_HEADING = 'A proposal cannot hold a “### ” heading: the hold note starts the next proposal there'
-export const NOTHING_TO_SEND = 'Nothing new in the Conversation section to send'
-export const NOTHING_TO_ASK = 'Nothing new in the Conversation section to ask the room'
-export const NOTHING_TO_QUEST = 'Nothing new in the Conversation section to send on a side quest'
+export const NOTHING_PENDING: Record<TriggerKind, string> = {
+  chat: 'Nothing new in the Conversation section to send',
+  room: 'Nothing new in the Conversation section to ask the room',
+  quest: 'Nothing new in the Conversation section to send on a side quest',
+}
 export const NOT_A_PROPOSER = (name: string): string => `@${name} is not a proposer — only proposers can be chatted with`
 export const NOT_A_QUEST_PROPOSER = (name: string): string => `@${name} is not a proposer — only a proposal can go on a side quest`
-export const NOT_THE_ENGINE_S = (name: string): string =>
+export const REPLY_NOT_ON_ENGINE = (name: string): string =>
   `This reply never reached the engine, so it cannot become ${name}'s proposal — ask ${name} again first`
 export const NOBODY_ANSWERED = 'Nobody in the room answered'
 export const NO_EDITED_PROPOSAL = 'Edit a proposal in this hold note first'
@@ -87,8 +90,8 @@ export type PendingTrigger =
   | { kind: 'room'; question: string }
   | { kind: 'quest'; name: string; chain: string }
 
-/** Which trigger line a palette send answers. */
-export type TriggerKind = 'chat' | 'room' | 'quest'
+/** A trigger line the engine answers, rather than a `revise` it lands. */
+type Trigger = Exclude<PendingTrigger, { kind: 'revise' }>
 
 /** The hold as it now reads, under the run it now lives under. */
 export type Hold = HoldReading & { pending?: PendingTrigger }
@@ -105,6 +108,11 @@ export type CanonOutcome = 'written' | 'held-back' | 'none'
 
 export type Resumed = Landing & { canon: CanonOutcome }
 
+/** Whether a send made a revise and landed, rather than answering under its line. */
+export function isLanding(sent: Hold | Landing): sent is Landing {
+  return 'forked' in sent
+}
+
 /** How the panel and the palette both name what became of the ticks; empty when there were none. */
 export function canonNote(canon: CanonOutcome): string {
   if (canon === 'none') return ''
@@ -118,7 +126,8 @@ export interface HoldsDeps {
   notify: (message: string) => void
   /** Hears every rerun, revise and resume, so the drawing follows one no panel started. */
   reruns: RerunWatch
-  engineUrl: () => string
+  /** Where a run is shown on the engine, for the links the note keeps (ADR-0004). */
+  runUrl: (runId: string) => string | undefined
 }
 
 /** A hold note found and read. */
@@ -126,8 +135,8 @@ interface Located {
   path: string
   content: string
   heading: HoldHeading
-  /** The run it is under, then the runs it was under before: every id the hold is found by. */
-  from: string[]
+  /** The run it is under, then its earlier runs: every id the hold is found by. */
+  runIds: string[]
 }
 
 interface FetchedRun {
@@ -144,7 +153,9 @@ interface LandingWording {
   failed: (runId: string | undefined, error: string | undefined) => string
 }
 
-const RERUN_WORDING: LandingWording = {
+const CANON_NOTE = normalizePath(CANON_PATH)
+
+const RERUN_DOWNSTREAM_WORDING: LandingWording = {
   landed: runId => `Reran downstream as run ${runId}`,
   heldBack: runId => `Reran as run ${runId}`,
   failed: (runId, error) => (runId ? `Rerun ${runId} failed: ${error}` : error ? `Rerun failed: ${error}` : 'Rerun produced no run'),
@@ -226,7 +237,7 @@ export class Holds {
   }
 
   async open(runId: string): Promise<void> {
-    const found = await this.needed(runId)
+    const found = await this.locateOrRefuse(runId)
     if (found) await this.deps.store.open(found.path)
   }
 
@@ -246,15 +257,18 @@ export class Holds {
     return this.edit(runId, content => tickCanonLine(content, id, ticked))
   }
 
-  /** A hold's candidate picked, by its heading — what a resume sends as `chosen` — or unpicked. */
-  pickCandidate(runId: string, nodeId: string, heading: string, ticked: boolean): Promise<Hold | undefined> {
-    return this.edit(runId, content => tickCandidate(content, nodeId, heading, ticked))
+  /**
+   * A candidate picked, by its heading — what a resume sends as `chosen` — or
+   * unpicked. `hold` is the hold's name as the note shows it: `## Waiting at <hold>`.
+   */
+  pickCandidate(runId: string, hold: string, heading: string, ticked: boolean): Promise<Hold | undefined> {
+    return this.edit(runId, content => tickCandidate(content, hold, heading, ticked))
   }
 
   async editProposal(runId: string, proposal: string, text: string): Promise<Hold | undefined> {
     if (text.trim() === '') return this.refuse(NOTHING_TYPED)
     if (/^### /m.test(text)) return this.refuse(PROPOSAL_HEADING)
-    const found = await this.needed(runId)
+    const found = await this.locateOrRefuse(runId)
     if (!found || !this.requireProposal(found, proposal)) return undefined
     return this.edit(runId, content => rewriteProposal(content, proposal, text))
   }
@@ -267,60 +281,45 @@ export class Holds {
   }
 
   /** A `@name message` line written, then answered under it (ADR-0014). */
-  async chat(runId: string, proposal: string, message: string): Promise<Hold | undefined> {
-    const turn = { name: proposal, message: oneLine(message) }
-    const found = await this.trigger(runId, turn.message, proposal, content => appendChatTrigger(content, turn))
-    return found && this.answerChat(found, turn)
+  chat(runId: string, proposal: string, message: string): Promise<Hold | undefined> {
+    return this.triggered(runId, { kind: 'chat', name: proposal, message: oneLine(message) })
   }
 
   /** An `ask the room:` line written, then every proposer's answer under it. */
-  async askRoom(runId: string, question: string): Promise<Hold | undefined> {
-    const asked = oneLine(question)
-    const found = await this.trigger(runId, asked, undefined, content => appendRoomTrigger(content, asked))
-    return found && this.answerRoom(found, asked)
+  askRoom(runId: string, question: string): Promise<Hold | undefined> {
+    return this.triggered(runId, { kind: 'room', question: oneLine(question) })
   }
 
   /** A `side quest:` line written, then the proposal, as the note has it, sent through `chain`. */
-  async sideQuest(runId: string, proposal: string, chain: string): Promise<Hold | undefined> {
-    const quest = { name: proposal, chainName: oneLine(chain) }
-    const found = await this.trigger(runId, quest.chainName, proposal, content => appendSideQuestTrigger(content, quest))
-    return found && this.answerQuest(found, quest)
+  sideQuest(runId: string, proposal: string, chain: string): Promise<Hold | undefined> {
+    return this.triggered(runId, { kind: 'quest', name: proposal, chain: oneLine(chain) })
   }
 
   /** Answers the pending trigger of `kind` a human typed; a chat ending in a bare `revise` is a revise. */
   async send(runId: string, kind: TriggerKind, onProgress?: OnRerunProgress): Promise<Hold | Landing | undefined> {
-    const found = await this.needed(runId)
+    const found = await this.locateOrRefuse(runId)
     if (!found) return undefined
-    const { content } = found
-    if (kind === 'chat') {
-      const revise = pendingRevise(content)
-      if (revise?.reply !== undefined) return this.revised(found, { ...revise, reply: revise.reply }, markRevised, onProgress)
-      const turn = pendingMessage(content)
-      return turn ? this.answerChat(found, turn) : this.refuse(NOTHING_TO_SEND)
-    }
-    if (kind === 'room') {
-      const question = pendingRoomQuestion(content)
-      return question ? this.answerRoom(found, question) : this.refuse(NOTHING_TO_ASK)
-    }
-    const quest = pendingSideQuest(content)
-    return quest ? this.answerQuest(found, quest) : this.refuse(NOTHING_TO_QUEST)
+    const revise = kind === 'chat' ? pendingRevise(found.content) : undefined
+    if (revise?.reply !== undefined) return this.revised(found, { ...revise, reply: revise.reply }, markRevised, onProgress)
+    const trigger = unanswered(readHold(found.content, [])?.conversation ?? [], kind)
+    return trigger ? this.answer(found, trigger) : this.refuse(NOTHING_PENDING[kind])
   }
 
   /** The edited proposals rerun downstream; the hold lands on the run that ran. */
   async rerun(runId: string, onProgress?: OnRerunProgress): Promise<Landing | undefined> {
-    const found = await this.needed(runId)
-    return found && this.exclusive(found, () => this.rerunEdits(found, onProgress))
+    const found = await this.locateOrRefuse(runId)
+    return found && this.exclusive(found, () => this.rerunDownstream(found, onProgress))
   }
 
   /** A reply made its proposal's revision through the engine's promote; the hold lands where the stream names. */
   async revise(runId: string, turn: RepliedTurn, onProgress?: OnRerunProgress): Promise<Landing | undefined> {
-    const found = await this.needed(runId)
+    const found = await this.locateOrRefuse(runId)
     return found && this.revised(found, turn, (content, newRunId) => markTurnRevised(content, turn, newRunId), onProgress)
   }
 
   /** The hold answered and the run carried on: ticks locked, the run linked back, a fork given its own hold. */
   async resume(runId: string, onProgress?: OnRerunProgress): Promise<Resumed | undefined> {
-    const found = await this.needed(runId)
+    const found = await this.locateOrRefuse(runId)
     return found && this.exclusive(found, () => this.resumed(found, onProgress))
   }
 
@@ -336,30 +335,30 @@ export class Holds {
     for (const hold of store.notesIn(folderOf(path))) {
       const content = (await store.read(hold)) ?? ''
       const heading = holdHeading(content)
-      if (heading && reranFrom(content).includes(runId)) return heading.runId
+      if (heading && earlierRunsIn(content).includes(runId)) return heading.runId
     }
     return runId
   }
 
   private async locate(runId: string): Promise<Located | undefined> {
-    return this.at(this.pathOf(await this.currentRun(runId)))
+    return this.noteAt(this.pathOf(await this.currentRun(runId)))
   }
 
-  private async at(path: string): Promise<Located | undefined> {
+  private async noteAt(path: string): Promise<Located | undefined> {
     const content = await this.deps.store.read(path)
     const heading = content === undefined ? undefined : holdHeading(content)
     if (content === undefined || !heading || directionBlock(content) === undefined) return undefined
-    return { path, content, heading, from: [heading.runId, ...reranFrom(content)] }
+    return { path, content, heading, runIds: [heading.runId, ...earlierRunsIn(content)] }
   }
 
   /** The hold as its note reads after a write. */
   private async reread(found: Located): Promise<Hold | undefined> {
-    const again = await this.at(found.path)
+    const again = await this.noteAt(found.path)
     return again && this.reading(again)
   }
 
   /** The hold, or a notice that there is none. */
-  private async needed(runId: string): Promise<Located | undefined> {
+  private async locateOrRefuse(runId: string): Promise<Located | undefined> {
     return (await this.locate(runId)) ?? this.refuse(NO_HOLD_NOTE(runId))
   }
 
@@ -384,16 +383,17 @@ export class Holds {
 
   /** One write to the note, answered by the hold as it then reads. */
   private async edit(runId: string, change: (content: string) => string): Promise<Hold | undefined> {
-    const found = await this.needed(runId)
-    return found && ((await this.process(found, change)) ? this.reread(found) : undefined)
+    const found = await this.locateOrRefuse(runId)
+    return found && ((await this.rewrite(found, change)) ? this.reread(found) : undefined)
   }
 
-  private async process(found: Located, change: (content: string) => string): Promise<boolean> {
-    const wrote = await guardWrite(this.deps.notify, 'the hold note', async () => {
-      await this.deps.store.process(found.path, change)
-      return true
-    })
-    return wrote === true
+  private async rewrite(found: Located, change: (content: string) => string): Promise<boolean> {
+    return (await this.guarded('the hold note', () => this.deps.store.process(found.path, change))) !== undefined
+  }
+
+  /** A vault write the reader's setup can refuse: `undefined`, once a notice has said why. */
+  private async guarded<T>(what: string, write: () => Promise<T>): Promise<Awaited<T> | { wrote: true } | undefined> {
+    return guardWrite(this.deps.notify, what, async () => (await write()) ?? { wrote: true as const })
   }
 
   private async writeFetched({ run, layout }: FetchedRun, chainName?: string): Promise<Hold | undefined> {
@@ -402,40 +402,34 @@ export class Holds {
     return wrote ? this.read(run.runId) : undefined
   }
 
-  /** A trigger line written, once there is something to say, a hold to say it in, and the proposal it names. */
-  private async trigger(
-    runId: string,
-    said: string,
-    proposal: string | undefined,
-    append: (content: string) => string,
-  ): Promise<Located | undefined> {
-    if (said === '') return this.refuse(NOTHING_TYPED)
-    const found = await this.needed(runId)
-    if (!found || (proposal !== undefined && !this.requireProposal(found, proposal))) return undefined
-    return (await this.process(found, append)) ? found : undefined
+  /** A trigger line written, once there is something to say, a hold to say it in, and the proposal it names; then answered. */
+  private async triggered(runId: string, trigger: Trigger): Promise<Hold | undefined> {
+    if (said(trigger) === '') return this.refuse(NOTHING_TYPED)
+    const found = await this.locateOrRefuse(runId)
+    if (!found || (trigger.kind !== 'room' && !this.requireProposal(found, trigger.name))) return undefined
+    return (await this.rewrite(found, content => appendTrigger(content, trigger))) ? this.answer(found, trigger) : undefined
   }
 
-  /** A failed answer leaves the trigger line, and the hold says so with `pending`. */
-  private async answerChat(found: Located, turn: ChatTurn): Promise<Hold | undefined> {
-    const reply = await this.reply(found.heading.runId, turn.name, turn.message)
-    return this.answered(found, reply && (content => appendChatReply(content, turn, reply)))
-  }
-
-  private async answerRoom(found: Located, question: string): Promise<Hold | undefined> {
-    const answers = await this.answers(found.heading.runId, question)
-    return this.answered(found, answers && (content => appendRoomAnswers(content, question, answers)))
-  }
-
-  private async answerQuest(found: Located, quest: SideQuestTurn): Promise<Hold | undefined> {
+  /** The engine asked what the trigger line asks; a failed answer leaves the line, and the hold says so with `pending`. */
+  private async answer(found: Located, trigger: Trigger): Promise<Hold | undefined> {
+    const { runId } = found.heading
+    if (trigger.kind === 'chat') {
+      const reply = await this.reply(runId, trigger.name, trigger.message)
+      return this.answered(found, reply && (content => appendChatReply(content, trigger, reply)))
+    }
+    if (trigger.kind === 'room') {
+      const answers = await this.answers(runId, trigger.question)
+      return this.answered(found, answers && (content => appendRoomAnswers(content, trigger.question, answers)))
+    }
+    const quest = { name: trigger.name, chainName: trigger.chain }
     // The proposal as the note has it now, edits and all.
-    const content = (await this.deps.store.read(found.path)) ?? found.content
-    const run = await this.quest(found.heading.runId, content, quest)
-    return this.answered(found, run && (now => appendSideQuestResult(now, quest, run)))
+    const run = await this.runQuest(runId, (await this.deps.store.read(found.path)) ?? found.content, quest)
+    return this.answered(found, run && (content => appendSideQuestResult(content, quest, run)))
   }
 
   /** The answer written under its trigger line; with none, the hold as it reads, the line still pending. */
   private async answered(found: Located, answer: ((content: string) => string) | undefined): Promise<Hold | undefined> {
-    if (answer && !(await this.process(found, answer))) return undefined
+    if (answer && !(await this.rewrite(found, answer))) return undefined
     return this.reread(found)
   }
 
@@ -480,11 +474,17 @@ export class Holds {
 
   /** A fresh call to the proposer's agent, seeded with what fed it and what it said (#54); nothing continued, so no turn. */
   private async approximate(source: FetchedRun, nodeId: string, name: string, message: string): Promise<ChatReply | undefined> {
+    const ask = this.askAgent(source, nodeId, message)
+    if (!ask) return this.refuse(NOT_A_PROPOSER(name))
+    const text = this.replyIn(await this.deps.withEngine(ask), name)
+    return text === undefined ? undefined : { text }
+  }
+
+  /** A standalone call to the node's agent, seeded with what fed it, what it said and `message`; none for a run that cannot seed one. */
+  private askAgent(source: FetchedRun, nodeId: string, message: string): (() => Promise<Answer>) | undefined {
     const seed = chatSeed(source.run, nodeId, message)
     const agentName = latestOutput(source.run.agentOutputs, nodeId)?.agentName
-    if (seed === undefined || agentName === undefined) return this.refuse(NOT_A_PROPOSER(name))
-    const text = this.replyIn(await this.deps.withEngine(() => launch(this.deps.engine, { agentName, seedPrompt: seed })), name)
-    return text === undefined ? undefined : { text }
+    return seed === undefined || agentName === undefined ? undefined : () => launch(this.deps.engine, { agentName, seedPrompt: seed })
   }
 
   /** Every proposer's answer, one at a time; `undefined`, once it has said why, when nobody answered. */
@@ -494,10 +494,9 @@ export class Holds {
       const source = await fetchRun(engine, runId)
       const gathered: RoomAnswer[] = []
       for (const panel of proposerPanels(source.layout.panels)) {
-        const seed = chatSeed(source.run, panel.node, question)
-        const agentName = latestOutput(source.run.agentOutputs, panel.node)?.agentName
-        if (seed === undefined || agentName === undefined) continue
-        const answered = await launch(engine, { agentName, seedPrompt: seed })
+        const ask = this.askAgent(source, panel.node, question)
+        if (!ask) continue
+        const answered = await ask()
         // A refusal is the engine's, not the proposer's: nobody else would be heard either.
         if (answered.kind === 'refused') return this.refuse(answered.said)
         if (answered.reply !== undefined) gathered.push({ name: panel.name, answer: answered.reply })
@@ -508,7 +507,7 @@ export class Holds {
     return answers.length > 0 ? answers : this.refuse(NOBODY_ANSWERED)
   }
 
-  private async quest(runId: string, content: string, quest: SideQuestTurn): Promise<SideQuestRun | undefined> {
+  private async runQuest(runId: string, content: string, quest: SideQuestTurn): Promise<SideQuestRun | undefined> {
     const { engine } = this.deps
     const found = await this.proposer(runId, quest.name, NOT_A_QUEST_PROPOSER)
     if (!found) return undefined
@@ -524,22 +523,22 @@ export class Holds {
 
     const landed = await this.deps.withEngine(() => engine.getRun(ran))
     if (!landed) return undefined
-    const url = runViewUrl(this.deps.engineUrl(), ran)
+    const url = this.deps.runUrl(ran)
     return { runId: ran, ...(url ? { url } : {}), result: landed.agentOutputs.at(-1)?.output ?? '' }
   }
 
   /** One rerun, revise or resume at a time per hold, its earlier runs included. */
   private async exclusive<T>(found: Located, act: () => Promise<T | undefined>): Promise<T | undefined> {
-    if (found.from.some(runId => this.going.has(runId))) return this.refuse(ALREADY_GOING)
-    for (const runId of found.from) this.going.add(runId)
+    if (found.runIds.some(runId => this.going.has(runId))) return this.refuse(ALREADY_GOING)
+    for (const runId of found.runIds) this.going.add(runId)
     try {
       return await act()
     } finally {
-      for (const runId of found.from) this.going.delete(runId)
+      for (const runId of found.runIds) this.going.delete(runId)
     }
   }
 
-  private async rerunEdits(found: Located, onProgress: OnRerunProgress | undefined): Promise<Landing | undefined> {
+  private async rerunDownstream(found: Located, onProgress: OnRerunProgress | undefined): Promise<Landing | undefined> {
     const { engine } = this.deps
     const { runId } = found.heading
     const source = await this.deps.withEngine(() => fetchRun(engine, runId))
@@ -552,7 +551,7 @@ export class Holds {
     return this.land(found, onEvent => launch(engine, request, onEvent), {
       edits: { before: panels, sent: edits },
       onProgress,
-      wording: RERUN_WORDING,
+      wording: RERUN_DOWNSTREAM_WORDING,
     })
   }
 
@@ -569,7 +568,7 @@ export class Holds {
       if (!proposer) return undefined
       const { source, panel } = proposer
       // Only a turn the engine recorded can be promoted; an approximate reply lives in the note alone (#52).
-      if (turn.turn === undefined) return this.refuse(NOT_THE_ENGINE_S(turn.name))
+      if (turn.turn === undefined) return this.refuse(REPLY_NOT_ON_ENGINE(turn.name))
       const canon = await this.canon()
       const promote = { runId, nodeId: panel.node, name: turn.name, turn: turn.turn, ...(canon !== undefined ? { canon } : {}) }
       return this.land(found, onEvent => runPromote(engine, promote, onEvent), {
@@ -584,21 +583,20 @@ export class Holds {
   private async resumed(found: Located, onProgress: OnRerunProgress | undefined): Promise<Resumed | undefined> {
     const { content, heading } = found
     const direction = directionBlock(content) ?? ''
-    const canonPath = normalizePath(CANON_PATH)
-    const canon = await this.deps.store.read(canonPath)
-    const request = resumeRequest({ direction, holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
+    const canon = await this.canon()
+    const request = resumeRequest({ direction, said: directionLines(direction), holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
 
-    return this.reported(found, onProgress, async (onEvent, report) => {
+    return this.withProgress(found, onProgress, async (onEvent, report) => {
       const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, onEvent))
       if (!resumed) return undefined
       if (resumed.kind === 'refused') return this.refuse(resumed.said)
       const { runId, forked, error } = resumed
       if (!runId) return this.refuse(error ? `Resume failed: ${error}` : 'Resume produced no run')
 
-      const locked = await this.lockCanon(canonPath, tickedCanonLines(direction), error)
-      const url = runViewUrl(this.deps.engineUrl(), runId)
-      await this.process(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
-      const hold = forked ? await this.fork(heading, runId, report) : error ? await this.read(runId) : await this.refresh(runId)
+      const locked = await this.lockCanon(tickedCanonLines(direction), error)
+      const url = this.deps.runUrl(runId)
+      await this.rewrite(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
+      const hold = forked ? await this.fork(heading, runId, report) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
       return hold && { hold, forked, ...(error !== undefined ? { error } : {}), canon: locked }
     })
   }
@@ -616,34 +614,33 @@ export class Holds {
   }
 
   /** The ticks locked into canon, held back when the run failed (#32), or none to lock. */
-  private async lockCanon(path: string, ticked: string[], error: string | undefined): Promise<CanonOutcome> {
+  private async lockCanon(ticked: string[], error: string | undefined): Promise<CanonOutcome> {
     if (ticked.length === 0) return 'none'
     if (error) return 'held-back'
     // Read again right before writing, so a change made while the run went is kept.
-    return (await this.writeNote(path, 'the canon file', current => appendCanon(current, ticked))) ? 'written' : 'held-back'
+    return (await this.writeNote(CANON_NOTE, 'the canon file', current => appendCanon(current, ticked))) ? 'written' : 'held-back'
   }
 
   /** A note created, or rewritten from what it held, folders and all; whether the vault took it. */
   private async writeNote(path: string, what: string, content: (previous: string | undefined) => string): Promise<boolean> {
     const { store } = this.deps
-    const wrote = await guardWrite(this.deps.notify, what, async () => {
+    const wrote = await this.guarded(what, async () => {
       await ensureFolder(store, folderOf(path))
       const previous = await store.read(path)
       const next = content(previous)
       if (previous === undefined) await store.create(path, next)
       else if (next !== previous) await store.modify(path, next)
-      return true
     })
-    return wrote === true
+    return wrote !== undefined
   }
 
   private canon(): Promise<string | undefined> {
-    return this.deps.store.read(normalizePath(CANON_PATH))
+    return this.deps.store.read(CANON_NOTE)
   }
 
   /** Progress told to the caller and to the watch, which hears the end whatever happens. */
-  private async reported<T>(found: Located, onProgress: OnRerunProgress | undefined, use: (onEvent: OnEvent, report: RerunReport) => Promise<T>): Promise<T> {
-    const report = this.deps.reruns.begin(found.from)
+  private async withProgress<T>(found: Located, onProgress: OnRerunProgress | undefined, use: (onEvent: OnEvent, report: RerunReport) => Promise<T>): Promise<T> {
+    const report = this.deps.reruns.begin(found.runIds)
     const tracker = new RerunProgressTracker()
     const onEvent: OnEvent = event => {
       const progress = tracker.hear(event)
@@ -663,7 +660,7 @@ export class Holds {
    * named for that run. The run of record is the one the stream names (ADR-0013).
    */
   private land(found: Located, call: (onEvent: OnEvent) => Promise<Answer>, options: LandingOptions): Promise<Landing | undefined> {
-    return this.reported(found, options.onProgress, async (onEvent, report) => {
+    return this.withProgress(found, options.onProgress, async (onEvent, report) => {
       const streamed = await this.deps.withEngine(() => call(onEvent))
       if (!streamed) return undefined
       if (streamed.kind === 'refused') return this.refuse(streamed.said)
@@ -680,7 +677,7 @@ export class Holds {
     if (!landedRun) return undefined
     const said = wording.landed(newRunId, forked)
 
-    const folded = await guardWrite(this.deps.notify, 'the hold note', async (): Promise<{ notice: string; moved?: true }> => {
+    const folded = await this.guarded('the hold note', async (): Promise<{ notice: string; moved?: true }> => {
       // Read again: the human may have written in the note while the call went.
       const current = (await store.read(path)) ?? ''
       const kept = editsToCarry(current, { ...options.edits, landed: landedRun.layout.panels })
@@ -701,7 +698,7 @@ export class Holds {
       const replaced = kept.replaced.length > 0 ? ` — it wrote ${kept.replaced.join(', ')} again, over your edits` : ''
       return { notice: `${said}${replaced}`, moved: true }
     })
-    if (!folded) return undefined
+    if (!folded || !('notice' in folded)) return undefined
     this.deps.notify(folded.notice)
     if (!folded.moved) return undefined
     await report.land({ runId: newRunId, chainName: heading.chainName, panels: landedRun.layout.panels })
@@ -720,10 +717,27 @@ function pendingIn(content: string, conversation: ConversationEntry[]): PendingT
   const revise = pendingRevise(content)
   if (revise?.reply !== undefined) return { kind: 'revise', turn: { ...revise, reply: revise.reply } }
   const last = conversation.at(-1)
+  return last && unanswered(conversation, last.kind)
+}
+
+/** The last trigger line of `kind` under Conversation, when nothing answers it yet. */
+function unanswered(conversation: ConversationEntry[], kind: TriggerKind): Trigger | undefined {
+  const last = conversation.filter(entry => entry.kind === kind).at(-1)
   if (last?.kind === 'chat' && last.reply === undefined) return { kind: 'chat', name: last.name, message: last.message }
   if (last?.kind === 'room' && last.answers.length === 0) return { kind: 'room', question: last.question }
   if (last?.kind === 'quest' && last.runId === undefined) return { kind: 'quest', name: last.name, chain: last.chainName }
   return undefined
+}
+
+function appendTrigger(content: string, trigger: Trigger): string {
+  if (trigger.kind === 'chat') return appendChatTrigger(content, trigger)
+  if (trigger.kind === 'room') return appendRoomTrigger(content, trigger.question)
+  return appendSideQuestTrigger(content, { name: trigger.name, chainName: trigger.chain })
+}
+
+/** What the human typed into the trigger line. */
+function said(trigger: Trigger): string {
+  return trigger.kind === 'chat' ? trigger.message : trigger.kind === 'room' ? trigger.question : trigger.chain
 }
 
 /** The note keeps each message, question and change on a line of its own; the panel matches what it sent by this. */

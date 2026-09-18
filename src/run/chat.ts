@@ -85,13 +85,6 @@ export function sameTurn(a: ChatTurn, b: ChatTurn): boolean {
   return a.name === b.name && a.message === b.message && a.reply === b.reply
 }
 
-/** The most recent `@name message` line with no reply below it yet, or undefined when there is none. */
-export function pendingMessage(content: string): ChatTurn | undefined {
-  const turns = locatedTurns(content)
-  const last = turns[turns.length - 1]?.entry
-  return last && last.reply === undefined ? { name: last.name, message: last.message } : undefined
-}
-
 /** The turn a trailing bare `revise` line refers to, or undefined when there is none to revise. */
 export function pendingRevise(content: string): ChatEntry | undefined {
   const tail = content.slice(conversationStart(content)).trimEnd()

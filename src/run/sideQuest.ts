@@ -32,12 +32,6 @@ function locatedQuests(content: string): LocatedTrigger<SideQuestTurn>[] {
   return locatedTriggers(content, QUEST_LINE, match => ({ name: match[1], chainName: match[2] }))
 }
 
-/** The most recent `side quest: @name chain` line with no result under it yet. */
-export function pendingSideQuest(content: string): SideQuestTurn | undefined {
-  const last = locatedQuests(content).at(-1)
-  return last && last.reply === undefined ? last.fields : undefined
-}
-
 function resultBlock(run: SideQuestRun): string {
   const link = run.url ? `[run ${run.runId}](${run.url})` : `run ${run.runId}`
   return quoted(`→ ${link}\n${run.result.trim()}`)

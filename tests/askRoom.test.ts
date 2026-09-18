@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { appendRoomAnswers, pendingRoomQuestion } from '@/run/askRoom'
+import { appendRoomAnswers } from '@/run/askRoom'
 
 /**
  * Ask the room: what an `ask the room: …` line means, and how every
@@ -21,37 +21,6 @@ const HOLD = [
   '## Conversation',
   '',
 ].join('\n')
-
-describe('pendingRoomQuestion', () => {
-  it('answers undefined when the Conversation section is empty', () => {
-    expect(pendingRoomQuestion(HOLD)).toBeUndefined()
-  })
-
-  it('reads an `ask the room: …` line with no answers yet', () => {
-    const content = HOLD + 'ask the room: is this too much Nier?\n'
-    expect(pendingRoomQuestion(content)).toBe('is this too much Nier?')
-  })
-
-  it('answers undefined once the question already carries answers', () => {
-    const content = HOLD + 'ask the room: is this too much Nier?\n> **gameplay-director:**\n> a bit.\n'
-    expect(pendingRoomQuestion(content)).toBeUndefined()
-  })
-
-  it('reads only the most recent unanswered question', () => {
-    const content = HOLD + 'ask the room: first?\n> **gameplay-director:**\n> yes.\nask the room: second?\n'
-    expect(pendingRoomQuestion(content)).toBe('second?')
-  })
-
-  it('is case-insensitive', () => {
-    const content = HOLD + 'Ask The Room: is this too much Nier?\n'
-    expect(pendingRoomQuestion(content)).toBe('is this too much Nier?')
-  })
-
-  it('does not mistake a `@name` chat line for a room question', () => {
-    const content = HOLD + '@gameplay-director defend it.\n'
-    expect(pendingRoomQuestion(content)).toBeUndefined()
-  })
-})
 
 describe('appendRoomAnswers', () => {
   it('appends every answer labeled by proposer, under the question', () => {

@@ -35,7 +35,7 @@ const buttons = () =>
       withEngine: action => action(),
       notify: message => void notices.push(message),
       reruns: new RerunWatch(),
-      engineUrl: () => 'http://localhost:3000',
+      runUrl: () => undefined,
     }),
   })
 

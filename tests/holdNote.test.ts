@@ -12,7 +12,7 @@ import {
   proposalEdits,
   refreshHoldNote,
   readHold,
-  reranFrom,
+  earlierRunsIn,
   tickCandidate,
   type HoldNoteInput,
 } from '@/run/holdNote'
@@ -409,24 +409,24 @@ describe('refreshHoldNote', () => {
 
   it('still names the run it came from when that run gave no verdict', () => {
     const empty = holdNoteContent(input({ panels: [panel(), verdict('')] }))
-    expect(reranFrom(refreshHoldNote(empty, input({ runId: '2026-09-16-Zz1', panels: [panel(), verdict('Halo as burden.')] })))).toEqual([
+    expect(earlierRunsIn(refreshHoldNote(empty, input({ runId: '2026-09-16-Zz1', panels: [panel(), verdict('Halo as burden.')] })))).toEqual([
       '2026-09-15-Ab3dE1',
     ])
   })
 })
 
-describe('reranFrom', () => {
+describe('earlierRunsIn', () => {
   const verdict = (text: string) => panel({ name: 'creative-director', node: 'decider', text, emphasis: 'join' })
 
   it('names every run a hold was rerun from, newest first', () => {
     const first = holdNoteContent(input({ panels: [panel(), verdict('First.')] }))
     const second = refreshHoldNote(first, input({ runId: '2026-09-16-Zz1', panels: [panel(), verdict('Second.')] }))
     const third = refreshHoldNote(second, input({ runId: '2026-09-17-Yy2', panels: [panel(), verdict('Third.')] }))
-    expect(reranFrom(third)).toEqual(['2026-09-16-Zz1', '2026-09-15-Ab3dE1'])
+    expect(earlierRunsIn(third)).toEqual(['2026-09-16-Zz1', '2026-09-15-Ab3dE1'])
   })
 
   it('names none for a hold never rerun', () => {
-    expect(reranFrom(holdNoteContent(input()))).toEqual([])
+    expect(earlierRunsIn(holdNoteContent(input()))).toEqual([])
   })
 })
 

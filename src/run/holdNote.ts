@@ -441,7 +441,7 @@ export function refreshHoldNote(previous: string, input: HoldNoteInput): string 
 }
 
 /** The runs a hold was rerun from, newest first, as its Previous verdict names them. */
-export function reranFrom(content: string): string[] {
+export function earlierRunsIn(content: string): string[] {
   const earlier = bodyUnder(content, PREVIOUS_VERDICT, [PROPOSALS], 0) ?? ''
   return [...earlier.matchAll(/^<summary>run (\S+)<\/summary>$/gm)].map(match => match[1])
 }
@@ -554,7 +554,7 @@ export function readHold(content: string, panels: LayoutPanel[]): HoldReading | 
   const edited = new Set(proposerPanels(panels).filter(panel => panel.node in edits).map(panel => panel.name))
   return {
     ...heading,
-    earlierRuns: reranFrom(content),
+    earlierRuns: earlierRunsIn(content),
     ...(verdict ? { verdict } : {}),
     proposals: proposals.map(proposal => ({
       ...proposal,

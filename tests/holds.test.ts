@@ -5,13 +5,14 @@ import {
   NO_EDITED_PROPOSAL,
   NO_HOLD_NOTE,
   NOBODY_ANSWERED,
-  NOT_THE_ENGINE_S,
-  NOTHING_TO_SEND,
+  NOTHING_PENDING,
+  REPLY_NOT_ON_ENGINE,
   PROPOSAL_HEADING,
   type Hold,
   type Landing,
 } from '@/ui/holds'
-import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerunFront, resumeFront, sendFront } from '@/ui/holdCommands'
+import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerunDownstreamFront, resumeFront, sendFront } from '@/ui/holdCommands'
+import { runViewUrl } from '@/run/provenance'
 import { RerunWatch } from '@/run/rerunWatch'
 import type { RerunProgress } from '@/run/rerunProgress'
 import { UNSUPPORTED_RESUME } from '@/run/resume'
@@ -259,7 +260,7 @@ function makeHolds(): Holds {
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
     reruns,
-    engineUrl: () => ENGINE_URL,
+    runUrl: runId => runViewUrl(ENGINE_URL, runId),
   })
 }
 
@@ -674,7 +675,7 @@ describe('send, a trigger line typed by hand', () => {
 
   it('says there is nothing to send when every message is answered', async () => {
     expect(await makeHolds().send(RUN, 'chat')).toBeUndefined()
-    expect(notices).toEqual([NOTHING_TO_SEND])
+    expect(notices).toEqual([NOTHING_PENDING.chat])
   })
 
   it('makes a reply the revision on a trailing bare `revise`, marking that line with the run it landed on', async () => {
@@ -726,6 +727,28 @@ describe('the panel and the palette write the same note', () => {
     store.inFront = { path: PATH }
     await sendFront(makeHolds(), notify, 'chat')
     expect(notes[NEW_PATH]).toBe(fromPanel)
+  })
+
+  it('for a rerun downstream', async () => {
+    const edited = HOLD.replace('Rotate abilities mid-fight.', 'Rotate stances.')
+    notes[PATH] = edited
+    await makeHolds().rerun(RUN)
+    const fromPanel = notes[NEW_PATH]
+    store = new MemoryNoteStore({ [PATH]: edited })
+    notes = store.notes
+    store.inFront = { path: PATH }
+    await rerunDownstreamFront(makeHolds(), notify)
+    expect(notes[NEW_PATH]).toBe(fromPanel)
+  })
+
+  it('for a resume, canon and all', async () => {
+    await makeHolds().resume(RUN)
+    const fromPanel = { ...notes }
+    store = new MemoryNoteStore({ [PATH]: HOLD })
+    notes = store.notes
+    store.inFront = { path: PATH }
+    await resumeFront(makeHolds(), notify)
+    expect(notes).toEqual(fromPanel)
   })
 
   it('answers a panel chat the engine failed later, from the palette', async () => {
@@ -847,7 +870,7 @@ describe('revise', () => {
   it('refuses a reply the engine never counted', async () => {
     expect(await makeHolds().revise(RUN, said)).toBeUndefined()
     expect(promotes).toEqual([])
-    expect(notices).toEqual([NOT_THE_ENGINE_S('world')])
+    expect(notices).toEqual([REPLY_NOT_ON_ENGINE('world')])
   })
 
   it('leaves the hold where it was when the rerun fails', async () => {
@@ -910,6 +933,24 @@ describe('resume', () => {
     expect(notes[CANON]).toBeUndefined()
   })
 
+  it('says so when the hold note is gone by the time the run carries on', async () => {
+    let release = (): void => {}
+    gate = new Promise(resolve => (release = resolve))
+    const resuming = makeHolds().resume(RUN)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    delete notes[PATH]
+    release()
+    expect(await resuming).toBeUndefined()
+    expect(notices.at(-1)).toBe(NO_HOLD_NOTE(RUN))
+  })
+
+  it('tells the caller how the run is getting on', async () => {
+    resumeFrames = [...started(RUN), layoutFrame('creative-director'), { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 }]
+    const heard: RerunProgress[] = []
+    await makeHolds().resume(RUN, progress => heard.push(progress))
+    expect(heard.at(-1)?.step).toEqual({ name: 'creative-director', writesVerdict: true })
+  })
+
   it('says why when the engine cannot resume a hold', async () => {
     capabilities = { runResume: false }
     expect(await makeHolds().resume(RUN)).toBeUndefined()
@@ -929,7 +970,7 @@ describe('the palette', () => {
   it('says to open a hold note when the note in front is not one', async () => {
     const holds = makeHolds()
     await resumeFront(holds, notify)
-    await rerunFront(holds, notify)
+    await rerunDownstreamFront(holds, notify)
     await sendFront(holds, notify, 'room')
     expect(notices).toEqual([NOT_A_HOLD_NOTE, NOT_A_HOLD_NOTE, NOT_A_HOLD_NOTE])
   })
@@ -944,7 +985,7 @@ describe('the palette', () => {
   it('reruns the note in front', async () => {
     notes[PATH] = HOLD.replace('Rotate abilities mid-fight.', 'Rotate stances.')
     store.inFront = { path: PATH }
-    await rerunFront(makeHolds(), notify)
+    await rerunDownstreamFront(makeHolds(), notify)
     expect(notices).toEqual([`Reran downstream as run ${NEW}`])
   })
 

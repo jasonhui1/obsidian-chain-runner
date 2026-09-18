@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { appendChatReply, chatEntries, chatSeed, markRevised, pendingMessage, pendingRevise } from '@/run/chat'
+import { appendChatReply, chatEntries, chatSeed, markRevised, pendingRevise } from '@/run/chat'
 import type { AgentOutput, RunGraph, RunMeta } from '@/engine/types'
 
 /**
@@ -23,27 +23,6 @@ const HOLD = [
   '## Conversation',
   '',
 ].join('\n')
-
-describe('pendingMessage', () => {
-  it('answers undefined when the Conversation section is empty', () => {
-    expect(pendingMessage(HOLD)).toBeUndefined()
-  })
-
-  it('reads an `@name message` line with no reply yet', () => {
-    const content = HOLD + '@gameplay-director this is Nier again. defend or change.\n'
-    expect(pendingMessage(content)).toEqual({ name: 'gameplay-director', message: 'this is Nier again. defend or change.' })
-  })
-
-  it('answers undefined once the line already carries a reply', () => {
-    const content = HOLD + '@gameplay-director defend it.\n> Halo is a burden, not a toolkit.\n'
-    expect(pendingMessage(content)).toBeUndefined()
-  })
-
-  it('reads only the most recent unanswered message', () => {
-    const content = HOLD + '@gameplay-director first.\n> replied.\n@gameplay-director second.\n'
-    expect(pendingMessage(content)?.message).toBe('second.')
-  })
-})
 
 describe('pendingRevise', () => {
   it('answers undefined when Conversation does not end in a bare `revise`', () => {

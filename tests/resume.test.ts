@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { resumeRequest, runResume, UNSUPPORTED_RESUME } from '@/run/resume'
+import { resumeRequest as requestFor, runResume, UNSUPPORTED_RESUME, type ResumeSource } from '@/run/resume'
+import { directionLines } from '@/run/holdNote'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
 import { refusingEngine, streamingEngine } from './stubEngine'
 import type { HoldPick } from '@/run/holdNote'
@@ -21,6 +22,9 @@ function hold(nodeId: string, headings: string[], chosen?: string): HoldPick {
     ...(chosen ? { chosen } : {}),
   }
 }
+
+/** The request for a note's source, with what the human wrote read out of its Direction as the hold module reads it. */
+const resumeRequest = (source: Omit<ResumeSource, 'said'>) => requestFor({ ...source, said: directionLines(source.direction) })
 
 describe('resumeRequest', () => {
   it('sends the Direction block verbatim, which the engine refuses blank', () => {

@@ -17,13 +17,6 @@ function locatedQuestions(content: string): LocatedTrigger<string>[] {
   return locatedTriggers(content, QUESTION_LINE, match => match[1].trim())
 }
 
-/** The most recent `ask the room: …` line with no answers under it yet. */
-export function pendingRoomQuestion(content: string): string | undefined {
-  const questions = locatedQuestions(content)
-  const last = questions[questions.length - 1]
-  return last && last.reply === undefined ? last.fields : undefined
-}
-
 /** Every proposer's answer, whole and labeled, one blockquote. */
 function answerBlock(answers: RoomAnswer[]): string {
   return answers.map(({ name, answer }) => quoted(`**${name}:**\n${answer.trim()}`)).join('\n')

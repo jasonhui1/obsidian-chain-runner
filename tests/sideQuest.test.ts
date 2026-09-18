@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { appendSideQuestResult, pendingSideQuest } from '@/run/sideQuest'
+import { appendSideQuestResult } from '@/run/sideQuest'
 
 /**
  * Side quest: what a `side quest: @name chain` line means, and how a run's
@@ -21,38 +21,6 @@ const HOLD = [
   '## Conversation',
   '',
 ].join('\n')
-
-describe('pendingSideQuest', () => {
-  it('answers undefined when the Conversation section is empty', () => {
-    expect(pendingSideQuest(HOLD)).toBeUndefined()
-  })
-
-  it('reads a `side quest: @name chain` line with no result yet', () => {
-    const content = HOLD + 'side quest: @gameplay-director combat-lab\n'
-    expect(pendingSideQuest(content)).toEqual({ name: 'gameplay-director', chainName: 'combat-lab' })
-  })
-
-  it('answers undefined once the line already carries a result', () => {
-    const content = HOLD + 'side quest: @gameplay-director combat-lab\n> → run 2026-09-16-Xy9zW2\n> Stances land as a rhythm system.\n'
-    expect(pendingSideQuest(content)).toBeUndefined()
-  })
-
-  it('reads only the most recent unresolved side quest', () => {
-    const content =
-      HOLD + 'side quest: @gameplay-director combat-lab\n> → run 2026-09-16-Xy9zW2\n> ok.\nside quest: @character-director combat-lab\n'
-    expect(pendingSideQuest(content)).toEqual({ name: 'character-director', chainName: 'combat-lab' })
-  })
-
-  it('reads a chain whose name has spaces in it whole', () => {
-    const content = HOLD + 'side quest: @gameplay-director combat lab \n'
-    expect(pendingSideQuest(content)).toEqual({ name: 'gameplay-director', chainName: 'combat lab' })
-  })
-
-  it('does not mistake a `@name` chat line for a side quest', () => {
-    const content = HOLD + '@gameplay-director defend it.\n'
-    expect(pendingSideQuest(content)).toBeUndefined()
-  })
-})
 
 describe('appendSideQuestResult', () => {
   it('appends the run link and result under the trigger line', () => {

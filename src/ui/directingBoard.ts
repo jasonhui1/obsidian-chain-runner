@@ -28,7 +28,7 @@ export interface DirectingBoardDeps {
   /** Reruns downstream of every edited proposal. */
   rerun: (onProgress: OnRerunProgress) => Promise<void>
   /** Answers the hold and carries the run on; `undefined` when nothing ran. */
-  resume: (runId: string) => Promise<Resumed | undefined>
+  resume: (runId: string, onProgress: OnRerunProgress) => Promise<Resumed | undefined>
   /** Answers whether the side quest's result reached the hold. */
   sideQuest: (proposal: string, chain: string) => Promise<boolean>
   /** The chains a side quest can go through; none while the engine cannot say. */
@@ -289,6 +289,7 @@ export class DirectingBoard {
     const button = this.button(bar, running ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
     button.disabled = running
     button.addEventListener('click', () => void this.startResume(hold.runId))
+    if (shown?.kind === 'running' && shown.progress?.step) this.add(bar, 'div', `${CLS}-progress`, rerunDoing(shown.progress.step))
     if (shown?.kind === 'stopped') this.add(bar, 'div', `${CLS}-faint`, 'Resume did not run.')
     if (shown?.kind === 'landed') this.resumeStatus(bar, shown.result)
   }
@@ -305,11 +306,15 @@ export class DirectingBoard {
   /** One resume at a time per run. */
   private async startResume(runId: string): Promise<void> {
     if (this.resumes.get(runId)?.kind === 'running') return
-    this.resumes.set(runId, { kind: 'running' })
+    const going: ResumeShown = { kind: 'running' }
+    this.resumes.set(runId, going)
     this.draw(this.state)
     let outcome: ResumeShown = { kind: 'stopped' }
     try {
-      const result = await this.deps.resume(runId)
+      const result = await this.deps.resume(runId, progress => {
+        going.progress = progress
+        this.draw(this.state)
+      })
       if (result) outcome = { kind: 'landed', result }
     } finally {
       this.resumes.set(runId, outcome)
@@ -596,7 +601,7 @@ interface Rerun {
 }
 
 /** A resume from the panel: going, landed, or stopped before it ran. */
-type ResumeShown = { kind: 'running' } | { kind: 'landed'; result: Resumed } | { kind: 'stopped' }
+type ResumeShown = { kind: 'running'; progress?: RerunProgress } | { kind: 'landed'; result: Resumed } | { kind: 'stopped' }
 
 /** The button names what the run would lock, so nothing is resumed on ticks the reader forgot. */
 function resumeLabel(canon: CanonChoice[]): string {

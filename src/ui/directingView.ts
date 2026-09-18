@@ -5,7 +5,7 @@ import { markdownEditor } from './proposalEditor'
 
 export const DIRECTING_VIEW_TYPE = 'chain-runner-directing'
 
-export interface DirectingViewDeps {
+export interface DirectingPanelDeps {
   holds: Holds
   /** The chains a side quest can go through; none while the engine cannot say. */
   chains: () => Promise<string[]>
@@ -27,7 +27,7 @@ export class DirectingView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private readonly deps: DirectingViewDeps,
+    private readonly deps: DirectingPanelDeps,
   ) {
     super(leaf)
   }
@@ -55,13 +55,9 @@ export class DirectingView extends ItemView {
     this.made?.draw({ kind: 'idle' })
   }
 
-  /** Shows a run's hold, on a proposal's tab when one is named; a hold rerun since is shown as it now is. */
-  async show(runId: string, proposal?: string): Promise<void> {
-    const read = ++this.latestRead
-    // On the new run at once, so an action on the old one landing meanwhile draws nothing.
-    this.listen(runId)
-    const hold = await this.deps.holds.read(runId)
-    if (read !== this.latestRead) return
+  /** Shows the hold the hold module answered for `runId`, on a proposal's tab when one is named; none is its missing note. */
+  show(runId: string, hold: Hold | undefined, proposal?: string): void {
+    ++this.latestRead
     this.listen(hold?.runId ?? runId)
     this.board().open(stateOf(hold, runId), proposal)
   }
@@ -118,8 +114,8 @@ export class DirectingView extends ItemView {
       sideQuest: (proposal, chain) => this.act(runId => holds.sideQuest(runId, proposal, chain)),
       revise: async (turn, onProgress) => void (await this.act(async runId => (await holds.revise(runId, turn, onProgress))?.hold)),
       rerun: async onProgress => void (await this.act(async runId => (await holds.rerun(runId, onProgress))?.hold)),
-      resume: async runId => {
-        const resumed = await holds.resume(runId)
+      resume: async (runId, onProgress) => {
+        const resumed = await holds.resume(runId, onProgress)
         this.wrote(runId, resumed?.hold)
         return resumed
       },
