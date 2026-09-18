@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { promoteRequest, runPromote, UNSUPPORTED_PROMOTE, type PromotedReply } from '@/run/promote'
 import { CANON_CONTEXT_KEY } from '@/run/canon'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
-import type { EngineClient } from '@/engine/client'
-import type { Capabilities, RunEvent } from '@/engine/types'
+import type { Capabilities } from '@/engine/types'
+import { refusingEngine, streamingEngine } from './stubEngine'
 
 /**
  * Promote's call, apart from the vault: what it asks the engine for, which run
@@ -20,23 +20,6 @@ const reply = (extra: Partial<PromotedReply> = {}): PromotedReply => ({
   name: 'gameplay-director',
   ...extra,
 })
-
-function stubEngine(events: RunEvent[], seen: { runId: string; nodeId: string }[] = []): EngineClient {
-  return {
-    promoteNode: async function* (node: { runId: string; nodeId: string }) {
-      seen.push(node)
-      for (const event of events) yield event
-    },
-  } as unknown as EngineClient
-}
-
-function refusingEngine(thrown: unknown): EngineClient {
-  return {
-    promoteNode: function () {
-      throw thrown
-    },
-  } as unknown as EngineClient
-}
 
 describe('promoteRequest', () => {
   it('names the turn the note recorded, which is the `### Turn N` of the node’s log', () => {
@@ -56,32 +39,32 @@ describe('promoteRequest', () => {
 
 describe('runPromote', () => {
   it('promotes on the node the reply was given by', async () => {
-    const seen: { runId: string; nodeId: string }[] = []
-    await runPromote(stubEngine([{ type: 'run_complete', runId: RUN }], seen), PROMOTES, reply())
+    const seen: unknown[] = []
+    await runPromote(streamingEngine([{ type: 'run_complete', runId: RUN }], PROMOTES, seen), reply())
     expect(seen).toEqual([{ runId: RUN, nodeId: 'gameplay-director' }])
   })
 
   it('reads back the same run when the engine reran to the hold in place', async () => {
-    const outcome = await runPromote(stubEngine([{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }]), PROMOTES, reply())
-    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: RUN }, forked: false })
+    const outcome = await runPromote(streamingEngine([{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }], PROMOTES), reply())
+    expect(outcome).toEqual({ kind: 'landed', runId: RUN, forked: false })
   })
 
   it('reads back the fork’s own id, not the run it was called on', async () => {
-    const outcome = await runPromote(stubEngine([{ type: 'run_start', runId: FORK }, { type: 'run_complete', runId: FORK }]), PROMOTES, reply())
-    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: FORK }, forked: true })
+    const outcome = await runPromote(streamingEngine([{ type: 'run_start', runId: FORK }, { type: 'run_complete', runId: FORK }], PROMOTES), reply())
+    expect(outcome).toEqual({ kind: 'landed', runId: FORK, forked: true })
   })
 
   it('hears every event on the way, so a panel can draw what is being written again', async () => {
     const heard: string[] = []
-    await runPromote(stubEngine([{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }]), PROMOTES, reply(), event =>
-      heard.push(event.type),
-    )
+    await runPromote(streamingEngine([{ type: 'run_start', runId: RUN }, { type: 'run_complete', runId: RUN }], PROMOTES), reply(), event => {
+      heard.push(event.type)
+    })
     expect(heard).toEqual(['run_start', 'run_complete'])
   })
 
   it('reports an engine error event as the run’s failure, not as a refusal', async () => {
-    const outcome = await runPromote(stubEngine([{ type: 'run_start', runId: RUN }, { type: 'error', error: 'the model refused' }]), PROMOTES, reply())
-    expect(outcome).toEqual({ kind: 'ran', outcome: { runId: RUN, error: 'the model refused' }, forked: false })
+    const outcome = await runPromote(streamingEngine([{ type: 'run_start', runId: RUN }, { type: 'error', error: 'the model refused' }], PROMOTES), reply())
+    expect(outcome).toEqual({ kind: 'landed', runId: RUN, error: 'the model refused', forked: false })
   })
 
   it.each([
@@ -91,30 +74,30 @@ describe('runPromote', () => {
     [400, 'turn 4 is out of range', "gameplay-director's reply cannot be used as the revision: turn 4 is out of range"],
     [400, 'node is not a proposer', "gameplay-director's reply cannot be used as the revision: node is not a proposer"],
   ])('says why rather than throwing when the engine refuses with %i', async (status, said, notice) => {
-    const engine = refusingEngine(new EngineHttpError(status, 'http://engine/promote', JSON.stringify({ error: said })))
-    expect(await runPromote(engine, PROMOTES, reply())).toEqual({ kind: 'refused', said: notice })
+    const engine = refusingEngine(new EngineHttpError(status, 'http://engine/promote', JSON.stringify({ error: said })), PROMOTES)
+    expect(await runPromote(engine, reply())).toEqual({ kind: 'refused', said: notice })
   })
 
   it('falls back to the engine’s own words on a status promote has nothing of its own to say about', async () => {
-    const engine = refusingEngine(new EngineHttpError(500, 'http://engine/promote', 'boom'))
-    expect(await runPromote(engine, PROMOTES, reply())).toEqual({ kind: 'refused', said: 'Engine error 500: boom' })
+    const engine = refusingEngine(new EngineHttpError(500, 'http://engine/promote', 'boom'), PROMOTES)
+    expect(await runPromote(engine, reply())).toEqual({ kind: 'refused', said: 'Engine error 500: boom' })
   })
 
   it('still throws when the engine cannot be reached, which is not a refusal', async () => {
-    await expect(runPromote(refusingEngine(new EngineOfflineError('http://engine')), PROMOTES, reply())).rejects.toBeInstanceOf(EngineOfflineError)
+    await expect(runPromote(refusingEngine(new EngineOfflineError('http://engine'), PROMOTES), reply())).rejects.toBeInstanceOf(EngineOfflineError)
   })
 
   it('asks nothing of an engine that says it cannot promote, and says so', async () => {
-    const engine = refusingEngine(new Error('never called'))
-    expect(await runPromote(engine, { nodePromote: false }, reply())).toEqual({ kind: 'refused', said: UNSUPPORTED_PROMOTE })
+    const engine = refusingEngine(new Error('never called'), { nodePromote: false })
+    expect(await runPromote(engine, reply())).toEqual({ kind: 'refused', said: UNSUPPORTED_PROMOTE, unsupported: true })
   })
 
   it('reads a 404 from an engine too old to say as the endpoint missing, since the node came from the run', async () => {
-    const engine = refusingEngine(new EngineHttpError(404, 'http://engine/promote', 'Not Found'))
-    expect(await runPromote(engine, {}, reply())).toEqual({ kind: 'refused', said: UNSUPPORTED_PROMOTE })
+    const engine = refusingEngine(new EngineHttpError(404, 'http://engine/promote', 'Not Found'), {})
+    expect(await runPromote(engine, reply())).toEqual({ kind: 'refused', said: UNSUPPORTED_PROMOTE, unsupported: true })
   })
 
   it('still asks an engine too old to say, which may have the endpoint all the same', async () => {
-    expect(await runPromote(stubEngine([{ type: 'run_start', runId: RUN }]), {}, reply())).toMatchObject({ kind: 'ran' })
+    expect(await runPromote(streamingEngine([{ type: 'run_start', runId: RUN }], {}), reply())).toMatchObject({ kind: 'landed' })
   })
 })

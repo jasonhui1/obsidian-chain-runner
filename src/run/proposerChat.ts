@@ -1,9 +1,7 @@
-import { engineFailureMessage, engineSaid } from '../engine/guard'
-import { disclaims, mayLackRoute } from '../engine/capabilities'
-import { EngineHttpError } from '../engine/transport'
+import { answer, type Answer } from './answer'
 import { latestOutput } from './chat'
 import type { EngineClient } from '../engine/client'
-import type { AgentOutput, Capabilities } from '../engine/types'
+import type { AgentOutput } from '../engine/types'
 
 /**
  * The real chat with a proposer: the engine continues that node's own
@@ -20,11 +18,7 @@ export interface ProposerChat {
   message: string
 }
 
-/** What came back: the proposer's words, a reason there are none, or an engine that cannot be asked. */
-export type ChatOutcome =
-  | { kind: 'reply'; text: string }
-  | { kind: 'refused'; said: string }
-  | { kind: 'unsupported' }
+export const UNSUPPORTED_CHAT = 'This engine cannot chat with a proposer. Update maestro-playground.'
 
 /** The engine turns already on a node: the assistant replies its transcript holds. */
 export function repliesSoFar(outputs: AgentOutput[], nodeId: string): number {
@@ -32,31 +26,23 @@ export function repliesSoFar(outputs: AgentOutput[], nodeId: string): number {
 }
 
 /**
- * One turn of the node's own transcript. Every refusal comes back as text to
- * show, never a throw; only an unreachable engine still throws.
+ * One turn of the node's own transcript, its words the answer's `reply`. Every
+ * refusal comes back as text to show, never a throw — `unsupported` where the
+ * approximate chat takes over; only an unreachable engine still throws.
  */
-export async function chatReply(engine: EngineClient, capabilities: Capabilities, chat: ProposerChat): Promise<ChatOutcome> {
-  if (disclaims(capabilities, 'proposerChat')) return { kind: 'unsupported' }
-  try {
-    let outcome: ChatOutcome = { kind: 'refused', said: `Chat with ${chat.name} produced no reply` }
-    for await (const event of engine.chatWithNode({ runId: chat.runId, nodeId: chat.nodeId, message: chat.message })) {
-      if (event.type === 'chat_done') outcome = { kind: 'reply', text: event.message.content }
-      if (event.type === 'error') outcome = { kind: 'refused', said: `Chat with ${chat.name} failed: ${event.error}` }
-    }
-    return outcome
-  } catch (error) {
-    if (!(error instanceof EngineHttpError)) throw error
-    // The node comes from the run's own layout, so a 404 from an engine that
-    // never claimed the endpoint is the route missing, not the node (#54).
-    if (mayLackRoute(error, capabilities, 'proposerChat')) return { kind: 'unsupported' }
-    return { kind: 'refused', said: refusal(error, chat) }
-  }
-}
-
-function refusal(error: EngineHttpError, chat: ProposerChat): string {
-  if (error.status === 409) return `Run ${chat.runId} is still running — chat with ${chat.name} once it stops`
-  if (error.status === 404) return `Run ${chat.runId} no longer has a node for ${chat.name}`
-  if (error.status === 400) return `${chat.name} cannot be chatted with: ${engineSaid(error)}`
-  if (error.status === 422) return `${chat.name}'s agent file is gone from the workspace`
-  return engineFailureMessage(error) ?? `Chat with ${chat.name} failed`
+export function chatReply(engine: EngineClient, chat: ProposerChat): Promise<Answer> {
+  const { runId, nodeId, name, message } = chat
+  return answer(engine, {
+    open: () => engine.chatWithNode({ runId, nodeId, message }),
+    refusals: {
+      // The node comes from the run's own layout, so a 404 from an engine that
+      // never claimed the endpoint is the route missing, not the node (#54).
+      endpoint: 'proposerChat',
+      unsupported: UNSUPPORTED_CHAT,
+      running: () => `Run ${runId} is still running — chat with ${name} once it stops`,
+      gone: `Run ${runId} no longer has a node for ${name}`,
+      invalid: said => `${name} cannot be chatted with: ${said}`,
+      unprocessable: `${name}'s agent file is gone from the workspace`,
+    },
+  })
 }

@@ -71,20 +71,21 @@ export class QuickRunner {
    * reader kept off one. The picker, then the run.
    */
   async runOn(seed: Seed, source: SeedSource): Promise<void> {
-    const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
-    if (!workspace) return
+    const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
+    if (!chains) return
+    const capabilities = await this.deps.engine.capabilities()
     // The panels are the engine's to project (ADR-0001), so an engine too old to
     // stream them is refused rather than drawn for from a stale rule.
-    if (!streamsLayout(workspace.capabilities)) {
+    if (!streamsLayout(capabilities)) {
       this.deps.notify(UNSUPPORTED_ENGINE)
       return
     }
-    if (workspace.chains.length === 0) {
+    if (chains.length === 0) {
       this.deps.notify('No chains in the workspace')
       return
     }
 
-    new ChainPicker(this.deps.app, workspace.chains, chain =>
+    new ChainPicker(this.deps.app, chains, chain =>
       this.pickParameter({ chain, seed, source }),
     ).open()
   }

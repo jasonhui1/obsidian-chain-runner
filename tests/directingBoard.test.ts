@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectingBoard, type DirectingState } from '@/ui/directingBoard'
 import type { ProposalEditor } from '@/ui/proposalEditor'
-import type { HoldReading, RerunProgress, ResumeResult } from '@/ui/holdActions'
+import type { HoldReading, RerunProgress, Resumed } from '@/ui/holdActions'
 
 /**
  * The directing panel's elements: which tab shows what, and that every button
@@ -42,7 +42,7 @@ let waiting: ((done: boolean) => void)[]
 let chainNames: string[]
 let chainsAsked: number
 /** Each resume still waiting on the hold actions, answered by the test. */
-let resumesWaiting: ((result: ResumeResult | undefined) => void)[]
+let resumesWaiting: ((result: Resumed | undefined) => void)[]
 /** Every editor the board has opened, in the order it opened them. */
 let editors: FakeEditor[]
 /** Tells the rerun going now how it is getting on. */
@@ -964,9 +964,9 @@ describe('without a hold', () => {
 describe('resume', () => {
   const RESUMED = '2026-09-16-Rs1Kq4'
 
-  const resumed = (over: Partial<ResumeResult> = {}): ResumeResult => ({ runId: RESUMED, forked: false, canon: 'written', ...over })
+  const resumed = (over: Partial<Resumed> = {}): Resumed => ({ kind: 'landed', runId: RESUMED, forked: false, canon: 'written', ...over })
 
-  const land = async (result: ResumeResult | undefined): Promise<void> => {
+  const land = async (result: Resumed | undefined): Promise<void> => {
     resumesWaiting.pop()?.(result)
     await settled()
   }
@@ -1023,7 +1023,7 @@ describe('resume', () => {
   it('says a run failed, and that its canon was held back', async () => {
     board().open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
-    await land({ runId: RESUMED, forked: false, error: 'the model refused', canon: 'held-back' })
+    await land({ kind: 'landed', runId: RESUMED, forked: false, error: 'the model refused', canon: 'held-back' })
     expect(text()).toContain('Failed: the model refused')
     expect(text()).toContain('canon not written')
   })

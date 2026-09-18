@@ -3,7 +3,7 @@ import { guardWrite } from './vaultWrite'
 import { fetchRun } from './rerunAndRefresh'
 import { appendRoomAnswers, pendingRoomQuestion, type RoomAnswer } from '../run/askRoom'
 import { chatSeed, latestOutput } from '../run/chat'
-import { runAgentOnce } from '../run/headlessRun'
+import { launch } from '../run/answer'
 import { holdHeading, proposerPanels } from '../run/holdNote'
 import type { EngineClient } from '../engine/client'
 
@@ -60,8 +60,13 @@ export class AskTheRoom {
         const seed = chatSeed(source.run, panel.node, question)
         const agentName = latestOutput(source.run.agentOutputs, panel.node)?.agentName
         if (seed === undefined || agentName === undefined) continue
-        const outcome = await runAgentOnce(engine, { agentName, seedPrompt: seed })
-        if (outcome.output) gathered.push({ name: panel.name, answer: outcome.output.output })
+        const answered = await launch(engine, { agentName, seedPrompt: seed })
+        // A refusal is the engine's, not the proposer's: nobody else would be heard either.
+        if (answered.kind === 'refused') {
+          notify(answered.said)
+          return undefined
+        }
+        if (answered.reply !== undefined) gathered.push({ name: panel.name, answer: answered.reply })
       }
       return gathered
     })

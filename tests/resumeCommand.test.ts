@@ -45,7 +45,7 @@ let capabilities: Capabilities
 
 function makeResume(): Resume {
   const engine = {
-    loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    capabilities: () => Promise.resolve(capabilities),
     resumeRun: function* (runId: string, request: unknown) {
       requests.push({ runId, request })
       if (refusal) throw refusal
@@ -262,7 +262,7 @@ describe('a resume the engine forked', () => {
 
 describe('resumeNote', () => {
   it('reports the run the resume carried on as', async () => {
-    expect(await makeResume().resumeNote(HOLD_PATH)).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, canon: 'written' })
+    expect(await makeResume().resumeNote(HOLD_PATH)).toEqual({ kind: 'landed', runId: '2026-09-15-Ab3dE1', forked: false, canon: 'written' })
   })
 
   it('reports a forked run under the id the stream named, not the one it posted to', async () => {
@@ -273,12 +273,12 @@ describe('resumeNote', () => {
   it('says the ticks were held back when the run failed', async () => {
     runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }, { type: 'error', error: 'the model refused' }]
     const result = await makeResume().resumeNote(HOLD_PATH)
-    expect(result).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, error: 'the model refused', canon: 'held-back' })
+    expect(result).toEqual({ kind: 'landed', runId: '2026-09-15-Ab3dE1', forked: false, error: 'the model refused', canon: 'held-back' })
   })
 
   it('carries the failure with no run when the stream never named one', async () => {
     runFrames = [{ type: 'error', error: 'nothing to resume' }]
-    expect(await makeResume().resumeNote(HOLD_PATH)).toEqual({ error: 'nothing to resume', forked: false, canon: 'held-back' })
+    expect(await makeResume().resumeNote(HOLD_PATH)).toEqual({ kind: 'landed', error: 'nothing to resume', forked: false, canon: 'held-back' })
   })
 
   it('has nothing to report when the engine is offline', async () => {

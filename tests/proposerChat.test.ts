@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { chatReply, repliesSoFar } from '@/run/proposerChat'
+import { chatReply, repliesSoFar, UNSUPPORTED_CHAT } from '@/run/proposerChat'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
-import type { EngineClient } from '@/engine/client'
-import type { AgentOutput, Capabilities, ChatEvent } from '@/engine/types'
+import type { AgentOutput, Capabilities } from '@/engine/types'
+import { refusingEngine, streamingEngine } from './stubEngine'
 
 /**
  * The real chat with a proposer, apart from the note: what the stream's events
@@ -11,41 +11,39 @@ import type { AgentOutput, Capabilities, ChatEvent } from '@/engine/types'
 
 const CHAT = { runId: '2026-09-15-Ab3dE1', nodeId: 'gameplay-director', name: 'gameplay-director', message: 'defend the sleeves' }
 
-/** An engine whose chat stream yields `events`, or throws `fails` before it starts. */
-function engineOf(events: ChatEvent[], fails?: unknown): EngineClient {
-  return {
-    chatWithNode: async function* () {
-      if (fails) throw fails
-      for (const event of events) yield event
-    },
-  } as unknown as EngineClient
-}
-
 const HAS_CHAT: Capabilities = { proposerChat: true }
 
 /** What the module says about an engine that answered `status`. */
 async function refused(status: number, body = ''): Promise<string | undefined> {
-  const outcome = await chatReply(engineOf([], new EngineHttpError(status, 'http://engine/chat', body)), HAS_CHAT, CHAT)
-  return outcome.kind === 'refused' ? outcome.said : undefined
+  const answered = await chatReply(refusingEngine(new EngineHttpError(status, 'http://engine/chat', body), HAS_CHAT), CHAT)
+  return answered.kind === 'refused' ? answered.said : undefined
 }
 
 describe('chatReply', () => {
   it('answers with the reply the chat stream finished on', async () => {
-    const outcome = await chatReply(
-      engineOf([
-        { type: 'token', token: 'fair ' },
-        { type: 'token', token: 'point' },
-        { type: 'chat_done', message: { role: 'assistant', content: 'fair point', thought: 'weighed it' } },
-      ]),
-      HAS_CHAT,
+    const answered = await chatReply(
+      streamingEngine(
+        [
+          { type: 'token', token: 'fair ' },
+          { type: 'token', token: 'point' },
+          { type: 'chat_done', message: { role: 'assistant', content: 'fair point', thought: 'weighed it' } },
+        ],
+        HAS_CHAT,
+      ),
       CHAT,
     )
-    expect(outcome).toEqual({ kind: 'reply', text: 'fair point' })
+    expect(answered).toEqual({ kind: 'landed', forked: false, reply: 'fair point' })
   })
 
-  it('answers with what the engine said when the model failed', async () => {
-    const outcome = await chatReply(engineOf([{ type: 'error', error: 'the model refused' }]), HAS_CHAT, CHAT)
-    expect(outcome).toEqual({ kind: 'refused', said: 'Chat with gameplay-director failed: the model refused' })
+  it('carries what the engine said when the model failed, as the answer’s error', async () => {
+    const answered = await chatReply(streamingEngine([{ type: 'error', error: 'the model refused' }], HAS_CHAT), CHAT)
+    expect(answered).toEqual({ kind: 'landed', forked: false, error: 'the model refused' })
+  })
+
+  it('sends the message to the node the note names', async () => {
+    const called: unknown[] = []
+    await chatReply(streamingEngine([], HAS_CHAT, called), CHAT)
+    expect(called).toEqual([{ runId: CHAT.runId, nodeId: CHAT.nodeId, message: CHAT.message }])
   })
 
   it('says the run is still going on a 409', async () => {
@@ -73,31 +71,26 @@ describe('chatReply', () => {
   })
 
   it('leaves an unreachable engine to the caller guard', async () => {
-    await expect(chatReply(engineOf([], new EngineOfflineError('http://engine/chat')), HAS_CHAT, CHAT)).rejects.toBeInstanceOf(EngineOfflineError)
+    await expect(chatReply(refusingEngine(new EngineOfflineError('http://engine/chat'), HAS_CHAT), CHAT)).rejects.toBeInstanceOf(EngineOfflineError)
   })
 })
 
 describe('the boundary with approximate chat', () => {
+  const unsupported = { kind: 'refused', said: UNSUPPORTED_CHAT, unsupported: true }
+
   it('sends nothing when the engine says it has no chat endpoint', async () => {
-    let called = false
-    const engine = {
-      chatWithNode: () => {
-        called = true
-        return engineOf([]).chatWithNode(CHAT)
-      },
-    } as unknown as EngineClient
-    expect(await chatReply(engine, { proposerChat: false }, CHAT)).toEqual({ kind: 'unsupported' })
-    expect(called).toBe(false)
+    const called: unknown[] = []
+    expect(await chatReply(streamingEngine([], { proposerChat: false }, called), CHAT)).toEqual(unsupported)
+    expect(called).toEqual([])
   })
 
   it('reads a 404 from an engine too old to claim the endpoint as the route missing', async () => {
-    const outcome = await chatReply(engineOf([], new EngineHttpError(404, 'http://engine/chat', 'Not found')), {}, CHAT)
-    expect(outcome).toEqual({ kind: 'unsupported' })
+    expect(await chatReply(refusingEngine(new EngineHttpError(404, 'http://engine/chat', 'Not found')), CHAT)).toEqual(unsupported)
   })
 
   it('calls an engine that says nothing either way, since that is the only way to find out', async () => {
-    const outcome = await chatReply(engineOf([{ type: 'chat_done', message: { role: 'assistant', content: 'fair point' } }]), {}, CHAT)
-    expect(outcome).toEqual({ kind: 'reply', text: 'fair point' })
+    const answered = await chatReply(streamingEngine([{ type: 'chat_done', message: { role: 'assistant', content: 'fair point' } }]), CHAT)
+    expect(answered).toMatchObject({ kind: 'landed', reply: 'fair point' })
   })
 })
 

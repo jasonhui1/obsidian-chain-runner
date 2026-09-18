@@ -4,7 +4,7 @@ import { guardWrite } from './vaultWrite'
 import { fetchRun, streamIntoHold, type FetchedRun, type RerunWording } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatReply, type RepliedTurn } from '../run/chat'
-import { runAgentOnce } from '../run/headlessRun'
+import { launch, type Answer } from '../run/answer'
 import { chatReply, repliesSoFar } from '../run/proposerChat'
 import { holdHeading, proposerPanels, type HoldHeading } from '../run/holdNote'
 import { runPromote, type PromotedReply } from '../run/promote'
@@ -96,17 +96,22 @@ export class ChatWithProposer {
       return undefined
     }
 
-    const outcome = await this.deps.withEngine(async () => {
-      const { capabilities } = await engine.loadWorkspace()
-      return chatReply(engine, capabilities, { runId, nodeId: panel.node, name, message })
-    })
-    if (!outcome) return undefined
-    if (outcome.kind === 'unsupported') return this.approximate(source, panel.node, name, message)
-    if (outcome.kind === 'refused') {
-      notify(outcome.said)
-      return undefined
-    }
-    return { text: outcome.text, turn: await this.turnOf(runId, panel.node, repliesSoFar(source.run.agentOutputs, panel.node)) }
+    const answered = await this.deps.withEngine(() => chatReply(engine, { runId, nodeId: panel.node, name, message }))
+    if (answered?.kind === 'refused' && answered.unsupported) return this.approximate(source, panel.node, name, message)
+    const text = this.replyIn(answered, name)
+    if (text === undefined) return undefined
+    return { text, turn: await this.turnOf(runId, panel.node, repliesSoFar(source.run.agentOutputs, panel.node)) }
+  }
+
+  /** The reply an answer carries; `undefined`, once it has said why, when there is none. */
+  private replyIn(answered: Answer | undefined, name: string): string | undefined {
+    const { notify } = this.deps
+    if (!answered) return undefined
+    if (answered.kind === 'refused') notify(answered.said)
+    else if (answered.error) notify(`Chat with ${name} failed: ${answered.error}`)
+    else if (answered.reply === undefined) notify(`Chat with ${name} produced no reply`)
+    else return answered.reply
+    return undefined
   }
 
   /**
@@ -134,17 +139,8 @@ export class ChatWithProposer {
       return undefined
     }
 
-    const outcome = await this.deps.withEngine(() => runAgentOnce(engine, { agentName, seedPrompt: seed }))
-    if (!outcome) return undefined
-    if (outcome.error) {
-      notify(`Chat with ${name} failed: ${outcome.error}`)
-      return undefined
-    }
-    if (!outcome.output) {
-      notify(`Chat with ${name} produced no reply`)
-      return undefined
-    }
-    return { text: outcome.output.output }
+    const text = this.replyIn(await this.deps.withEngine(() => launch(engine, { agentName, seedPrompt: seed })), name)
+    return text === undefined ? undefined : { text }
   }
 
   /**
@@ -187,10 +183,7 @@ export class ChatWithProposer {
       ...(canon !== undefined ? { canon } : {}),
     }
 
-    return streamIntoHold(this.deps, path, heading, async onEvent => {
-      const { capabilities } = await engine.loadWorkspace()
-      return runPromote(engine, capabilities, promote, onEvent)
-    }, {
+    return streamIntoHold(this.deps, path, heading, onEvent => runPromote(engine, promote, onEvent), {
       beforeRefresh: mark,
       onProgress,
       edits: { before: source.layout.panels, sent: {}, revised: panel.node },

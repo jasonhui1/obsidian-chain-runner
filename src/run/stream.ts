@@ -1,5 +1,6 @@
 import { engineFailureMessage } from '../engine/guard'
 import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
+import { answer } from './answer'
 import { applyRunEvent, emptyRunState, type RunState } from './session'
 import type { EngineClient } from '../engine/client'
 import { isEvent, type Capabilities, type RunRequest } from '../engine/types'
@@ -30,8 +31,8 @@ export function streamsOutputs(capabilities: Capabilities): boolean {
   )
 }
 
-/** How a run's stream ended. */
-export interface RunOutcome {
+/** How a run's stream ended, as the drawing surfaces read it. */
+interface DrawnRun {
   state: RunState
   /** What stopped the caller reaching the end — an offline engine, a refusal. */
   failure?: string
@@ -53,13 +54,20 @@ export async function streamRun(input: {
   holdReached: (runId: string, nodeId: string) => Promise<void>
   notify: (message: string) => void
   markOffline: () => void
-}): Promise<RunOutcome> {
+}): Promise<DrawnRun> {
   let state = emptyRunState()
   try {
-    for await (const event of input.engine.launchRun(input.request, input.signal)) {
-      state = applyRunEvent(state, event)
-      await input.onState(state)
-      if (isEvent(event, 'run_waiting')) await input.holdReached(event.runId, event.nodeId)
+    const answered = await answer(input.engine, {
+      open: () => input.engine.launchRun(input.request, input.signal),
+      onEvent: async event => {
+        state = applyRunEvent(state, event)
+        await input.onState(state)
+        if (isEvent(event, 'run_waiting')) await input.holdReached(event.runId, event.nodeId)
+      },
+    })
+    if (answered.kind === 'refused') {
+      input.notify(answered.said)
+      return { state, failure: answered.said, aborted: false }
     }
   } catch (error) {
     if (error instanceof RequestAbortedError) return { state, aborted: true }

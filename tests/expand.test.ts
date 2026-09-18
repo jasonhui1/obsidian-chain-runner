@@ -99,7 +99,8 @@ function makeExpand(): Expand {
   }
 
   const engine = {
-    loadWorkspace: () => Promise.resolve({ chains, capabilities }),
+    capabilities: () => Promise.resolve(capabilities),
+    listChains: () => Promise.resolve(chains),
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
       launched.push(request)
       for (const event of events) yield event

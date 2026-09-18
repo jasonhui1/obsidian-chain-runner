@@ -101,7 +101,7 @@ function makeCommand(): ChatWithProposer {
       requests.push(request)
       for (const event of runFrames) yield event
     },
-    loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    capabilities: () => Promise.resolve(capabilities),
     promoteNode: async function* (node: { runId: string; nodeId: string }, request: PromoteRequest) {
       promotes.push({ ...node, request })
       if (promoteRefusal) throw promoteRefusal

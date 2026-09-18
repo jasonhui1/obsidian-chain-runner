@@ -1,12 +1,8 @@
+import { answer, type Answer } from './answer'
 import { CANON_CONTEXT_KEY } from './canon'
-import { underRunOfRecord, type ForkedRun } from './fork'
-import { streamOrRefusal } from './headlessRun'
 import { directionLines, type HoldPick } from './holdNote'
-import { disclaims, mayLackRoute } from '../engine/capabilities'
-import { engineSaid } from '../engine/guard'
-import type { EngineHttpError } from '../engine/transport'
 import type { EngineClient } from '../engine/client'
-import type { Capabilities, ResumeRequest } from '../engine/types'
+import type { ResumeRequest } from '../engine/types'
 
 /**
  * Resume: the hold's answer posted back to the run, which carries on from
@@ -50,26 +46,24 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
   }
 }
 
-/** What a resume came back with: the run it carried on as — which may be a fork — or why the engine would not. */
-export type ResumeOutcome = ForkedRun
-
 /**
- * The hold answered and the run carried on, read as a run stream under whichever
- * run the stream names — a hold already answered forks instead (#53). Every
- * refusal comes back as words to show; only an unreachable engine still throws.
+ * The hold answered and the run carried on, under whichever run the stream
+ * names — a hold already answered forks instead (#53). Every refusal comes
+ * back as words to show; only an unreachable engine still throws.
  */
-export async function runResume(engine: EngineClient, capabilities: Capabilities, runId: string, request: ResumeRequest): Promise<ResumeOutcome> {
-  if (disclaims(capabilities, 'runResume')) return { kind: 'refused', said: UNSUPPORTED_RESUME }
-  const said = (error: EngineHttpError): string | undefined => refusal(error, runId, capabilities)
-  return underRunOfRecord(runId, onEvent => streamOrRefusal(() => engine.resumeRun(runId, request), said, onEvent))
-}
-
-function refusal(error: EngineHttpError, runId: string, capabilities: Capabilities): string | undefined {
-  if (error.status === 409) return `Run ${runId} cannot be resumed yet: ${engineSaid(error)}`
+export function runResume(engine: EngineClient, runId: string, request: ResumeRequest): Promise<Answer> {
   const gone = `Run ${runId} no longer has the hold this note answers`
-  // The run id is the note's own, so either the run or the route may be what is missing.
-  if (mayLackRoute(error, capabilities, 'runResume')) return `${gone} — or this engine cannot resume a hold. Update maestro-playground if so.`
-  if (error.status === 404) return gone
-  if (error.status === 400) return `The engine would not resume run ${runId}: ${engineSaid(error)}`
-  return undefined
+  return answer(engine, {
+    open: () => engine.resumeRun(runId, request),
+    calledOn: runId,
+    refusals: {
+      endpoint: 'runResume',
+      unsupported: UNSUPPORTED_RESUME,
+      // The run id is the note's own, so either the run or the route may be what is missing.
+      missingRoute: `${gone} — or this engine cannot resume a hold. Update maestro-playground if so.`,
+      running: said => `Run ${runId} cannot be resumed yet: ${said}`,
+      gone,
+      invalid: said => `The engine would not resume run ${runId}: ${said}`,
+    },
+  })
 }

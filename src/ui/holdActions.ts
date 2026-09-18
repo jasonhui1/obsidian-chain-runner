@@ -3,7 +3,7 @@ import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
 import type { NoteStore } from './noteStore'
 import type { RerunDownstream } from './rerunDownstream'
-import type { Resume, ResumeResult } from './resume'
+import type { Resume, Resumed } from './resume'
 import type { RunPanels } from './runPanels'
 import type { SideQuest } from './sideQuest'
 import { guardWrite } from './vaultWrite'
@@ -35,7 +35,7 @@ export { DIRECTION_VERBS, type CanonChoice, type DirectionVerb, type HoldPick, t
 export type { ConversationEntry } from '../run/conversation'
 export { sameTurn, type RepliedTurn } from '../run/chat'
 export type { RoomAnswer } from '../run/askRoom'
-export { canonNote, type CanonOutcome, type ResumeResult } from './resume'
+export { canonNote, type CanonOutcome, type Resumed } from './resume'
 export { rerunDoing, type OnRerunProgress, type RerunProgress, type RerunStep } from '../run/rerunProgress'
 
 export const PROPOSAL_HEADING = 'A proposal cannot hold a “### ” heading: the hold note starts the next proposal there'
@@ -146,7 +146,7 @@ export class HoldActions {
    * The hold answered and the run carried on, its ticks locked and the run it
    * carried on as linked back; `undefined` when nothing ran.
    */
-  async resume(runId: string): Promise<ResumeResult | undefined> {
+  async resume(runId: string): Promise<Resumed | undefined> {
     const path = this.deps.notes.find(runId)
     return path ? this.deps.resume.resumeNote(path) : undefined
   }

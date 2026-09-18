@@ -149,7 +149,8 @@ function makeRun(): NodeRun {
   }
 
   const engine = {
-    loadWorkspace: () => Promise.resolve({ chains, capabilities }),
+    capabilities: () => Promise.resolve(capabilities),
+    listChains: () => Promise.resolve(chains),
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
       launched.push(request)
       if (launchError) throw launchError

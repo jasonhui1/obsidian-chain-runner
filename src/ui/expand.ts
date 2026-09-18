@@ -75,18 +75,19 @@ export class Expand {
       return
     }
 
-    const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
-    if (!workspace) return
-    if (!streamsOutputs(workspace.capabilities)) {
+    const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
+    if (!chains) return
+    const capabilities = await this.deps.engine.capabilities()
+    if (!streamsOutputs(capabilities)) {
       this.deps.notify(UNSUPPORTED_STREAMING)
       return
     }
-    if (workspace.chains.length === 0) {
+    if (chains.length === 0) {
       this.deps.notify(NO_CHAINS)
       return
     }
 
-    new ChainPicker(this.deps.app, workspace.chains, chain => this.pick(chain, block), {
+    new ChainPicker(this.deps.app, chains, chain => this.pick(chain, block), {
       placeholder: 'Expand this block with which chain?',
       unseeded: 'reads its own files — this block is not used',
     }).open()

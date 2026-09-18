@@ -1,11 +1,7 @@
+import { answer, type Answer, type OnEvent } from './answer'
 import { CANON_CONTEXT_KEY } from './canon'
-import { underRunOfRecord, type ForkedRun } from './fork'
-import { streamOrRefusal } from './headlessRun'
-import { disclaims, mayLackRoute } from '../engine/capabilities'
-import { engineSaid } from '../engine/guard'
-import type { EngineHttpError } from '../engine/transport'
 import type { EngineClient } from '../engine/client'
-import type { Capabilities, PromoteRequest, RunEvent } from '../engine/types'
+import type { PromoteRequest } from '../engine/types'
 
 /**
  * Promote: a proposer's chat reply made that node's own output. The engine
@@ -40,25 +36,19 @@ export function promoteRequest(promote: PromotedReply): PromoteRequest {
  * the run it was called on, or under the fork the engine named instead. Every
  * refusal comes back as words to show; only an unreachable engine still throws.
  */
-export async function runPromote(
-  engine: EngineClient,
-  capabilities: Capabilities,
-  promote: PromotedReply,
-  onEvent?: (event: RunEvent) => void,
-): Promise<ForkedRun> {
-  if (disclaims(capabilities, 'nodePromote')) return { kind: 'refused', said: UNSUPPORTED_PROMOTE }
-  const { runId, nodeId } = promote
-  const said = (error: EngineHttpError): string | undefined => refusal(error, promote, capabilities)
-  return underRunOfRecord(runId, heard => streamOrRefusal(() => engine.promoteNode({ runId, nodeId }, promoteRequest(promote)), said, heard), onEvent)
-}
-
-/** A node inside a loop, a `turn` out of range and a node that is no proposer all come back as 400. */
-function refusal(error: EngineHttpError, promote: PromotedReply, capabilities: Capabilities): string | undefined {
-  // The node comes from the run's own layout, so a 404 from an engine that
-  // never claimed the endpoint is the route missing, not the node (#54).
-  if (mayLackRoute(error, capabilities, 'nodePromote')) return UNSUPPORTED_PROMOTE
-  if (error.status === 409) return `Run ${promote.runId} is still running — use ${promote.name}'s reply once it stops`
-  if (error.status === 404) return `Run ${promote.runId} no longer has a node for ${promote.name}`
-  if (error.status === 400) return `${promote.name}'s reply cannot be used as the revision: ${engineSaid(error)}`
-  return undefined
+export function runPromote(engine: EngineClient, promote: PromotedReply, onEvent?: OnEvent): Promise<Answer> {
+  const { runId, nodeId, name } = promote
+  return answer(engine, {
+    open: () => engine.promoteNode({ runId, nodeId }, promoteRequest(promote)),
+    calledOn: runId,
+    onEvent,
+    refusals: {
+      endpoint: 'nodePromote',
+      unsupported: UNSUPPORTED_PROMOTE,
+      running: () => `Run ${runId} is still running — use ${name}'s reply once it stops`,
+      gone: `Run ${runId} no longer has a node for ${name}`,
+      // A node inside a loop, a `turn` out of range and a node that is no proposer all come back as 400.
+      invalid: said => `${name}'s reply cannot be used as the revision: ${said}`,
+    },
+  })
 }

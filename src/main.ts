@@ -69,7 +69,10 @@ export default class ChainRunnerPlugin extends Plugin {
     this.pill = this.addStatusBarItem()
     this.renderPill()
     this.register(
-      this.status.onChange(() => {
+      this.status.onChange(state => {
+        // An engine that came back may be another version: what it can do is asked again.
+        // A refresh that fails keeps what was known; the action that needs it will say so.
+        if (state === 'online') this.engine.loadWorkspace().catch(() => {})
         this.renderPill()
         // The empty result view says whether there is an engine, so it moves with the pill.
         this.refreshResultViews()

@@ -5,6 +5,7 @@ import { appendCanon, CANON_PATH, tickedCanonLines } from '../run/canon'
 import { appendResumeLink, directionBlock, holdHeading, waitingHoldsIn } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
 import { resumeRequest, runResume } from '../run/resume'
+import type { Landed } from '../run/answer'
 import type { EngineClient } from '../engine/client'
 
 /**
@@ -24,15 +25,8 @@ export function canonNote(canon: CanonOutcome): string {
   return canon === 'written' ? 'canon written' : 'canon not written'
 }
 
-/** What a resume landed on, for the command and the directing panel alike. */
-export interface ResumeResult {
-  /** The run it carried on as. */
-  runId?: string
-  /** The engine forked rather than carrying the run on: `runId` is a new run (#53). */
-  forked: boolean
-  error?: string
-  canon: CanonOutcome
-}
+/** What a resume landed on, and what became of its ticks, for the command and the directing panel alike. */
+export type Resumed = Landed & { canon: CanonOutcome }
 
 export interface ResumeDeps {
   store: NoteStore
@@ -63,7 +57,7 @@ export class Resume {
    * The note's hold answered, its ticks locked and the run linked back.
    * `undefined` only when nothing ran, which says why in a notice of its own.
    */
-  async resumeNote(path: string): Promise<ResumeResult | undefined> {
+  async resumeNote(path: string): Promise<Resumed | undefined> {
     const content = (await this.deps.store.read(path)) ?? ''
     const heading = holdHeading(content)
     const direction = directionBlock(content)
@@ -77,35 +71,26 @@ export class Resume {
     const request = resumeRequest({ direction, holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
 
     const { engine } = this.deps
-    const resumed = await this.deps.withEngine(async () => {
-      const { capabilities } = await engine.loadWorkspace()
-      return runResume(engine, capabilities, heading.runId, request)
-    })
+    const resumed = await this.deps.withEngine(() => runResume(engine, heading.runId, request))
     if (!resumed) return undefined
     if (resumed.kind === 'refused') {
       this.deps.notify(resumed.said)
       return undefined
     }
 
-    const outcome = resumed.outcome
-    const forked = resumed.forked
+    const { runId, forked, error } = resumed
     const ticked = tickedCanonLines(direction)
-    if (!outcome.runId) return { forked, ...(outcome.error ? { error: outcome.error } : {}), canon: ticked.length > 0 ? 'held-back' : 'none' }
+    if (!runId) return { ...resumed, canon: ticked.length > 0 ? 'held-back' : 'none' }
 
-    const canonOutcome = await this.lockCanon(canonPath, ticked, outcome.error)
+    const locked = await this.lockCanon(canonPath, ticked, error)
     // A note that refuses the link says so on its own; the run still happened, so it is still reported.
-    await this.linkRun(path, content, { runId: outcome.runId, forked })
+    await this.linkRun(path, content, { runId, forked })
     // A fork has moved the engine on whether it landed or not; a run carried on
     // in place that failed is left as it stands, still showing its own hold.
-    if (forked) await this.followFork(heading.runId, outcome.runId)
-    else if (!outcome.error) await this.deps.refresh(outcome.runId)
+    if (forked) await this.followFork(heading.runId, runId)
+    else if (!error) await this.deps.refresh(runId)
 
-    return {
-      runId: outcome.runId,
-      forked,
-      ...(outcome.error ? { error: outcome.error } : {}),
-      canon: canonOutcome,
-    }
+    return { ...resumed, canon: locked }
   }
 
   /**
@@ -124,7 +109,7 @@ export class Resume {
     return (await this.writeCanon(path, ticked)) ? 'written' : 'held-back'
   }
 
-  private resumeNotice(result: ResumeResult): string {
+  private resumeNotice(result: Resumed): string {
     if (!result.runId) return result.error ? `Resume failed: ${result.error}` : 'Resume produced no run'
     const as = result.forked ? `Resumed — forked as run ${result.runId}` : `Resumed as run ${result.runId}`
     if (!result.error) return as

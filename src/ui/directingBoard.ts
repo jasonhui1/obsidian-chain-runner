@@ -10,7 +10,7 @@ import {
   type RepliedTurn,
   type OnRerunProgress,
   type RerunProgress,
-  type ResumeResult,
+  type Resumed,
   rerunDoing,
   sameTurn,
 } from './holdActions'
@@ -40,7 +40,7 @@ export interface DirectingBoardDeps {
   /** Reruns downstream of every edited proposal. */
   rerun: (onProgress: OnRerunProgress) => Promise<void>
   /** Answers the hold and carries the run on; `undefined` when nothing ran. */
-  resume: (runId: string) => Promise<ResumeResult | undefined>
+  resume: (runId: string) => Promise<Resumed | undefined>
   /** Answers whether the side quest's result reached the hold. */
   sideQuest: (proposal: string, chain: string) => Promise<boolean>
   /** The chains a side quest can go through; none while the engine cannot say. */
@@ -301,7 +301,7 @@ export class DirectingBoard {
     if (shown?.kind === 'landed') this.resumeStatus(bar, shown.result)
   }
 
-  private resumeStatus(bar: HTMLElement, result: ResumeResult): void {
+  private resumeStatus(bar: HTMLElement, result: Resumed): void {
     const line = this.add(bar, 'div', `${CLS}-resumed`)
     const failed = result.error !== undefined
     const said = failed ? `Failed: ${result.error}` : 'Resumed'
@@ -597,7 +597,7 @@ interface Rerun {
 }
 
 /** A resume from the panel: going, landed, or stopped before it ran. */
-type ResumeShown = { kind: 'running' } | { kind: 'landed'; result: ResumeResult } | { kind: 'stopped' }
+type ResumeShown = { kind: 'running' } | { kind: 'landed'; result: Resumed } | { kind: 'stopped' }
 
 /** The button names what the run would lock, so nothing is resumed on ticks the reader forgot. */
 function resumeLabel(canon: CanonChoice[]): string {

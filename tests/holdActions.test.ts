@@ -233,7 +233,7 @@ function makeActions(): HoldActions {
       else if (request.agentName) yield* framesByAgent[request.agentName] ?? []
       else yield* chainFrames
     },
-    loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
+    capabilities: () => Promise.resolve(capabilities),
     resumeRun: async function* (runId: string, request: ResumeRequest) {
       resumes.push({ runId, request })
       yield* chainFrames

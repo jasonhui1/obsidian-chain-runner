@@ -102,6 +102,56 @@ describe('loadWorkspace capabilities', () => {
   })
 })
 
+describe('capabilities', () => {
+  const workspaceLoads = (): number => engine.requests.filter(request => request.path === '/api/workspace').length
+
+  it('asks the engine once and keeps what it said', async () => {
+    expect(await client.capabilities()).toEqual({ runLayoutFrames: true })
+    engine.capabilities = { runLayoutFrames: false }
+    expect(await client.capabilities()).toEqual({ runLayoutFrames: true })
+    expect(workspaceLoads()).toBe(1)
+  })
+
+  it('keeps what a workspace load already said, without asking again', async () => {
+    await client.listChains()
+    await client.capabilities()
+    expect(workspaceLoads()).toBe(1)
+  })
+
+  it('shares one question among callers asking at once', async () => {
+    await Promise.all([client.capabilities(), client.capabilities()])
+    expect(workspaceLoads()).toBe(1)
+  })
+
+  it('takes what a later workspace load says — the status poll’s refresh', async () => {
+    await client.capabilities()
+    engine.capabilities = { runLayoutFrames: true, runResume: true }
+    await client.loadWorkspace()
+    expect(await client.capabilities()).toEqual({ runLayoutFrames: true, runResume: true })
+  })
+
+  it('asks again once the base URL names another engine', async () => {
+    let url = engine.url
+    const moving = new EngineClient(() => url, createNodeTransport())
+    await moving.capabilities()
+    const other = await FakeEngine.start()
+    try {
+      other.capabilities = { nodePromote: true }
+      url = other.url
+      expect(await moving.capabilities()).toEqual({ nodePromote: true })
+    } finally {
+      await other.stop()
+    }
+  })
+
+  it('keeps nothing from a failed question, so the next one asks again', async () => {
+    engine.failWith = { status: 500, body: 'workspace unreadable' }
+    await expect(client.capabilities()).rejects.toBeInstanceOf(EngineHttpError)
+    engine.failWith = undefined
+    expect(await client.capabilities()).toEqual({ runLayoutFrames: true })
+  })
+})
+
 describe('getRun', () => {
   it('returns the run meta', async () => {
     engine.runMeta = { runId: '2026-09-02-ab12c', chainName: 'Five Personas', status: 'complete', agentOutputs: [] }

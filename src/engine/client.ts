@@ -61,21 +61,39 @@ const PROBE_PATH = '/api/runs/chain-runner-probe'
  * Every failure to reach it surfaces as `EngineOfflineError`.
  */
 export class EngineClient {
+  /** What the engine at `base` said it can do, kept so no action asks just to gate itself. */
+  private known: { base: string; capabilities: Promise<Capabilities> } | undefined
+
   constructor(
     private readonly baseUrl: () => string,
     private readonly transport: HttpTransport,
   ) {}
 
   /**
-   * The workspace, with the engine's account of what it supports. One too old to
-   * report `capabilities` yields an empty one, which supports nothing (ADR-0017).
+   * The workspace, with the engine's account of what it supports, which is kept
+   * for `capabilities`. One too old to report `capabilities` yields an empty one,
+   * which supports nothing (ADR-0017).
    */
   async loadWorkspace(): Promise<Workspace> {
+    const base = this.baseUrl()
     const workspace = await this.getJson<WorkspaceResponse>('/api/workspace')
-    return {
-      chains: (workspace.chains ?? []).map(summarise),
-      capabilities: workspace.capabilities ?? {},
-    }
+    const capabilities = workspace.capabilities ?? {}
+    this.known = { base, capabilities: Promise.resolve(capabilities) }
+    return { chains: (workspace.chains ?? []).map(summarise), capabilities }
+  }
+
+  /** What the engine can do: as it last said, asked only when nothing is kept for this base URL. */
+  capabilities(): Promise<Capabilities> {
+    const base = this.baseUrl()
+    if (this.known?.base === base) return this.known.capabilities
+    const asked = this.loadWorkspace().then(workspace => workspace.capabilities)
+    const known = { base, capabilities: asked }
+    this.known = known
+    // A failed question keeps nothing, so the next caller asks again.
+    asked.catch(() => {
+      if (this.known === known) this.known = undefined
+    })
+    return asked
   }
 
   /** Chains the workspace holds, narrowed to what the add-chain picker shows. */

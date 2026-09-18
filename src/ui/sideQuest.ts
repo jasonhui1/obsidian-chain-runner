@@ -1,7 +1,7 @@
 import { readFront, type NoteStore } from './noteStore'
 import { guardWrite } from './vaultWrite'
 import { fetchRun } from './rerunAndRefresh'
-import { runHeadless } from '../run/headlessRun'
+import { launch } from '../run/answer'
 import { holdHeading, proposalEdits, proposerPanels } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
 import { appendSideQuestResult, pendingSideQuest, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
@@ -67,15 +67,19 @@ export class SideQuest {
     }
     const seed = proposalEdits(content, source.layout.panels)[panel.node] ?? panel.text.trim()
 
-    const outcome = await this.deps.withEngine(() => runHeadless(engine, { chainName: quest.chainName, seedPrompt: seed }))
-    if (!outcome) return undefined
-    const runId = outcome.runId
-    if (!runId) {
-      notify(outcome.error ? `Side quest failed: ${outcome.error}` : 'Side quest produced no run')
+    const answered = await this.deps.withEngine(() => launch(engine, { chainName: quest.chainName, seedPrompt: seed }))
+    if (!answered) return undefined
+    if (answered.kind === 'refused') {
+      notify(answered.said)
       return undefined
     }
-    if (outcome.error) {
-      notify(`Side quest run ${runId} failed: ${outcome.error}`)
+    const runId = answered.runId
+    if (!runId) {
+      notify(answered.error ? `Side quest failed: ${answered.error}` : 'Side quest produced no run')
+      return undefined
+    }
+    if (answered.error) {
+      notify(`Side quest run ${runId} failed: ${answered.error}`)
       return undefined
     }
 

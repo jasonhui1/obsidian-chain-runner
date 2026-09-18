@@ -29,7 +29,8 @@ let store: MemoryNoteStore
 
 function makeRunner(): QuickRunner {
   const engine = {
-    loadWorkspace: () => Promise.resolve({ chains: CHAINS, capabilities: { runLayoutFrames: true } }),
+    capabilities: () => Promise.resolve({ runLayoutFrames: true }),
+    listChains: () => Promise.resolve(CHAINS),
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
       launched.push(request)
       for (const event of events) yield event

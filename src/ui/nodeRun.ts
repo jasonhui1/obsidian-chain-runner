@@ -110,13 +110,14 @@ export class NodeRun {
     const reading = this.read(target, view)
     if (!reading) return
 
-    const workspace = await this.deps.withEngine(() => this.deps.engine.loadWorkspace())
-    if (!workspace) return
-    if (!streamsOutputs(workspace.capabilities)) {
+    const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
+    if (!chains) return
+    const capabilities = await this.deps.engine.capabilities()
+    if (!streamsOutputs(capabilities)) {
       this.deps.notify(UNSUPPORTED_STREAMING)
       return
     }
-    const chain = workspace.chains.find(one => one.slug === data.chain)
+    const chain = chains.find(one => one.slug === data.chain)
     if (!chain) {
       this.deps.notify(CHAIN_GONE(data.chainName))
       return
