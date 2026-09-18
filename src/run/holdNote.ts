@@ -1,5 +1,6 @@
 import { readConversation, type ConversationEntry } from './conversation'
 import { fileName } from './outputNote'
+import { proposerPanels, verdictPanel } from './panels'
 import { extractSection } from './section'
 import { waitingHolds, type AgentOutput, type HoldCandidate, type HoldRecord, type LayoutPanel, type RunMeta } from '../engine/types'
 
@@ -57,11 +58,6 @@ export function thoughtsByNode(outputs: AgentOutput[]): Record<string, string> {
   return thoughts
 }
 
-/** A run's proposals: every panel but the one they converge on. */
-export function proposerPanels(panels: LayoutPanel[]): LayoutPanel[] {
-  return panels.filter(panel => panel.emphasis !== 'join')
-}
-
 /** The run and chain a hold note was written for. */
 export interface HoldHeading {
   runId: string
@@ -80,11 +76,6 @@ const verdictHeading = (chainName: string) => `## Verdict (${chainName})`
 const PREVIOUS_VERDICT = '## Previous verdict'
 const PROPOSALS = '## Proposals'
 const DIRECTION = '## Direction'
-
-/** The panel a hold shows as its verdict, when the layout has one. */
-export function verdictPanel(panels: LayoutPanel[]): LayoutPanel | undefined {
-  return panels.find(panel => panel.emphasis === 'join')
-}
 
 /**
  * A fresh hold note: each open hold with its candidates, the join panel as the

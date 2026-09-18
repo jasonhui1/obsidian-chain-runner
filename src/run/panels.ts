@@ -47,6 +47,16 @@ function scoped(text: string, socket: string | undefined): string {
   return extractSection(text, socket)
 }
 
+/** A run's proposals: every panel but the one they converge on. */
+export function proposerPanels(panels: LayoutPanel[]): LayoutPanel[] {
+  return panels.filter(panel => panel.emphasis !== 'join')
+}
+
+/** The panel a hold shows as its verdict, when the layout has one. */
+export function verdictPanel(panels: LayoutPanel[]): LayoutPanel | undefined {
+  return panels.find(panel => panel.emphasis === 'join')
+}
+
 /** How much a panel holds, in the one count every surface shows. */
 export function lineCount(text: string): number {
   const trimmed = text.trim()

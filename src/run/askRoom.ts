@@ -29,9 +29,9 @@ function answerBlock(answers: RoomAnswer[]): string {
   return answers.map(({ name, answer }) => quoted(`**${name}:**\n${answer.trim()}`)).join('\n')
 }
 
-/** A question and every answer to it written together, as the Conversation's last entry. */
-export function appendRoomQuestion(content: string, question: string, answers: RoomAnswer[]): string {
-  return appendToConversation(content, `ask the room: ${question}\n${answerBlock(answers)}`)
+/** An `ask the room:` line, as the Conversation's last entry, for the answers to land under. */
+export function appendRoomTrigger(content: string, question: string): string {
+  return appendToConversation(content, `ask the room: ${question}`)
 }
 
 /** A question to the room as the Conversation reads back. */

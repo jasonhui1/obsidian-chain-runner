@@ -1,4 +1,4 @@
-import { proposerPanels, verdictPanel } from './holdNote'
+import { proposerPanels, verdictPanel } from './panels'
 import { isEvent, type LayoutPanel, type RunEvent } from '../engine/types'
 
 /**

@@ -52,9 +52,9 @@ export function appendSideQuestResult(content: string, quest: SideQuestTurn, run
   return content.slice(0, found.insertAt) + resultBlock(run) + '\n' + content.slice(found.insertAt)
 }
 
-/** A side quest and its result written together, as the Conversation's last entry. */
-export function appendSideQuest(content: string, quest: SideQuestTurn, run: SideQuestRun): string {
-  return appendToConversation(content, `side quest: @${quest.name} ${quest.chainName}\n${resultBlock(run)}`)
+/** A `side quest:` line, as the Conversation's last entry, for the result to land under. */
+export function appendSideQuestTrigger(content: string, quest: SideQuestTurn): string {
+  return appendToConversation(content, `side quest: @${quest.name} ${quest.chainName}`)
 }
 
 /** Every side quest under Conversation, in order, each with where it sits in the note. */

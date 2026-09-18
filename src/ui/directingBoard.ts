@@ -1,21 +1,9 @@
-import {
-  canonNote,
-  DIRECTION_VERBS,
-  type CanonChoice,
-  type ConversationEntry,
-  type DirectionVerb,
-  type HoldPick,
-  type HoldProposal,
-  type HoldReading,
-  type RepliedTurn,
-  type OnRerunProgress,
-  type RerunProgress,
-  type Resumed,
-  rerunDoing,
-  sameTurn,
-} from './holdActions'
+import { canonNote, DIRECTION_VERBS, oneLine, type DirectionVerb, type Hold, type Resumed } from './holds'
 import type { ProposalEditor } from './proposalEditor'
 import { TypingBoxes } from './typingBoxes'
+import { sameTurn, type RepliedTurn } from '../run/chat'
+import type { ConversationEntry } from '../run/conversation'
+import { rerunDoing, type OnRerunProgress, type RerunProgress } from '../run/rerunProgress'
 
 /** The directing panel's elements: a Run tab, and a tab per proposal. Plain DOM; every button is handed to the deps. */
 
@@ -59,7 +47,7 @@ export interface DirectingBoardDeps {
 export type DirectingState =
   | { kind: 'idle' }
   | { kind: 'missing'; runId: string }
-  | { kind: 'hold'; hold: HoldReading }
+  | { kind: 'hold'; hold: Hold }
 
 const CLS = 'chain-runner-directing'
 
@@ -122,7 +110,7 @@ export class DirectingBoard {
   }
 
   /** A hold a rerun moved takes what the panel held under its earlier runs: an open edit, and the rerun still going. */
-  private followHold(hold: HoldReading): void {
+  private followHold(hold: Hold): void {
     for (const earlier of hold.earlierRuns) {
       const going = this.rerunning.get(earlier)
       this.rerunning.delete(earlier)
@@ -157,7 +145,7 @@ export class DirectingBoard {
     this.button(body, '✎ Direct this run', 'mod-cta').addEventListener('click', () => this.deps.writeHold())
   }
 
-  private hold(body: HTMLElement, hold: HoldReading): void {
+  private hold(body: HTMLElement, hold: Hold): void {
     const proposal = hold.proposals.find(one => one.name === this.tab)
     const row = this.add(body, 'div', `${CLS}-tabs`)
     const tabs = this.add(row, 'div', `${CLS}-tablist`)
@@ -198,21 +186,22 @@ export class DirectingBoard {
     this.sideQuests(this.section(body, 'Side quest'), hold, proposal.name)
   }
 
-  private sideQuests(el: HTMLElement, hold: HoldReading, name: string): void {
+  private sideQuests(el: HTMLElement, hold: Hold, name: string): void {
     el.classList.add(`${CLS}-quests`)
     const key = boxKey(hold.runId, `quest ${name}`)
-    for (const quest of hold.conversation) {
-      if (quest.kind !== 'quest' || quest.name !== name) continue
+    const pending = this.boxes.waiting(key)
+    const quests = hold.conversation.filter((entry): entry is QuestEntry => entry.kind === 'quest' && entry.name === name)
+    const sent = sentEntry(quests, pending, quest => quest.runId === undefined && quest.chainName)
+    for (const quest of quests) {
       const shown = this.turn(el, `Sent through ${quest.chainName}`)
       if (quest.runId === undefined) {
-        this.add(shown, 'div', `${CLS}-faint`, 'No result')
+        this.add(shown, 'div', `${CLS}-faint`, quest === sent ? `${quest.chainName} is running…` : 'No result')
         continue
       }
       this.markdown(shown, quest.result || '*The run gave no result.*')
       this.runLink(shown, quest.runId)
     }
-    const pending = this.boxes.waiting(key)
-    if (pending !== undefined) this.add(this.turn(el, `Sent through ${pending}`), 'div', `${CLS}-faint`, `${pending} is running…`)
+    if (pending !== undefined && !sent) this.add(this.turn(el, `Sent through ${pending}`), 'div', `${CLS}-faint`, `${pending} is running…`)
     if (this.edits.has(editKey(hold.runId, name))) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
     this.boxes.draw(el, {
       key,
@@ -241,36 +230,39 @@ export class DirectingBoard {
     this.draw(this.state)
   }
 
-  private chat(el: HTMLElement, hold: HoldReading, name: string): void {
+  private chat(el: HTMLElement, hold: Hold, name: string): void {
     const key = boxKey(hold.runId, `chat ${name}`)
     const turns = hold.conversation.filter((entry): entry is ChatEntry => entry.kind === 'chat' && entry.name === name)
     const pending = this.boxes.waiting(key)
+    const sent = sentEntry(turns, pending, turn => turn.reply === undefined && turn.message)
     if (turns.length === 0 && pending === undefined) this.add(el, 'div', `${CLS}-faint`, `Nothing said to ${name} yet`)
     for (const turn of turns) {
       const shown = this.turn(el, turn.message)
-      if (turn.reply === undefined) this.add(shown, 'div', `${CLS}-faint`, 'No reply')
+      if (turn.reply === undefined) this.add(shown, 'div', `${CLS}-faint`, turn === sent ? `${name} is replying…` : 'No reply')
       else this.markdown(shown, turn.reply)
       if (turn.revisedAs) this.add(shown, 'div', `${CLS}-faint`, `Used as the revision · run ${shortId(turn.revisedAs)}`)
       else if (turn.reply !== undefined) {
         this.reviseButton(shown, hold, { name, message: turn.message, reply: turn.reply, ...(turn.turn !== undefined ? { turn: turn.turn } : {}) })
       }
     }
-    if (pending !== undefined) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
+    if (pending !== undefined && !sent) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
     this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.deps.chat(name, text) })
   }
 
-  private room(el: HTMLElement, hold: HoldReading): void {
+  private room(el: HTMLElement, hold: Hold): void {
     const key = boxKey(hold.runId, 'room')
     const pending = this.boxes.waiting(key)
-    for (const entry of hold.conversation) {
-      if (entry.kind !== 'room') continue
+    const questions = hold.conversation.filter((entry): entry is RoomEntry => entry.kind === 'room')
+    const sent = sentEntry(questions, pending, entry => entry.answers.length === 0 && entry.question)
+    for (const entry of questions) {
       const shown = this.turn(el, entry.question)
+      if (entry.answers.length === 0) this.add(shown, 'div', `${CLS}-faint`, entry === sent ? 'The room is answering…' : 'No answers')
       for (const answer of entry.answers) {
         this.add(shown, 'div', `${CLS}-answerer`, answer.name)
         this.markdown(shown, answer.answer)
       }
     }
-    if (pending !== undefined) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, 'The room is answering…')
+    if (pending !== undefined && !sent) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, 'The room is answering…')
     this.boxes.draw(el, { key, placeholder: 'Ask every proposal…', label: 'Ask', send: text => this.deps.askRoom(text) })
   }
 
@@ -281,7 +273,7 @@ export class DirectingBoard {
     return turn
   }
 
-  private reviseButton(el: HTMLElement, hold: HoldReading, turn: RepliedTurn): void {
+  private reviseButton(el: HTMLElement, hold: Hold, turn: RepliedTurn): void {
     const going = this.rerunning.get(hold.runId)?.from
     const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
@@ -290,7 +282,7 @@ export class DirectingBoard {
   }
 
   /** Pinned under every tab: the Direction run as it stands, and what the last run of it landed on. */
-  private resumeBar(hold: HoldReading): void {
+  private resumeBar(hold: Hold): void {
     const bar = this.add(this.root, 'div', `${CLS}-footer`)
     const shown = this.resumes.get(hold.runId)
     const running = shown?.kind === 'running'
@@ -307,7 +299,7 @@ export class DirectingBoard {
     const said = failed ? `Failed: ${result.error}` : 'Resumed'
     const canon = canonNote(result.canon)
     this.add(line, 'span', failed ? `${CLS}-failed` : `${CLS}-faint`, canon ? `${said} · ${canon}` : said)
-    if (result.runId) this.runLink(line, result.runId)
+    this.runLink(line, result.hold.runId)
   }
 
   /** One resume at a time per run. */
@@ -321,12 +313,14 @@ export class DirectingBoard {
       if (result) outcome = { kind: 'landed', result }
     } finally {
       this.resumes.set(runId, outcome)
+      // A fork is shown as its own hold, which says what landed it.
+      if (outcome.kind === 'landed') this.resumes.set(outcome.result.hold.runId, outcome)
       this.draw(this.state)
     }
   }
 
   /** At the end of the tab row, once a proposal is edited; the edited ones are marked on their tabs. */
-  private rerunButton(row: HTMLElement, hold: HoldReading): void {
+  private rerunButton(row: HTMLElement, hold: Hold): void {
     if (!hold.proposals.some(one => one.edited)) return
     const going = this.rerunning.get(hold.runId)?.from
     const button = this.button(row, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', `mod-cta ${CLS}-rerun`)
@@ -336,7 +330,7 @@ export class DirectingBoard {
   }
 
   /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
-  private canRerun(hold: HoldReading): boolean {
+  private canRerun(hold: Hold): boolean {
     return !this.rerunning.has(hold.runId) && !this.editOpen(hold)
   }
 
@@ -347,7 +341,7 @@ export class DirectingBoard {
     return going.progress ? going.progress.proposals.includes(name) : true
   }
 
-  private editOpen(hold: HoldReading): boolean {
+  private editOpen(hold: Hold): boolean {
     return hold.proposals.some(one => this.edits.has(editKey(hold.runId, one.name)))
   }
 
@@ -355,7 +349,7 @@ export class DirectingBoard {
    * A rerun that writes the verdict again greys the old one under what it is doing,
    * until the run it lands on replaces it. Until it says, it is taken to.
    */
-  private verdict(body: HTMLElement, hold: HoldReading): void {
+  private verdict(body: HTMLElement, hold: Hold): void {
     const going = this.rerunning.get(hold.runId)
     const rewriting = going !== undefined && going.progress?.verdict !== false
     if (!hold.verdict && !rewriting) return
@@ -378,7 +372,7 @@ export class DirectingBoard {
     this.releases.push(this.deps.every(1000, show))
   }
 
-  private async startRerun(hold: HoldReading, from: RerunFrom, rerun: (onProgress: OnRerunProgress) => Promise<void>): Promise<void> {
+  private async startRerun(hold: Hold, from: RerunFrom, rerun: (onProgress: OnRerunProgress) => Promise<void>): Promise<void> {
     const runId = hold.runId
     if (!this.canRerun(hold)) return
     const going: Rerun = { from, startedAt: this.deps.now() }
@@ -586,6 +580,11 @@ interface OpenEdit {
 }
 
 type ChatEntry = Extract<ConversationEntry, { kind: 'chat' }>
+type RoomEntry = Extract<ConversationEntry, { kind: 'room' }>
+type QuestEntry = Extract<ConversationEntry, { kind: 'quest' }>
+type HoldProposal = Hold['proposals'][number]
+type CanonChoice = Hold['canon'][number]
+type HoldPick = Hold['holds'][number]
 
 type RerunFrom = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn }
 
@@ -617,6 +616,15 @@ function editKey(runId: string, proposal: string): string {
 
 function boxKey(runId: string, box: string): string {
   return `${runId} ${box}`
+}
+
+/**
+ * The entry the note already holds for what a box is sending: the last one,
+ * still unanswered, saying what was sent (ADR-0014). `unanswered` answers what it says.
+ */
+function sentEntry<T>(entries: T[], pending: string | undefined, unanswered: (entry: T) => string | false): T | undefined {
+  const last = entries.at(-1)
+  return pending !== undefined && last !== undefined && unanswered(last) === oneLine(pending) ? last : undefined
 }
 
 function shortId(runId: string): string {

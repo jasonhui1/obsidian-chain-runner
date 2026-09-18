@@ -2,12 +2,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectingBoard, type DirectingState } from '@/ui/directingBoard'
 import type { ProposalEditor } from '@/ui/proposalEditor'
-import type { HoldReading, RerunProgress, Resumed } from '@/ui/holdActions'
+import type { Hold as HoldReading, Resumed } from '@/ui/holds'
+import type { RerunProgress } from '@/run/rerunProgress'
 
 /**
  * The directing panel's elements: which tab shows what, and that every button
- * is handed to the hold actions rather than done here. What a hold reads as is
- * `holdActions.test.ts`.
+ * is handed to the hold module rather than done here. What a hold reads as is
+ * `holds.test.ts`.
  */
 
 const RUN = '2026-09-15-ubqPU2'
@@ -782,6 +783,28 @@ describe('a proposal tab, chatting', () => {
     expect(composer('Message world…').value).toBe('again?')
   })
 
+  it('draws the message once the note has it, still waiting, rather than twice (ADR-0014)', () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    type(composer('Message world…'), 'really\nso?')
+    button('Send').click()
+    panel.draw(showing(hold({ conversation: [{ kind: 'chat', name: 'world', message: 'really so?' }] })))
+    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent)
+    expect(turns).toEqual(['really so?world is replying…'])
+  })
+
+  it('says a message the engine left unanswered has no reply', async () => {
+    const panel = board()
+    panel.open(showing(), 'world')
+    type(composer('Message world…'), 'really?')
+    button('Send').click()
+    const unanswered = showing(hold({ conversation: [{ kind: 'chat', name: 'world', message: 'really?' }] }))
+    panel.draw(unanswered)
+    waiting[0]!(true)
+    await settled()
+    expect(root.querySelector('.chain-runner-directing-turn')?.textContent).toBe('really?No reply')
+  })
+
   it('puts the message back in the box when it could not be sent', async () => {
     board().open(showing(), 'world')
     type(composer('Message world…'), 'really?')
@@ -938,6 +961,16 @@ describe('the Run tab, talking to the room', () => {
     expect(text()).not.toContain('The room is answering…')
   })
 
+  it('draws a question the note has, still waiting, once', () => {
+    const panel = board()
+    panel.open(showing())
+    type(composer('Ask every proposal…'), 'the hook?')
+    button('Ask').click()
+    panel.draw(showing(hold({ conversation: [{ kind: 'room', question: 'the hook?', answers: [] }] })))
+    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent)
+    expect(turns).toEqual(['the hook?The room is answering…'])
+  })
+
   it('adds a CHANGE to the Direction from its own box', () => {
     board().open(showing())
     type(composer('What should change…'), 'rotation should hurt')
@@ -964,7 +997,8 @@ describe('without a hold', () => {
 describe('resume', () => {
   const RESUMED = '2026-09-16-Rs1Kq4'
 
-  const resumed = (over: Partial<Resumed> = {}): Resumed => ({ kind: 'landed', runId: RESUMED, forked: false, canon: 'written', ...over })
+  /** A resume that landed under `runId`, its hold as the hold module answers it. */
+  const resumed = (runId = RESUMED, over: Partial<Resumed> = {}): Resumed => ({ hold: hold({ runId }), forked: false, canon: 'written', ...over })
 
   const land = async (result: Resumed | undefined): Promise<void> => {
     resumesWaiting.pop()?.(result)
@@ -1008,7 +1042,7 @@ describe('resume', () => {
   it('names the run it carried on as, which a fork makes a different one', async () => {
     board().open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed({ runId: '2026-09-16-Forked' }))
+    await land(resumed('2026-09-16-Forked', { forked: true }))
     expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe('http://engine/history/2026-09-16-Forked')
   })
 
@@ -1023,7 +1057,7 @@ describe('resume', () => {
   it('says a run failed, and that its canon was held back', async () => {
     board().open(showing())
     button('▶ Resume · 1 of 2 canon ticked').click()
-    await land({ kind: 'landed', runId: RESUMED, forked: false, error: 'the model refused', canon: 'held-back' })
+    await land(resumed(RESUMED, { error: 'the model refused', canon: 'held-back' }))
     expect(text()).toContain('Failed: the model refused')
     expect(text()).toContain('canon not written')
   })

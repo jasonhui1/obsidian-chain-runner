@@ -25,3 +25,8 @@ export function refusingEngine(thrown: unknown, capabilities: Capabilities = {})
     throw thrown
   })
 }
+
+/** An engine answering only the calls a test names, as the test answers them. */
+export function stubEngine(calls: Partial<Record<keyof EngineClient, unknown>>): EngineClient {
+  return calls as unknown as EngineClient
+}

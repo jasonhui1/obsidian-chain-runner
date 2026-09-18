@@ -3,7 +3,7 @@ import { appendSideQuestResult, pendingSideQuest } from '@/run/sideQuest'
 
 /**
  * Side quest: what a `side quest: @name chain` line means, and how a run's
- * result lands under it. `sideQuestCommand.test.ts` is the order this happens
+ * result lands under it. `holds.test.ts` is the order this happens
  * in.
  */
 

@@ -1,19 +1,24 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createDirectionButtons, PROPOSAL_BUTTONS_CLASS, PROPOSAL_BUTTON_CLASS } from '@/ui/directionButtons'
+import { Holds } from '@/ui/holds'
+import { RerunWatch } from '@/run/rerunWatch'
+import { EngineOfflineError } from '@/engine/transport'
 import type { App } from 'obsidian'
 import { lastModal, resetModals } from './obsidian'
 import { MemoryNoteStore } from './memoryNoteStore'
+import { stubEngine } from './stubEngine'
 import type { MarkdownPostProcessorContext } from 'obsidian'
 
 /**
  * The verb buttons next to each proposal: that a hold note gets one row per
  * proposal and a note that isn't one gets none, and that pressing a button
- * appends the right line — COMBINE only once a second proposal is picked.
- * What the line says is `holdNote.test.ts`; only the buttons are here.
+ * appends the right line to the hold the heading names — COMBINE only once a
+ * second proposal is picked. What the line says is `holdNote.test.ts`.
  */
 
 const HOLD_PATH = 'Maestro/holds/2026-09-15-Ab3dE1.md'
+const HOLD = '# Hold: run 2026-09-15-Ab3dE1 · creative-director\n\n## Direction\nKEEP:\n\n## Conversation\n'
 
 let store: MemoryNoteStore
 let notes: Record<string, string>
@@ -21,7 +26,18 @@ let notices: string[]
 
 const context = (): MarkdownPostProcessorContext => ({ sourcePath: HOLD_PATH, docId: 'd' }) as MarkdownPostProcessorContext
 
-const buttons = () => createDirectionButtons({ app: {} as App, store, notify: message => void notices.push(message) })
+const buttons = () =>
+  createDirectionButtons({
+    app: {} as App,
+    holds: new Holds({
+      store,
+      engine: stubEngine({ getLayout: () => Promise.reject(new EngineOfflineError('http://localhost:3000')) }),
+      withEngine: action => action(),
+      notify: message => void notices.push(message),
+      reruns: new RerunWatch(),
+      engineUrl: () => 'http://localhost:3000',
+    }),
+  })
 
 /** A rendered hold note: a title, one heading per proposal, each its own section. */
 function rendered(names: string[], title = 'Hold: run 2026-09-15-Ab3dE1 · creative-director'): { container: HTMLElement; sections: HTMLElement[] } {
@@ -56,7 +72,7 @@ function press(row: Element, verb: string): void {
 
 beforeEach(() => {
   document.body.replaceChildren()
-  store = new MemoryNoteStore({ [HOLD_PATH]: '## Direction\nKEEP:\n\n## Conversation\n' })
+  store = new MemoryNoteStore({ [HOLD_PATH]: HOLD })
   notes = store.notes
   notices = []
   resetModals()
@@ -111,7 +127,7 @@ describe('pressing a verb', () => {
     expect(notes[HOLD_PATH]).toContain('KEEP: character-director')
   })
 
-  it('leaves a note that is not the note the button is drawn in alone', async () => {
+  it('leaves a note that is not the hold the heading names alone', async () => {
     notes['some/other.md'] = '## Direction\n\n## Conversation\n'
     const { sections } = rendered(['character-director'])
     buttons()(sections[0]!, context())

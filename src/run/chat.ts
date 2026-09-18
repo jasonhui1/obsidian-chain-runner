@@ -111,9 +111,9 @@ export function appendChatReply(content: string, turn: { name: string; message: 
   return content.slice(0, found.insertAt) + replyBlock(reply) + '\n' + content.slice(found.insertAt)
 }
 
-/** A message and its reply written together, as the Conversation's last entry. */
-export function appendChatTurn(content: string, turn: { name: string; message: string }, reply: ChatReply): string {
-  return appendToConversation(content, `@${turn.name} ${turn.message}\n${replyBlock(reply)}`)
+/** A `@name message` line, as the Conversation's last entry, for its reply to land under. */
+export function appendChatTrigger(content: string, turn: { name: string; message: string }): string {
+  return appendToConversation(content, `@${turn.name} ${turn.message}`)
 }
 
 /** The trailing bare `revise` replaced with which run it produced, so it is not acted on twice. */

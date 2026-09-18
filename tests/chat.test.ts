@@ -5,7 +5,7 @@ import type { AgentOutput, RunGraph, RunMeta } from '@/engine/types'
 /**
  * Approximate chat with a proposer, apart from the vault and the engine: what a
  * `@name message` line means, what a bare `revise` refers to, and the seed a
- * standalone agent call is given. `chatWithProposer.test.ts` is the order this
+ * standalone agent call is given. `holds.test.ts` is the order this
  * happens in.
  */
 

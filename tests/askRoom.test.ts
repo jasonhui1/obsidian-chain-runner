@@ -3,7 +3,7 @@ import { appendRoomAnswers, pendingRoomQuestion } from '@/run/askRoom'
 
 /**
  * Ask the room: what an `ask the room: …` line means, and how every
- * proposer's answer lands under it. `askTheRoom.test.ts` is the order this
+ * proposer's answer lands under it. `holds.test.ts` is the order this
  * happens in.
  */
 

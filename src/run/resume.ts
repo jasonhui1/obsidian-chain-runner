@@ -1,4 +1,4 @@
-import { answer, type Answer } from './answer'
+import { answer, type Answer, type OnEvent } from './answer'
 import { CANON_CONTEXT_KEY } from './canon'
 import { directionLines, type HoldPick } from './holdNote'
 import type { EngineClient } from '../engine/client'
@@ -51,11 +51,12 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
  * names — a hold already answered forks instead (#53). Every refusal comes
  * back as words to show; only an unreachable engine still throws.
  */
-export function runResume(engine: EngineClient, runId: string, request: ResumeRequest): Promise<Answer> {
+export function runResume(engine: EngineClient, runId: string, request: ResumeRequest, onEvent?: OnEvent): Promise<Answer> {
   const gone = `Run ${runId} no longer has the hold this note answers`
   return answer(engine, {
     open: () => engine.resumeRun(runId, request),
     calledOn: runId,
+    onEvent,
     refusals: {
       endpoint: 'runResume',
       unsupported: UNSUPPORTED_RESUME,

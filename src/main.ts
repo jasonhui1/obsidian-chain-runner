@@ -3,12 +3,11 @@ import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
 import { EngineStatus } from './engine/status'
+import { runViewUrl } from './run/provenance'
 import { RerunWatch } from './run/rerunWatch'
 import { seedFromNote } from './run/seed'
 import { withDefaults, type ChainRunnerSettings } from './settings'
 import { ChainNodes, newNodeId } from './ui/chainNodes'
-import { AskTheRoom } from './ui/askTheRoom'
-import { ChatWithProposer } from './ui/chatWithProposer'
 import { DirectingView, DIRECTING_VIEW_TYPE } from './ui/directingView'
 import { createDirectionButtons } from './ui/directionButtons'
 import {
@@ -22,9 +21,8 @@ import {
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
-import { DirectRun } from './ui/directRun'
-import { HoldActions } from './ui/holdActions'
-import { HoldNotes } from './ui/holdNotes'
+import { directRun, rerunFront, resumeFront, sendFront } from './ui/holdCommands'
+import { Holds } from './ui/holds'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
@@ -32,13 +30,9 @@ import { createNoteStore, readFront, type NoteStore } from './ui/noteStore'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
-import { RerunDownstream } from './ui/rerunDownstream'
 import { RerunOnDrawing } from './ui/rerunOnDrawing'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
-import { RunPanels } from './ui/runPanels'
-import { Resume } from './ui/resume'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
-import { SideQuest } from './ui/sideQuest'
 import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
 import { installScript } from './ui/toolScript'
@@ -98,10 +92,18 @@ export default class ChainRunnerPlugin extends Plugin {
     })
     this.registerMarkdownPostProcessor(sourceRun.processor)
     this.register(sourceRun.stop)
+    // The one owner of every hold note: the panel, the palette and the buttons all go through it.
+    const notify = (message: string): void => void new Notice(message)
+    const holds = new Holds({
+      store,
+      engine: this.engine,
+      withEngine: action => this.withEngine(action),
+      notify,
+      reruns,
+      engineUrl: () => this.settings.engineUrl,
+    })
     // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
-    this.registerMarkdownPostProcessor(
-      createDirectionButtons({ app: this.app, store, notify: message => new Notice(message) }),
-    )
+    this.registerMarkdownPostProcessor(createDirectionButtons({ app: this.app, holds }))
     const keep = new KeepPiece({
       app: this.app,
       store,
@@ -126,26 +128,10 @@ export default class ChainRunnerPlugin extends Plugin {
           keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
         }),
     )
-    const holdNotes = new HoldNotes({ store, notify: message => new Notice(message) })
-    const directRun = new DirectRun({
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      holdNotes,
-      currentRun: () => this.activeResultView()?.currentResult(),
-      open: path => store.open(path),
-    })
-    // From the drawing, a hold opens in the directing panel rather than a tab.
-    const directInPanel = new DirectRun({
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      holdNotes,
-      currentRun: () => undefined,
-      open: async (_note, runId) => void (await this.openDirectingPanel())?.show(runId),
-    })
     // A run watched live writes its hold note as it reaches each hold.
-    const holdReached = (runId: string, nodeId: string): Promise<void> => directInPanel.holdReached(runId, nodeId)
+    const holdReached = async (runId: string, nodeId: string): Promise<void> => {
+      if (await holds.write(runId)) new Notice(`Run ${runId} is waiting at ${nodeId}: its hold note is written`)
+    }
     this.quickRun = new QuickRunner({
       app: this.app,
       store,
@@ -226,65 +212,31 @@ export default class ChainRunnerPlugin extends Plugin {
     // An expansion outlives the command that started it; unloading the plugin ends it.
     this.register(() => expand.stop())
 
-    const chat = new ChatWithProposer({
-      store,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      reruns,
-    })
-    const askRoom = new AskTheRoom({
-      store,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-    })
-    const rerun = new RerunDownstream({
-      store,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      reruns,
-    })
-    const sideQuest = new SideQuest({
-      store,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      engineUrl: () => this.settings.engineUrl,
-    })
-    const resume = new Resume({
-      store,
-      engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      engineUrl: () => this.settings.engineUrl,
-      refresh: runId => directInPanel.refresh(runId),
-      openFork: runId => directInPanel.openHold(runId),
-    })
-    const holds = new HoldActions({
-      store,
-      notify: message => new Notice(message),
-      notes: holdNotes,
-      write: runId => directInPanel.write(runId),
-      chat,
-      room: askRoom,
-      rerun,
-      quest: sideQuest,
-      resume,
-      engineUrl: () => this.settings.engineUrl,
-      panels: new RunPanels(this.engine),
-    })
-    this.registerView(DIRECTING_VIEW_TYPE, leaf => new DirectingView(leaf, holds))
+    this.registerView(
+      DIRECTING_VIEW_TYPE,
+      leaf =>
+        new DirectingView(leaf, {
+          holds,
+          chains: () => this.engine.listChains().then(
+            chains => chains.map(chain => chain.name),
+            () => [],
+          ),
+          runUrl: runId => runViewUrl(this.settings.engineUrl, runId),
+        }),
+    )
     const directFromDrawing = new DirectFromDrawing({
       surface: {
         unavailable: () => surface.unavailable(),
         selectedRun: () => surface.selectedRun(),
         cardProposal: (element, view) => surface.cardProposal(element, view),
       },
-      direct: runId => directInPanel.openHold(runId),
+      // From the drawing, a hold opens in the directing panel, brought up to date or written first.
+      direct: async runId => {
+        const hold = (await holds.refresh(runId)) ?? (await holds.write(runId))
+        if (hold) await (await this.openDirectingPanel())?.show(hold.runId)
+      },
       showProposal: async (runId, proposal) => {
-        await directInPanel.refresh(runId)
+        await holds.refresh(runId)
         await (await this.openDirectingPanel())?.show(runId, proposal)
       },
       notify: message => new Notice(message),
@@ -369,7 +321,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.addCommand({
       id: 'direct-this-run',
       name: 'Direct this run',
-      callback: () => void directRun.start(),
+      callback: () => void directRun(holds, notify, this.activeResultView()?.currentResult()),
     })
 
     this.addCommand({
@@ -387,31 +339,31 @@ export default class ChainRunnerPlugin extends Plugin {
     this.addCommand({
       id: 'resume-hold',
       name: 'Resume this hold',
-      callback: () => void resume.start(),
+      callback: () => void resumeFront(holds, notify),
     })
 
     this.addCommand({
       id: 'rerun-downstream',
       name: 'Rerun downstream',
-      callback: () => void rerun.start(),
+      callback: () => void rerunFront(holds, notify),
     })
 
     this.addCommand({
       id: 'chat-with-proposer',
       name: 'Chat with proposer',
-      callback: () => void chat.start(),
+      callback: () => void sendFront(holds, notify, 'chat'),
     })
 
     this.addCommand({
       id: 'ask-the-room',
       name: 'Ask the room',
-      callback: () => void askRoom.start(),
+      callback: () => void sendFront(holds, notify, 'room'),
     })
 
     this.addCommand({
       id: 'side-quest',
       name: 'Side quest',
-      callback: () => void sideQuest.start(),
+      callback: () => void sendFront(holds, notify, 'quest'),
     })
 
     // Proof the client reaches a live engine, and something to exercise the
