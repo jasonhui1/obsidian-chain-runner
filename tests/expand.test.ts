@@ -9,7 +9,7 @@ import {
   PROPOSAL_GONE,
   SELECT_A_PROPOSAL,
 } from '@/ui/expand'
-import { SELECT_ONE_BLOCK, type BlockReading, type NodeSurface, type PlacedProposal } from '@/ui/excalidraw'
+import { SELECT_ONE_BLOCK, type BlockReading, type ProposalSurface, type PlacedProposal } from '@/ui/excalidraw'
 import { UNSUPPORTED_STREAMING } from '@/run/stream'
 import { OFFLINE_NOTICE } from '@/engine/guard'
 import { OutputNotes } from '@/ui/outputNotes'
@@ -45,6 +45,8 @@ let editable: boolean
 let store: MemoryNoteStore
 let vault: Record<string, string>
 let proposalIds: number
+/** How many times the drawing was bound. */
+let bound: number
 
 /** The engine's own layout frame: `n` panels, the first `done` of them settled. */
 const layout = (names: string[], done: number): RunEvent => ({
@@ -71,30 +73,22 @@ const finishes = (): RunEvent[] => [
 ]
 
 function makeExpand(): Expand {
-  const surface: NodeSurface = {
+  const surface: ProposalSurface = {
     unavailable: () => undefined,
-    hasActiveDrawing: () => true,
-    selectedNode: () => undefined,
-    reflow: () => Promise.resolve(false),
-    place: () => Promise.resolve(),
-    setParameter: () => Promise.resolve(true),
-    setChain: () => Promise.resolve(true),
-    read: () => undefined,
-    setRunStatus: () => Promise.resolve(true),
-    placeRun: () => Promise.resolve(true),
-    selection: () => block,
-    selectedProposal: () => selectedProposal,
-    selectedRun: () => undefined,
-    openViews: () => [],
-    followRerun: () => Promise.resolve(false),
-    cardProposal: () => undefined,
-    placeProposals: (proposals, source) => {
-      placed.push({ proposals, sourceId: source.id })
-      return Promise.resolve()
-    },
-    editProposal: (proposalId, action) => {
-      edits.push({ proposalId, action })
-      return Promise.resolve(editable)
+    on: () => {
+      bound++
+      return {
+        selection: () => block,
+        selectedProposal: () => selectedProposal,
+        placeProposals: (proposals, source) => {
+          placed.push({ proposals, sourceId: source.id })
+          return Promise.resolve()
+        },
+        editProposal: (proposalId, action) => {
+          edits.push({ proposalId, action })
+          return Promise.resolve(editable)
+        },
+      }
     },
   }
 
@@ -170,6 +164,7 @@ beforeEach(() => {
   launched = []
   notices = []
   placed = []
+  bound = 0
   edits = []
   selectedProposal = undefined
   editable = true
@@ -280,6 +275,12 @@ describe('what lands on the drawing', () => {
     expect(identities.map(one => one.proposalId)).toEqual(['p-1', 'p-2'])
     expect(identities.map(one => one.notePath)).toEqual([OPTIMIST, SKEPTIC])
     expect(identities.every(one => one.runId === RUN_ID)).toBe(true)
+  })
+
+  it('places them on the drawing the block was read off, bound once', async () => {
+    await expandWith()
+    expect(placed).toHaveLength(1)
+    expect(bound).toBe(1)
   })
 
   it('places them once, not once per frame', async () => {

@@ -14,7 +14,7 @@ import { CHAIN_GONE, NODE_GONE } from '@/ui/chainNodes'
 import { UNSUPPORTED_STREAMING } from '@/run/stream'
 import { OFFLINE_NOTICE } from '@/engine/guard'
 import { runLabel, type NodeRunStatus } from '@/ui/chainNode'
-import type { NodeReading, NodeSurface } from '@/ui/excalidraw'
+import type { DrawingView, NodeReading, RunSurface } from '@/ui/excalidraw'
 import { OutputNotes } from '@/ui/outputNotes'
 import type { RunFrame } from '@/run/runFrame'
 import type { EngineClient } from '@/engine/client'
@@ -58,6 +58,10 @@ let vault: Record<string, string>
 let offline: number
 /** Whether this Excalidraw can make a real frame. */
 let canFrame: boolean
+/** Each view a run bound its drawing on. */
+let boundOn: (DrawingView | undefined)[]
+/** Why the drawing cannot be bound, when it cannot. */
+let unbindable: string | undefined
 /** Every vault write, so the cadence of the streaming flush is visible. */
 let writes: string[]
 /** What the vault held after each event of the stream was handled. */
@@ -121,30 +125,24 @@ const joinFirst = (done: number): RunEvent => ({
 })
 
 function makeRun(): NodeRun {
-  const surface: NodeSurface = {
-    selection: () => undefined,
-    selectedProposal: () => undefined,
-    selectedRun: () => undefined,
-    openViews: () => [],
-    followRerun: () => Promise.resolve(false),
-    cardProposal: () => undefined,
-    selectedNode: () => undefined,
-    reflow: () => Promise.resolve(false),
-    placeProposals: async () => {},
-    editProposal: async () => false,
+  const surface: RunSurface = {
     unavailable: () => undefined,
-    hasActiveDrawing: () => true,
-    place: () => Promise.resolve(),
-    setParameter: () => Promise.resolve(true),
-    setChain: () => Promise.resolve(true),
-    read: () => reading,
-    setRunStatus: (_target, status) => {
-      labels.push(runLabel(status))
-      return Promise.resolve(true)
-    },
-    placeRun: (frame, outputs) => {
-      framed.push({ frame, notes: outputs.map(output => output.notePath) })
-      return Promise.resolve(canFrame)
+    openViews: () => [],
+    on: view => {
+      boundOn.push(view)
+      if (unbindable) throw new Error(unbindable)
+      return {
+        read: () => reading,
+        setRunStatus: (_target, status) => {
+          labels.push(runLabel(status))
+          return Promise.resolve(true)
+        },
+        placeRun: (frame, outputs) => {
+          framed.push({ frame, notes: outputs.map(output => output.notePath) })
+          return Promise.resolve(canFrame)
+        },
+        followRerun: () => Promise.resolve(false),
+      }
     },
   }
 
@@ -205,6 +203,8 @@ beforeEach(() => {
   labels = []
   framed = []
   canFrame = true
+  boundOn = []
+  unbindable = undefined
   store = new MemoryNoteStore()
   vault = store.notes
   offline = 0
@@ -214,6 +214,21 @@ beforeEach(() => {
 })
 
 describe('what the run is given', () => {
+  it('binds the drawing once, on the click’s own view, for the whole run', async () => {
+    const view = { file: null }
+    await makeRun().run(nodeData, { groupIds: ['g-1'] }, view)
+    expect(framed).toHaveLength(1)
+    expect(labels.length).toBeGreaterThan(1)
+    expect(boundOn).toEqual([view])
+  })
+
+  it('says why, and runs nothing, when there is no drawing to bind', async () => {
+    unbindable = 'Open the Excalidraw drawing as its own tab to do that.'
+    await start()
+    expect(notices).toEqual([unbindable])
+    expect(launched).toEqual([])
+  })
+
   it('sends what is bound into the node, in reading order', async () => {
     reading!.inputs.inputs = [
       { kind: 'text', text: 'a premise' },

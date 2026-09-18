@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { RerunOnDrawing, type RerunDrawings } from '@/ui/rerunOnDrawing'
+import { RerunOnDrawing } from '@/ui/rerunOnDrawing'
+import type { DrawingView, RunSurface } from '@/ui/excalidraw'
 import type { RerunLanding } from '@/run/rerunWatch'
 import type { RunProvenance } from '@/ui/outputNotes'
 import type { RunPanel } from '@/run/panels'
@@ -26,19 +27,32 @@ let written: { panel: RunPanel; run: RunProvenance }[]
 let followed: { view: string; from: readonly string[]; to: string; notes: Record<string, string | undefined> }[]
 let notices: string[]
 let refused: string[]
+/** Each drawing bound, by name, in the order it was. */
+let bound: string[]
 
 function makeFollower(): RerunOnDrawing {
-  const surface: RerunDrawings = {
+  /** Each open drawing's view, known here by its name. */
+  const names = new Map<DrawingView, string>(Object.keys(drawings).map(name => [{ file: null }, name]))
+  const surface: RunSurface = {
     unavailable: () => unavailable,
-    openViews: () => Object.keys(drawings),
-    followRerun: async (from, to, noteFor, on) => {
-      const shown = drawings[on as string]
-      if (shown === 'unreachable') throw new Error('That drawing went away')
-      if (!shown) return false
-      const notes: Record<string, string | undefined> = {}
-      for (const output of shown) notes[output] = await noteFor(output)
-      followed.push({ view: on as string, from, to, notes })
-      return true
+    openViews: () => [...names.keys()],
+    on: view => {
+      const name = names.get(view as DrawingView) as string
+      bound.push(name)
+      return {
+        read: () => undefined,
+        setRunStatus: () => Promise.resolve(true),
+        placeRun: () => Promise.resolve(true),
+        followRerun: async (from, to, noteFor) => {
+          const shown = drawings[name]
+          if (shown === 'unreachable') throw new Error('That drawing went away')
+          if (!shown) return false
+          const notes: Record<string, string | undefined> = {}
+          for (const output of shown) notes[output] = await noteFor(output)
+          followed.push({ view: name, from, to, notes })
+          return true
+        },
+      }
     },
   }
   return new RerunOnDrawing({
@@ -61,6 +75,7 @@ beforeEach(() => {
   followed = []
   notices = []
   refused = []
+  bound = []
 })
 
 describe('RerunOnDrawing', () => {
@@ -81,6 +96,7 @@ describe('RerunOnDrawing', () => {
     drawings = { board: ['Verdict'], sketch: [] }
     await makeFollower().land(landing)
     expect(followed.map(one => one.view)).toEqual(['board', 'sketch'])
+    expect(bound).toEqual(['board', 'sketch'])
     expect(written.map(one => one.panel.name)).toEqual(['Verdict'])
   })
 

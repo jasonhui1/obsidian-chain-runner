@@ -12,11 +12,12 @@ import { DirectingView, DIRECTING_VIEW_TYPE } from './ui/directingView'
 import { createDirectionButtons } from './ui/directionButtons'
 import {
   createDrawingSurface,
-  createNodeSurface,
+  createExcalidrawSurface,
   createScriptVault,
   registerLinkHook,
   registerSelectionHook,
   scriptFolder,
+  type DrawingView,
 } from './ui/excalidraw'
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
@@ -146,7 +147,7 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the command that started it; unloading the plugin ends it.
     this.register(() => this.quickRun.stop())
 
-    const surface = createNodeSurface(this.app)
+    const surface = createExcalidrawSurface(this.app)
     // A rerun that lands moves the cards on every open drawing on to the run it landed as.
     const onDrawing = new RerunOnDrawing({ surface, notes, notify: message => new Notice(message) })
     this.register(reruns.onLanding(landing => onDrawing.land(landing)))
@@ -232,11 +233,7 @@ export default class ChainRunnerPlugin extends Plugin {
       ;(await this.openDirectingPanel())?.show(runId, hold, proposal)
     }
     const directFromDrawing = new DirectFromDrawing({
-      surface: {
-        unavailable: () => surface.unavailable(),
-        selectedRun: () => surface.selectedRun(),
-        cardProposal: (element, view) => surface.cardProposal(element, view),
-      },
+      surface,
       direct: runId => showOnPanel(runId),
       showProposal: (runId, proposal) => showOnPanel(runId, proposal),
       notify: message => new Notice(message),
@@ -384,7 +381,7 @@ export default class ChainRunnerPlugin extends Plugin {
    * What the Excalidraw toolbar script calls — this plugin's one caller from
    * outside it. The view is the drawing the button was pressed on.
    */
-  addChainNode(view?: unknown): Promise<void> {
+  addChainNode(view?: DrawingView): Promise<void> {
     return this.nodes.placeUnset(view)
   }
 

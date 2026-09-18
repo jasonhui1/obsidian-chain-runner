@@ -96,7 +96,7 @@ export class ChainNodes {
     // Only the palette needs a drawing in front of the reader; a click brought its own.
     if (!view && !this.onADrawing()) return
     const nodeId = this.deps.newNodeId()
-    await this.onDrawing(() => this.deps.surface.place(buildChainNode(undefined, { nodeId }), view))
+    await this.onDrawing(() => this.deps.surface.on(view).place(buildChainNode(undefined, { nodeId })))
   }
 
   /**
@@ -175,7 +175,7 @@ export class ChainNodes {
   /** The node still selected, for a double-click whose first click changed nothing. */
   private stillSelected(): MaybeNodeElement | undefined {
     try {
-      return this.deps.surface.selectedNode(this.lastView)
+      return this.deps.surface.on(this.lastView).selectedNode()
     } catch {
       // Every double-click in the workspace arrives here; only a drawing answers.
       return undefined
@@ -209,7 +209,7 @@ export class ChainNodes {
    */
   handleResize(): void {
     try {
-      void this.deps.surface.reflow(this.lastView).catch(() => {})
+      void this.deps.surface.on(this.lastView).reflow().catch(() => {})
     } catch {
       // Every release in the workspace arrives here; only a drawing answers.
     }
@@ -247,7 +247,7 @@ export class ChainNodes {
           chain,
           value =>
             void this.onDrawing(async () => {
-              if (!(await this.deps.surface.setChain(target, chain, value, view))) this.deps.notify(NODE_GONE)
+              if (!(await this.deps.surface.on(view).setChain(target, chain, value))) this.deps.notify(NODE_GONE)
             }),
           at,
         ),
@@ -282,7 +282,7 @@ export class ChainNodes {
       parameter.options,
       value => {
         void this.onDrawing(async () => {
-          if (!(await this.deps.surface.setParameter(target, value, view))) this.deps.notify(NODE_GONE)
+          if (!(await this.deps.surface.on(view).setParameter(target, value))) this.deps.notify(NODE_GONE)
         })
       },
       at,
@@ -292,7 +292,7 @@ export class ChainNodes {
   private async put(chain: ChainSummary, parameterValue: string | undefined): Promise<void> {
     const nodeId = this.deps.newNodeId()
     await this.onDrawing(() =>
-      this.deps.surface.place(buildChainNode(chain, { nodeId, ...(parameterValue ? { parameterValue } : {}) })),
+      this.deps.surface.on().place(buildChainNode(chain, { nodeId, ...(parameterValue ? { parameterValue } : {}) })),
     )
   }
 

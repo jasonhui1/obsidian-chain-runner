@@ -14,3 +14,13 @@ export async function onDrawing<T>(
     return undefined
   }
 }
+
+/** `onDrawing` for what answers at once: binding a drawing, or reading it. */
+export function readDrawing<T>(read: () => T | undefined, notify: (message: string) => void): T | undefined {
+  try {
+    return read()
+  } catch (error) {
+    notify(error instanceof Error ? error.message : UNREACHABLE_DRAWING)
+    return undefined
+  }
+}

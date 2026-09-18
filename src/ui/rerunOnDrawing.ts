@@ -1,4 +1,4 @@
-import type { NodeSurface } from './excalidraw'
+import type { RunSurface } from './excalidraw'
 import { onDrawing } from './onDrawing'
 import type { OutputNotes } from './outputNotes'
 import type { RerunLanding } from '../run/rerunWatch'
@@ -9,10 +9,8 @@ import type { RerunLanding } from '../run/rerunWatch'
  * Only drawings open now can be reached.
  */
 
-export type RerunDrawings = Pick<NodeSurface, 'unavailable' | 'openViews' | 'followRerun'>
-
 export interface RerunOnDrawingDeps {
-  surface: RerunDrawings
+  surface: RunSurface
   notes: Pick<OutputNotes, 'write'>
   notify: (message: string) => void
 }
@@ -30,7 +28,7 @@ export class RerunOnDrawing {
       return filed.get(output) as Promise<string | undefined>
     }
     for (const view of surface.openViews()) {
-      await onDrawing(() => surface.followRerun(landing.from, landing.runId, noteFor, view), notify)
+      await onDrawing(() => surface.on(view).followRerun(landing.from, landing.runId, noteFor), notify)
     }
   }
 

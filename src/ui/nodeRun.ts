@@ -1,5 +1,5 @@
 import { chainIsUnset, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
-import type { DrawingView, NodeReading, NodeSurface, PlacedOutput } from './excalidraw'
+import type { DrawingView, NodeReading, PlacedOutput, RunDrawing, RunSurface } from './excalidraw'
 import type { Box } from './nodeScene'
 import type { NoteStore } from './noteStore'
 import type { OutputNotes } from './outputNotes'
@@ -9,7 +9,7 @@ import { openLiveOutputs, type LiveOutput } from './liveOutputs'
 import type { RunLayout } from '../run/panels'
 import { buildRunFrame, type FramedPanel, type RunFrame } from '../run/runFrame'
 import { seedFromInputs } from './inputSeed'
-import { onDrawing, UNREACHABLE_DRAWING } from './onDrawing'
+import { onDrawing, readDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { runFailure } from '../run/session'
 import { streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
 import type { EngineClient } from '../engine/client'
@@ -49,7 +49,7 @@ export interface NodeRunDeps {
   markOffline: () => void
   /** Writes the hold note of a run that reached a hold. */
   holdReached: (runId: string, nodeId: string) => Promise<void>
-  surface: NodeSurface
+  surface: RunSurface
   notes: OutputNotes
 }
 
@@ -58,8 +58,8 @@ interface NodeRunPlan {
   chain: ChainSummary
   seed: string
   target: NodeTarget
-  /** The click's own view — the only handle on a drawing embedded in a note. */
-  view: DrawingView | undefined
+  /** The drawing the click came from, bound once for the whole run. */
+  drawing: RunDrawing
   node: Box
   parameterValue?: string
 }
@@ -107,7 +107,10 @@ export class NodeRun {
       return
     }
 
-    const reading = this.read(target, view)
+    // The click's own view, or else the tab in front, bound once for the whole run.
+    const drawing = readDrawing(() => this.deps.surface.on(view), this.deps.notify)
+    if (!drawing) return
+    const reading = this.read(target, drawing)
     if (!reading) return
 
     const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
@@ -140,7 +143,7 @@ export class NodeRun {
       chain,
       seed,
       target,
-      view,
+      drawing,
       node: reading.box,
       ...(data.parameterValue ? { parameterValue: data.parameterValue } : {}),
     }
@@ -159,9 +162,9 @@ export class NodeRun {
   }
 
   /** What the node is bound to and where it sits, or a notice and nothing. */
-  private read(target: NodeTarget, view: DrawingView | undefined): NodeReading | undefined {
+  private read(target: NodeTarget, drawing: RunDrawing): NodeReading | undefined {
     try {
-      const reading = this.deps.surface.read(target, view)
+      const reading = drawing.read(target)
       if (reading) return reading
       this.deps.notify(NODE_GONE)
     } catch (error) {
@@ -171,7 +174,7 @@ export class NodeRun {
   }
 
   private async launch(plan: NodeRunPlan, controller: AbortController): Promise<void> {
-    const { chain, seed, target, view, parameterValue } = plan
+    const { chain, seed, target, drawing, parameterValue } = plan
 
     let said = ''
     // Every write to a drawing is a save, so only a change of words earns one.
@@ -179,7 +182,7 @@ export class NodeRun {
       const next = JSON.stringify(status)
       if (next === said) return
       said = next
-      await this.onDrawing(() => this.deps.surface.setRunStatus(target, status, view))
+      await this.onDrawing(() => drawing.setRunStatus(target, status))
     }
 
     await say({ kind: 'running', done: 0 })
@@ -216,7 +219,7 @@ export class NodeRun {
     })
 
     const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, notePath: one.note.path }))
-    await this.place(frame, placed, plan.view)
+    await this.place(frame, placed, plan.drawing)
     return outputs
   }
 
@@ -225,7 +228,7 @@ export class NodeRun {
    * produced no panels is done, not failed — an empty answer is still an answer.
    */
   private async finish(run: ChainRunOutcome<FramedPanel>, plan: NodeRunPlan): Promise<void> {
-    const { target, view } = plan
+    const { target, drawing } = plan
     const error = runFailure(run.state)
     if (error && error !== run.failure) this.deps.notify(error)
     // The reason goes onto the node too: a notice is gone when the reader looks back.
@@ -237,19 +240,19 @@ export class NodeRun {
       if (!run.state.runId) {
         if (!error) this.deps.notify(NOTHING_WRITTEN)
         await this.onDrawing(() =>
-          this.deps.surface.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }, view),
+          drawing.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }),
         )
         return
       }
       this.deps.notify(NO_OUTPUTS)
     }
-    await this.onDrawing(() => this.deps.surface.setRunStatus(target, settled, view))
+    await this.onDrawing(() => drawing.setRunStatus(target, settled))
   }
 
   /** Puts the frame on the drawing, saying so when it could not be a real frame. */
-  private async place(frame: RunFrame, outputs: PlacedOutput[], view: DrawingView | undefined): Promise<void> {
+  private async place(frame: RunFrame, outputs: PlacedOutput[], drawing: RunDrawing): Promise<void> {
     await this.onDrawing(async () => {
-      if (!(await this.deps.surface.placeRun(frame, outputs, view))) this.deps.notify(NO_FRAME)
+      if (!(await drawing.placeRun(frame, outputs))) this.deps.notify(NO_FRAME)
       return true
     })
   }

@@ -1,11 +1,11 @@
 import type { App } from 'obsidian'
 import { ChainPicker, ParameterPicker } from './chainPicker'
-import type { BlockReading, DrawingView, NodeSurface, PlacedProposal } from './excalidraw'
+import type { BlockReading, DrawingView, PlacedProposal, ProposalDrawing, ProposalSurface } from './excalidraw'
 import { SELECT_ONE_BLOCK } from './excalidraw'
 import { seedFromInputs } from './inputSeed'
 import type { NoteStore } from './noteStore'
 import type { OutputNotes } from './outputNotes'
-import { onDrawing, UNREACHABLE_DRAWING } from './onDrawing'
+import { onDrawing, readDrawing } from './onDrawing'
 import { proposalData, type MaybeProposalElement } from './proposal'
 import { buildProposalFan, type ProposedPanel } from './proposalFan'
 import { runIntoNotes } from './chainRun'
@@ -48,10 +48,16 @@ export interface ExpandDeps {
   markOffline: () => void
   /** Writes the hold note of a run that reached a hold. */
   holdReached: (runId: string, nodeId: string) => Promise<void>
-  surface: NodeSurface
+  surface: ProposalSurface
   notes: OutputNotes
   /** A fresh identity for a proposal, injected so what is placed is checkable. */
   newProposalId: () => string
+}
+
+/** The block an expansion grows from, and the drawing it was read off. */
+interface Source {
+  drawing: ProposalDrawing
+  block: BlockReading
 }
 
 export class Expand {
@@ -68,7 +74,10 @@ export class Expand {
       return
     }
 
-    const block = this.read()
+    // Bound now, so the proposals land on this drawing even if the reader moves on.
+    const drawing = readDrawing(() => this.deps.surface.on(), this.deps.notify)
+    if (!drawing) return
+    const block = this.read(drawing)
     if (!block) return
     if (this.inFlight.has(block.id)) {
       this.deps.notify(ALREADY_EXPANDING)
@@ -87,7 +96,7 @@ export class Expand {
       return
     }
 
-    new ChainPicker(this.deps.app, chains, chain => this.pick(chain, block), {
+    new ChainPicker(this.deps.app, chains, chain => this.pick(chain, { drawing, block }), {
       placeholder: 'Expand this block with which chain?',
       unseeded: 'reads its own files — this block is not used',
     }).open()
@@ -107,8 +116,10 @@ export class Expand {
     const data = proposalData(element)
     // Not ours: a wiki link the reader drew themselves, and theirs to follow.
     if (!data) return true
-    if (data.role === 'accept') void this.decide(data.proposalId, 'accept', undefined, view)
-    if (data.role === 'dismiss') void this.decide(data.proposalId, 'dismiss', data.notePath, view)
+    if (data.role === 'accept' || data.role === 'dismiss') {
+      const drawing = readDrawing(() => this.deps.surface.on(view), this.deps.notify)
+      if (drawing) void this.decide(drawing, data.proposalId, data.role, data.role === 'dismiss' ? data.notePath : undefined)
+    }
     // A click on the card opens the note it shows, which is what a card is for.
     return data.role === 'card'
   }
@@ -124,51 +135,50 @@ export class Expand {
       this.deps.notify(unavailable)
       return
     }
-    const data = onSelection(() => this.deps.surface.selectedProposal(), this.deps.notify)
+    const drawing = readDrawing(() => this.deps.surface.on(), this.deps.notify)
+    if (!drawing) return
+    const data = readDrawing(() => drawing.selectedProposal(), this.deps.notify)
     if (!data) {
       this.deps.notify(SELECT_A_PROPOSAL)
       return
     }
-    await this.decide(data.proposalId, action, action === 'dismiss' ? data.notePath : undefined, undefined)
+    await this.decide(drawing, data.proposalId, action, action === 'dismiss' ? data.notePath : undefined)
   }
 
   /** Keeping or dropping a proposal; a dropped one takes its note with it. */
   private async decide(
+    drawing: ProposalDrawing,
     proposalId: string,
     action: 'accept' | 'dismiss',
     notePath: string | undefined,
-    view: DrawingView | undefined,
   ): Promise<void> {
-    const edited = await this.onDrawing(() => this.deps.surface.editProposal(proposalId, action, view))
+    const edited = await this.onDrawing(() => drawing.editProposal(proposalId, action))
     // Only once the drawing is rid of it: a note trashed under a card still shown
     // would leave a dead embeddable.
     if (edited && notePath) await this.deps.notes.remove(notePath)
   }
 
   /** The block the reader picked out, or a notice and nothing. */
-  private read(): BlockReading | undefined {
-    const block = onSelection(() => this.deps.surface.selection(), this.deps.notify)
+  private read(drawing: ProposalDrawing): BlockReading | undefined {
+    const block = readDrawing(() => drawing.selection(), this.deps.notify)
     if (!block) this.deps.notify(SELECT_ONE_BLOCK)
     return block
   }
 
   /** Asks for the chain's dropdown first when it declares one. */
-  private pick(chain: ChainSummary, block: BlockReading): void {
+  private pick(chain: ChainSummary, source: Source): void {
     const parameter = parameterToAsk(chain)
     if (!parameter) {
-      void this.launch(chain, block, undefined)
+      void this.launch(chain, source, undefined)
       return
     }
     new ParameterPicker(this.deps.app, parameter.name, parameter.options, value => {
-      void this.launch(chain, block, value)
+      void this.launch(chain, source, value)
     }).open()
   }
 
-  private async launch(
-    chain: ChainSummary,
-    block: BlockReading,
-    parameterValue: string | undefined,
-  ): Promise<void> {
+  private async launch(chain: ChainSummary, source: Source, parameterValue: string | undefined): Promise<void> {
+    const { block } = source
     const seed = await seedFromInputs({
       store: this.deps.store,
       notify: this.deps.notify,
@@ -190,7 +200,7 @@ export class Expand {
     this.inFlight.set(block.id, controller)
     this.deps.notify(EXPANDING(chain.name))
     try {
-      await this.stream(chain, block, seed, parameterValue, controller)
+      await this.stream(chain, source, seed, parameterValue, controller)
     } finally {
       if (this.inFlight.get(block.id) === controller) this.inFlight.delete(block.id)
     }
@@ -198,7 +208,7 @@ export class Expand {
 
   private async stream(
     chain: ChainSummary,
-    block: BlockReading,
+    source: Source,
     seed: string,
     parameterValue: string | undefined,
     controller: AbortController,
@@ -215,7 +225,7 @@ export class Expand {
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
       holdReached: this.deps.holdReached,
-      place: (runId, layout) => this.propose(runId, layout, chain, block),
+      place: (runId, layout) => this.propose(runId, layout, chain, source),
     })
     // Dropped by an unload: the cards stay as a record of a real run.
     if (outcome.aborted) return
@@ -231,7 +241,7 @@ export class Expand {
     runId: string,
     layout: RunLayout,
     chain: ChainSummary,
-    block: BlockReading,
+    { drawing, block }: Source,
   ): Promise<LiveOutput<ProposedPanel>[]> {
     const fan = buildProposalFan({ layout, source: block.box })
     // A refused note has said so already; the rest of the run still lands.
@@ -253,7 +263,7 @@ export class Expand {
       },
     }))
     await this.onDrawing(async () => {
-      await this.deps.surface.placeProposals(proposals, block)
+      await drawing.placeProposals(proposals, block)
       return true
     })
     return outputs
@@ -264,16 +274,6 @@ export class Expand {
     const done = await onDrawing(action, this.deps.notify)
     if (done === false) this.deps.notify(PROPOSAL_GONE)
     return done === true
-  }
-}
-
-/** Reads the drawing's selection, saying so rather than throwing when it cannot. */
-function onSelection<T>(read: () => T | undefined, notify: (message: string) => void): T | undefined {
-  try {
-    return read()
-  } catch (error) {
-    notify(error instanceof Error ? error.message : UNREACHABLE_DRAWING)
-    return undefined
   }
 }
 

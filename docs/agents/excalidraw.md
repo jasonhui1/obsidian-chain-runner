@@ -34,6 +34,8 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | a group selecting as a group, and a double-click drilling in | #21 — **run**, and the reason a double-click took four attempts |
 | `addText`'s `autoResize: false`, and putting `fontSize` back after a group resize | #22 — **run**: a node dragged wider shows more of its words and holds its type size |
 | `link` rewritten on a copied embeddable, `name` on a copied frame | #45 — **written, not run**: how a landed rerun points a card at the new run's note and retitles its frame |
+| `getAPI(view)`, and `reset()` keeping the view bound | #63 — **read, not run**, at 2.26.4 only: a fresh EA instance, constructed with `targetView` set, pushed onto a weak list |
+| `addElementsToView` returning `false` | #63 — **read, not run**: only when the view has unloaded; nothing is thrown, so a write to a closed drawing is silent unless checked |
 
 `addFrame`, `addArrow`, `getViewSelectedElements` and
 `getViewFileForImageElement` are feature-detected rather than assumed. A build
@@ -44,10 +46,19 @@ without one is a version notice, not a silent no-op.
 Through the plugin instance (`app.plugins.plugins['obsidian-excalidraw-plugin'].ea`),
 never the window global, so the dependency stays explicit and optional.
 
-**`setView` on every entry point.** The binding goes stale when the reader
-switches tabs. Set it per call, not once at load. A click carries its own view —
-use that over the tab in front, because a drawing embedded in a note is not a
-tab.
+**One instance per gesture, from `getAPI(view)`.** The shared `plugin.ea` has
+one binding, and any action or tab switch moves it — so a gesture that awaits
+between a read and a write (a run, an expansion, a rerun filing its notes) would
+write to whichever drawing was bound last. `getAPI(view)` returns a fresh
+instance nobody else holds; `src/ui/excalidraw.ts` binds one per gesture and
+`reset()`s its workbench before each write, which leaves the view bound. A click
+carries its own view — use that over the tab in front, because a drawing
+embedded in a note is not a tab.
+
+**`setView` fails silently.** Handed anything but an `ExcalidrawView`, it keeps
+the *previous* binding. `getAPI` sets `targetView` without that check.
+
+The hooks stay on the shared `plugin.ea`: that is the instance Excalidraw asks.
 
 ## Clicks
 

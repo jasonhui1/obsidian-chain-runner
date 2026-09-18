@@ -6,6 +6,8 @@ import type { Point } from '@/ui/panelSpot'
 /** Directing a run from the drawing: the label's two clicks, and the palette command on a selection. */
 
 const RUN = '2026-09-15-ubqPU2'
+/** The drawing a click arrives from. */
+const view = { file: null }
 const label = buildDirectLabel({ x: 0, y: 0, width: 1000, height: 400 }, RUN)
 
 let directed: string[]
@@ -60,18 +62,18 @@ describe('handleLinkClick', () => {
 
 describe('handleSelection', () => {
   it('directs the label’s run on a plain click', () => {
-    make().handleSelection(label)
+    make().handleSelection(label, view)
     expect(directed).toEqual([RUN])
   })
 
   it('does nothing when the press was a drag, not a click', () => {
     settleWith = undefined
-    make().handleSelection(label)
+    make().handleSelection(label, view)
     expect(directed).toEqual([])
   })
 
   it('ignores every other element', () => {
-    make().handleSelection({})
+    make().handleSelection({}, view)
     expect(directed).toEqual([])
     expect(shown).toEqual([])
   })
@@ -79,7 +81,7 @@ describe('handleSelection', () => {
   it('shows the proposal a clicked card belongs to', () => {
     const card = {}
     cards.set(card, { runId: RUN, proposal: 'gameplay' })
-    make().handleSelection(card)
+    make().handleSelection(card, view)
     expect(shown).toEqual([{ runId: RUN, proposal: 'gameplay' }])
     expect(directed).toEqual([])
   })
@@ -88,7 +90,7 @@ describe('handleSelection', () => {
     const card = {}
     cards.set(card, { runId: RUN, proposal: 'gameplay' })
     settleWith = undefined
-    make().handleSelection(card)
+    make().handleSelection(card, view)
     expect(shown).toEqual([])
   })
 })

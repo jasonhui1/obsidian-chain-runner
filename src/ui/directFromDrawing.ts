@@ -1,4 +1,5 @@
-import { directLabelRunId, type CardProposal } from './runLabel'
+import type { DrawingView, SelectionSurface } from './excalidraw'
+import { directLabelRunId } from './runLabel'
 import { UNREACHABLE_DRAWING } from './onDrawing'
 import type { Point } from './panelSpot'
 
@@ -10,13 +11,7 @@ import type { Point } from './panelSpot'
 export const SELECT_A_RUN = 'Select a card from a run on the drawing to direct that run.'
 
 export interface DirectFromDrawingDeps {
-  surface: {
-    unavailable(): string | undefined
-    /** The run the selection belongs to; throws when the drawing cannot be reached. */
-    selectedRun(): string | undefined
-    /** The run and proposal a clicked card shows, or `undefined` for any other element. */
-    cardProposal(element: unknown, view: unknown): CardProposal | undefined
-  }
+  surface: SelectionSurface
   direct: (runId: string) => Promise<void>
   showProposal: (runId: string, proposal: string) => Promise<void>
   notify: (message: string) => void
@@ -36,7 +31,7 @@ export class DirectFromDrawing {
   }
 
   /** A plain click on the label or a card, once the press is known not to be a drag. */
-  handleSelection(element: { customData?: unknown }, view?: unknown): void {
+  handleSelection(element: { customData?: unknown }, view: DrawingView): void {
     const runId = directLabelRunId(element)
     const card = runId ? undefined : this.deps.surface.cardProposal(element, view)
     if (!runId && !card) return

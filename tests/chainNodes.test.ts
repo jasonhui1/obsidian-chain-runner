@@ -53,45 +53,35 @@ const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0)
 
 function makeSurface(): NodeSurface {
   return {
-    selection: () => undefined,
-    selectedNode: on => {
-      selectedNodeOn.push(on)
-      if (!drawingOpen) throw new Error('Open the Excalidraw drawing as its own tab to do that.')
-      return selected
-    },
-    reflow: on => {
-      if (!drawingOpen) return Promise.reject(new Error('Open the Excalidraw drawing as its own tab to do that.'))
-      reflowedOn.push(on)
-      return Promise.resolve(true)
-    },
-    selectedProposal: () => undefined,
-    selectedRun: () => undefined,
-    openViews: () => [],
-    followRerun: () => Promise.resolve(false),
-    cardProposal: () => undefined,
-    placeProposals: async () => {},
-    editProposal: async () => false,
     unavailable: () => unavailable,
     hasActiveDrawing: () => drawingOpen,
-    // This only checks that a click reaches the run; `nodeRun.test.ts` has the rest.
-    read: () => undefined,
-    setRunStatus: () => Promise.resolve(true),
-    placeRun: () => Promise.resolve(true),
-    place: (elements, on) => {
-      placed.push(elements)
-      placedOn.push(on)
-      return Promise.resolve()
-    },
-    setChain: (target, chain, value, on) => {
-      if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
-      chainSet.push({ nodeId: target.nodeId, chain: chain.slug, value, on })
-      return Promise.resolve(true)
-    },
-    setParameter: (target, value, on) => {
-      if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
-      parameterSet.push({ nodeId: target.nodeId, value, on })
-      return Promise.resolve(true)
-    },
+    on: view => ({
+      selectedNode: () => {
+        selectedNodeOn.push(view)
+        if (!drawingOpen) throw new Error('Open the Excalidraw drawing as its own tab to do that.')
+        return selected
+      },
+      reflow: () => {
+        if (!drawingOpen) return Promise.reject(new Error('Open the Excalidraw drawing as its own tab to do that.'))
+        reflowedOn.push(view)
+        return Promise.resolve(true)
+      },
+      place: elements => {
+        placed.push(elements)
+        placedOn.push(view)
+        return Promise.resolve()
+      },
+      setChain: (target, chain, value) => {
+        if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
+        chainSet.push({ nodeId: target.nodeId, chain: chain.slug, value, on: view })
+        return Promise.resolve(true)
+      },
+      setParameter: (target, value) => {
+        if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
+        parameterSet.push({ nodeId: target.nodeId, value, on: view })
+        return Promise.resolve(true)
+      },
+    }),
   }
 }
 
@@ -220,7 +210,7 @@ describe('clicking the node’s links', () => {
   })
 
   it('hands a Run click to the run, with the node and view it came from', () => {
-    const view = { drawing: true }
+    const view = { file: null }
     expect(makeNodes().handleLinkClick({ ...element({ role: 'run' }), groupIds: ['g-1'] }, view)).toBe(false)
     expect(runs).toEqual([{ nodeId: 'n-1', groupIds: ['g-1'], view }])
     expect(notices).toEqual([])
@@ -238,7 +228,7 @@ describe('clicking the node’s links', () => {
 
   it('rewrites on the drawing the click came from, not on the tab in front', async () => {
     // A drawing embedded in a note is not a tab; the click's own view is the handle.
-    const embedded = { embedded: true }
+    const embedded = { file: null }
     makeNodes().handleLinkClick(element(), embedded)
     await flush()
     lastModal()?.choose(0)
@@ -301,7 +291,7 @@ describe('dropping a node with no chain yet', () => {
   })
 
   it('places it on the drawing the button was pressed on', async () => {
-    const view = { drawing: true }
+    const view = { file: null }
     await makeNodes().placeUnset(view)
     expect(placedOn).toEqual([view])
   })
@@ -348,7 +338,7 @@ describe('clicking the chain line', () => {
   })
 
   it('writes to the drawing the click came from', async () => {
-    const view = { drawing: true }
+    const view = { file: null }
     makeNodes().handleLinkClick(chainLine(), view)
     await flush()
     lastModal()?.choose(1)
@@ -426,7 +416,7 @@ describe('clicking a node without a modifier', () => {
   })
 
   it('writes the pick through, on the drawing the click came from', async () => {
-    const view = { drawing: true }
+    const view = { file: null }
     makeNodes().handleSelection(line('chain'), view)
     await flush()
     lastModal()?.choose(1)
@@ -559,7 +549,7 @@ describe('double-clicking a node', () => {
   })
 
   it('runs on the drawing the editor opened in', () => {
-    const view = { embedded: true }
+    const view = { file: null }
     makeNodes().handleTextEdit(line('run'), view)
     expect(runs[0]?.view).toBe(view)
   })
@@ -606,7 +596,7 @@ describe('double-clicking a node', () => {
   it('runs on the line a double drilled into, which the drawing reports after it', () => {
     // A node is a group: the first click selects all of it and names no line,
     // and only the double picks out ▶ Run — reported once the double is over.
-    const view = { embedded: true }
+    const view = { file: null }
     const nodes = makeNodes()
     nodes.handleDoubleClick()
     expect(runs).toEqual([])
@@ -685,7 +675,7 @@ describe('double-clicking a node', () => {
   })
 
   it('runs on the drawing the click that selected it came from', () => {
-    const view = { embedded: true }
+    const view = { file: null }
     const nodes = makeNodes()
     nodes.handleSelection(line('run'), view)
     nodes.handleDoubleClick()
@@ -693,7 +683,7 @@ describe('double-clicking a node', () => {
   })
 
   it('asks the drawing on the view the node was last selected on', () => {
-    const view = { embedded: true }
+    const view = { file: null }
     const nodes = makeNodes()
     nodes.handleSelection(line('chain'), view)
     clock = 9000
@@ -737,7 +727,7 @@ describe('finishing a drag that resized a node', () => {
   })
 
   it('asks the drawing the node was last selected on, not the tab in front', () => {
-    const view = { embedded: true }
+    const view = { file: null }
     const nodes = makeNodes()
     nodes.handleSelection(element({ role: 'chain' }), view)
     nodes.handleResize()

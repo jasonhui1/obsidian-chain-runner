@@ -1,4 +1,4 @@
-import { TFile, normalizePath, type App, type WorkspaceLeaf } from 'obsidian'
+import { TFile, normalizePath, type App, type FileView, type WorkspaceLeaf } from 'obsidian'
 import { drawingChoices, isDrawingPath, type DrawingChoice } from './drawingChoices'
 import {
   chainEdits,
@@ -70,8 +70,10 @@ const VIEW_READY_POLL_MS = 50
  */
 interface ExcalidrawAutomate {
   verifyMinimumPluginVersion(version: string): boolean
+  /** A fresh instance bound to `view`, which no other caller's `setView` can move. */
+  getAPI(view: DrawingView): ExcalidrawAutomate
+  /** Empties the workbench and puts the style back; the view stays bound. */
   reset(): void
-  setView(view: unknown): void
   style: ElementStyle
   addEmbeddable(x: number, y: number, width: number, height: number, url?: string, file?: TFile): string
   addRect(x: number, y: number, width: number, height: number): string
@@ -142,7 +144,7 @@ type LinkClickHook = (
   element: SceneElement,
   linkText: string,
   event: unknown,
-  view: unknown,
+  view: DrawingView,
   ea: unknown,
 ) => boolean
 
@@ -158,7 +160,7 @@ interface SceneChangeHook {
     elements: SceneElement[],
     appState: SceneAppState | undefined,
     files: unknown,
-    view: unknown,
+    view: DrawingView,
     ea: unknown,
   ) => void
 }
@@ -189,10 +191,12 @@ export interface DrawingSurface {
 }
 
 /**
- * A live Excalidraw view: opaque, since it is only handed back to `setView`. A
- * click carries its own view, the only handle on a drawing embedded in a note.
+ * A live Excalidraw view. A click carries its own, the only handle on a drawing
+ * embedded in a note; Obsidian's `FileView` is one.
  */
-export type DrawingView = unknown
+export interface DrawingView {
+  readonly file: TFile | null
+}
 
 /** What a node's drawing says about it, at the moment it was asked. */
 export interface NodeReading {
@@ -225,45 +229,51 @@ export interface PlacedProposal {
   identity: ProposalIdentity
 }
 
-/** What the chain-node actions need a drawing to do. */
-export interface NodeSurface {
+/** Every role starts here: an Excalidraw missing or too old is a notice, not a throw. */
+interface Reachable {
   /** Why Excalidraw cannot be used, or `undefined` when it can. */
   unavailable(): string | undefined
-  /** Whether the tab in front of the reader is a drawing to put a node on. */
-  hasActiveDrawing(): boolean
-  /** Puts a built node on that drawing, at the cursor, and saves. */
-  place(elements: ChainNodeElement[], on?: DrawingView): Promise<void>
+}
+
+/**
+ * One gesture's drawing: the click's own view, or else the tab in front, bound
+ * once. Throws when there is no drawing to bind.
+ */
+type BindDrawing<Drawing> = (view?: DrawingView) => Drawing
+
+/** Placing chain nodes and re-shaping them, on one drawing. */
+export interface NodeDrawing {
+  /** Puts a built node on the drawing, at the cursor, and saves. */
+  place(elements: ChainNodeElement[]): Promise<void>
   /** Rewrites a node's parameter in place. `false` means the node is no longer there. */
-  setParameter(target: NodeTarget, value: string, on?: DrawingView): Promise<boolean>
+  setParameter(target: NodeTarget, value: string): Promise<boolean>
   /** Re-shapes a node around another chain. `false` means the node is no longer there. */
-  setChain(target: NodeTarget, chain: ChainSummary, value?: string, on?: DrawingView): Promise<boolean>
+  setChain(target: NodeTarget, chain: ChainSummary, value?: string): Promise<boolean>
   /**
    * Cuts every resized node's lines to its new width. `false` when there was
    * nothing to do, which is every drawing the reader has not just dragged one on.
    */
-  reflow(on?: DrawingView): Promise<boolean>
-  /** What a node is bound to and where it sits; `undefined` when it is gone. */
-  read(target: NodeTarget, on?: DrawingView): NodeReading | undefined
-  /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
-  setRunStatus(target: NodeTarget, status: NodeRunStatus, on?: DrawingView): Promise<boolean>
-  /** `false` means no frame could be made and the outputs landed loose. */
-  placeRun(frame: RunFrame, outputs: readonly PlacedOutput[], on?: DrawingView): Promise<boolean>
-  /** The one block the reader has selected, or `undefined` when it is not one we can read. */
-  selection(on?: DrawingView): BlockReading | undefined
-  /** Draws a run's proposals greyed and dashed, each connected back to `source`. */
-  placeProposals(proposals: readonly PlacedProposal[], source: BlockReading, on?: DrawingView): Promise<void>
-  /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
-  selectedRun(on?: DrawingView): string | undefined
-  /** The run and proposal a card on the drawing shows, by its output note. */
-  cardProposal(element: unknown, on: DrawingView): CardProposal | undefined
-  /** The proposal the reader has selected, for the commands that decide one. */
-  selectedProposal(on?: DrawingView): ProposalData | undefined
+  reflow(): Promise<boolean>
   /** The one node element the reader has selected, for the gestures the hook cannot see. */
-  selectedNode(on?: DrawingView): MaybeNodeElement | undefined
-  /** Every drawing open in a view now; a drawing in a tab not yet loaded is not one. */
-  openViews(): DrawingView[]
+  selectedNode(): MaybeNodeElement | undefined
+}
+
+export interface NodeSurface extends Reachable {
+  /** Whether the tab in front of the reader is a drawing to put a node on. */
+  hasActiveDrawing(): boolean
+  on: BindDrawing<NodeDrawing>
+}
+
+/** Landing a run on one drawing: its node's status line, its frame and its outputs. */
+export interface RunDrawing {
+  /** What a node is bound to and where it sits; `undefined` when it is gone. */
+  read(target: NodeTarget): NodeReading | undefined
+  /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
+  setRunStatus(target: NodeTarget, status: NodeRunStatus): Promise<boolean>
+  /** `false` means no frame could be made and the outputs landed loose. */
+  placeRun(frame: RunFrame, outputs: readonly PlacedOutput[]): Promise<boolean>
   /**
-   * Moves a drawing on to a landed rerun: each card of the runs `from` to the
+   * Moves the drawing on to a landed rerun: each card of the runs `from` to the
    * note `noteFor` files for its output, and the labels and frames to `to`.
    * `false` when the drawing shows none of `from`.
    */
@@ -271,11 +281,41 @@ export interface NodeSurface {
     from: readonly string[],
     to: string,
     noteFor: (output: string) => Promise<string | undefined>,
-    on: DrawingView,
   ): Promise<boolean>
-  /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
-  editProposal(proposalId: string, action: 'accept' | 'dismiss', on?: DrawingView): Promise<boolean>
 }
+
+export interface RunSurface extends Reachable {
+  /** Every drawing open in a view now; a drawing in a tab not yet loaded is not one. */
+  openViews(): DrawingView[]
+  on: BindDrawing<RunDrawing>
+}
+
+/** Placing a block's proposals on one drawing, and keeping or dropping them. */
+export interface ProposalDrawing {
+  /** The one block the reader has selected, or `undefined` when it is not one we can read. */
+  selection(): BlockReading | undefined
+  /** Draws a run's proposals greyed and dashed, each connected back to `source`. */
+  placeProposals(proposals: readonly PlacedProposal[], source: BlockReading): Promise<void>
+  /** The proposal the reader has selected, for the commands that decide one. */
+  selectedProposal(): ProposalData | undefined
+  /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
+  editProposal(proposalId: string, action: 'accept' | 'dismiss'): Promise<boolean>
+}
+
+export interface ProposalSurface extends Reachable {
+  on: BindDrawing<ProposalDrawing>
+}
+
+/** Reading which run the reader's selection or click belongs to. */
+export interface SelectionSurface extends Reachable {
+  /** The run the selection on the tab in front belongs to: a Direct label's, or a card's output note's. */
+  selectedRun(): string | undefined
+  /** The run and proposal a card on the drawing shows, by its output note. */
+  cardProposal(element: MaybeNodeElement, on: DrawingView): CardProposal | undefined
+}
+
+/** Excalidraw, in every role this plugin gives it. */
+export type ExcalidrawSurface = NodeSurface & RunSurface & ProposalSurface & SelectionSurface
 
 /** Said when Expand is asked for and the selection is not one readable block. */
 export const SELECT_ONE_BLOCK =
@@ -301,13 +341,10 @@ export function createDrawingSurface(app: App): DrawingSurface {
     place: async (drawing, notePath) => {
       const ea = automate(app)
       if (!ea) throw new Error(NO_EXCALIDRAW)
-      const view = await openDrawing(app, drawing.path)
-      ea.reset()
-      // The binding goes stale when the reader switches tabs, so it is set per call.
-      ea.setView(view)
-      embedNote(app, ea, { x: 0, y: 0, width: EMBEDDABLE_WIDTH, height: EMBEDDABLE_HEIGHT }, notePath)
+      const bound = ea.getAPI(await openDrawing(app, drawing.path))
+      embedNote(app, bound, { x: 0, y: 0, width: EMBEDDABLE_WIDTH, height: EMBEDDABLE_HEIGHT }, notePath)
       // Reposition to the cursor, and save.
-      await ea.addElementsToView(true, true)
+      await save(bound, true)
     },
   }
 }
@@ -315,260 +352,264 @@ export function createDrawingSurface(app: App): DrawingSurface {
 /** Said when a chain-node action cannot find the drawing it is meant to act on. */
 export const NOT_A_DRAWING = 'Open the Excalidraw drawing as its own tab to do that.'
 
-export function createNodeSurface(app: App): NodeSurface {
-  /**
-   * The one place a node action reaches Excalidraw. A click's own view wins over
-   * the tab in front: a drawing embedded in a note is not a tab.
-   */
-  const bind = (on?: DrawingView): { ea: ExcalidrawAutomate; view: DrawingView } => {
+export function createExcalidrawSurface(app: App): ExcalidrawSurface {
+  /** The one place a gesture reaches Excalidraw. A click's own view wins: a drawing embedded in a note is not a tab. */
+  const bind = (view?: DrawingView): BoundDrawing => {
     const ea = automate(app)
     if (!ea) throw new Error(NO_EXCALIDRAW)
-    const view = on ?? activeDrawing(app)
-    if (!view) throw new Error(NOT_A_DRAWING)
-    ea.reset()
-    // The binding goes stale when the reader switches tabs, so it is set per call.
-    ea.setView(view)
-    return { ea, view }
+    const drawing = view ?? activeDrawing(app)
+    if (!drawing) throw new Error(NOT_A_DRAWING)
+    return new BoundDrawing(app, ea.getAPI(drawing), drawing)
   }
 
   return {
     unavailable: () => unavailableReason(app),
-
     hasActiveDrawing: () => activeDrawing(app) !== undefined,
-
-    place: async (elements, on) => {
-      const { ea } = bind(on)
-      const ids = elements.map(element => draw(ea, element))
-      // One group, so the node's elements move, copy and delete together.
-      if (ids.length > 1) ea.addToGroup(ids)
-      // Reposition to the cursor.
-      await ea.addElementsToView(true, true)
-    },
-
-    setParameter: async (target, value, on) => {
-      const { ea } = bind(on)
-      return write(ea, parameterEdits(ea.getViewElements(), target, value))
-    },
-
-    setChain: async (target, chain, value, on) => {
-      const { ea } = bind(on)
-      const reshape = chainEdits(ea.getViewElements(), target, chain, value)
-      return write(ea, reshape.edits, reshape.removals, reshape.additions)
-    },
-
-    reflow: async on => {
-      const { ea } = bind(on)
-      const scene = ea.getViewElements()
-      // Every node is asked; only one the reader dragged answers with anything.
-      const edits = nodeTargets(scene).flatMap(target => reflowEdits(scene, target))
-      return write(ea, edits)
-    },
-
-    setRunStatus: async (target, status, on) => {
-      const { ea } = bind(on)
-      return write(ea, runEdits(ea.getViewElements(), target, status))
-    },
-
-    read: (target, on) => {
-      const { ea, view } = bind(on)
-      const scene = ea.getViewElements()
-      const box = nodeBox(scene, target)
-      if (!box) return undefined
-      return { box, inputs: resolveInputs(scene, target, imageNoteLookup(ea)), drawing: drawingPath(view) }
-    },
-
-    selection: on => {
-      const { ea, view } = bind(on)
-      const selected = selectedElements(ea)
-      if (selected.length !== 1) return undefined
-      const element = selected[0]
-      // Our own furniture is not material to expand: a node, or another proposal.
-      if (!element || chainNodeData(element) || proposalData(element)) return undefined
-      const input = blockInput(element, ea.getViewElements(), imageNoteLookup(ea))
-      if (!input) return undefined
-      return {
-        id: element.id,
-        box: {
-          x: element.x ?? 0,
-          y: element.y ?? 0,
-          width: element.width ?? 0,
-          height: element.height ?? 0,
-        },
-        input,
-        drawing: drawingPath(view),
-      }
-    },
-
-    selectedNode: on => {
-      const { ea } = bind(on)
-      const selected = selectedElements(ea)
-      // One element, so a double-click on a rubber-banded group runs nothing.
-      const only = selected.length === 1 ? selected[0] : undefined
-      return only && chainNodeData(only) ? only : undefined
-    },
-
-    selectedRun: on => {
-      const { ea, view } = bind(on)
-      return selectedRunId(selectedElements(ea), noteFrontmatter(app, view))
-    },
-
-    cardProposal: (element, on) => cardProposal(element as SceneShape, noteFrontmatter(app, on)),
-
-    selectedProposal: on => {
-      const { ea } = bind(on)
-      for (const element of selectedElements(ea)) {
-        const data = proposalData(element)
-        if (data) return data
-      }
-      return undefined
-    },
-
-    placeProposals: async (proposals, source, on) => {
-      const { ea } = bind(on)
-      /** Marks a drawn element as this proposal's, and greys it. */
-      const mark = (id: string | undefined, identity: ProposalIdentity, role: ProposalRole): void => {
-        const element = id ? ea.getElement(id) : undefined
-        if (!element) return
-        element.strokeColor = PROPOSAL_STROKE
-        element.strokeStyle = PROPOSAL_STROKE_STYLE
-        element.customData = { chainRunnerProposal: { ...identity, role } }
-        ids.push(element.id)
-      }
-
-      let ids: string[] = []
-      for (const { box, notePath, identity } of proposals) {
-        ea.style.strokeColor = PROPOSAL_STROKE
-        ea.style.strokeStyle = PROPOSAL_STROKE_STYLE
-        ids = []
-
-        const card = embedNote(app, ea, box, notePath)
-        mark(card?.id, identity, 'card')
-
-        // The connector is what makes a card read as this block's proposal. Drawn
-        // from the source's own edge: a stub short of it points at nothing.
-        mark(
-          ea.addArrow?.(
-            [
-              [source.box.x + source.box.width, source.box.y + source.box.height / 2],
-              [box.x, box.y + box.height / 2],
-            ],
-            { startObjectId: source.id, ...(card ? { endObjectId: card.id } : {}) },
-          ),
-          identity,
-          'link',
-        )
-
-        for (const label of buildProposalLabels(box, identity)) {
-          ea.style.strokeColor = label.strokeColor
-          ea.style.strokeStyle = ACCEPTED_STROKE_STYLE
-          ea.style.fontSize = label.fontSize
-          const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
-          if (!made) continue
-          made.link = label.link
-          made.customData = label.customData
-          ids.push(made.id)
-        }
-        // One group, so a proposal's card, connector and labels move together.
-        if (ids.length > 1) ea.addToGroup(ids)
-      }
-      ea.style.strokeColor = ACCEPTED_STROKE
-      ea.style.strokeStyle = ACCEPTED_STROKE_STYLE
-      // Not repositioned to the cursor: the coordinates are the source block's own.
-      await ea.addElementsToView(false, true)
-    },
-
-    editProposal: async (proposalId, action, on) => {
-      const { ea } = bind(on)
-      const scene = ea.getViewElements()
-      const edits: ProposalEdits<SceneElement> =
-        action === 'accept' ? acceptEdits(scene, proposalId) : dismissEdits(scene, proposalId)
-      const touched = [...edits.normalise, ...edits.remove]
-      if (touched.length === 0) return false
-
-      // The copies keep their ids, so writing them back edits the drawing in place.
-      ea.copyViewElementsToEAforEditing(touched)
-      for (const element of edits.normalise) {
-        const live = ea.getElement(element.id)
-        if (!live) continue
-        live.strokeColor = ACCEPTED_STROKE
-        live.strokeStyle = ACCEPTED_STROKE_STYLE
-        // Only our own key: another plugin's stamp on the same element is not ours to drop.
-        live.customData = withoutProposal(live.customData)
-      }
-      for (const element of edits.remove) {
-        const live = ea.getElement(element.id)
-        if (live) live.isDeleted = true
-      }
-      await ea.addElementsToView(false, true)
-      return true
-    },
-
+    on: bind,
     openViews: () => {
       const views: DrawingView[] = []
       eachLeaf(app, leaf => {
-        if (leaf.view.getViewType() === EXCALIDRAW_VIEW) views.push(leaf.view)
+        const view = excalidrawView(leaf)
+        if (view) views.push(view)
       })
       return views
     },
+    selectedRun: () => bind().selectedRun(),
+    // Every element a hook hands over is a scene element.
+    cardProposal: (element, on) => cardProposal(element as SceneShape, noteFrontmatter(app, on)),
+  }
+}
 
-    followRerun: async (from, to, noteFor, on) => {
-      const { ea, view } = bind(on)
-      const found = rerunScene(ea.getViewElements(), from, to, noteFrontmatter(app, view))
-      if (!found) return false
-      const notePaths = new Map<SceneElement, string>()
-      for (const card of found.cards) {
-        const notePath = await noteFor(card.output)
-        if (notePath) notePaths.set(card.element, notePath)
-      }
+/**
+ * One drawing, bound once for one gesture. Its own EA instance rather than the
+ * shared one, whose binding any other action or tab can move while this one awaits.
+ */
+class BoundDrawing implements NodeDrawing, RunDrawing, ProposalDrawing {
+  constructor(
+    private readonly app: App,
+    private readonly ea: ExcalidrawAutomate,
+    private readonly view: DrawingView,
+  ) {}
 
-      // Bound again: filing the notes gave another action the chance to rebind.
-      const { ea: editing } = bind(on)
-      editing.copyViewElementsToEAforEditing([...notePaths.keys(), ...found.labels, ...found.frames.map(frame => frame.element)])
-      const copy = (element: SceneElement): SceneElement | undefined => editing.getElement(element.id)
-      for (const [element, notePath] of notePaths) {
-        const card = copy(element)
-        if (card) card.link = `[[${notePath}]]`
-      }
-      for (const element of found.labels) {
-        const label = copy(element)
-        if (label) label.customData = relabel(label.customData, to)
-      }
-      for (const { element, name } of found.frames) {
-        const frame = copy(element)
-        if (frame) frame.name = name
-      }
-      await editing.addElementsToView(false, true)
-      return true
-    },
+  /** The instance, its workbench emptied so a write carries only its own elements. */
+  private emptied(): ExcalidrawAutomate {
+    this.ea.reset()
+    return this.ea
+  }
 
-    placeRun: async (frame, outputs, on) => {
-      const { ea } = bind(on)
+  async place(elements: ChainNodeElement[]): Promise<void> {
+    const ea = this.emptied()
+    const ids = elements.map(element => draw(ea, element))
+    // One group, so the node's elements move, copy and delete together.
+    if (ids.length > 1) ea.addToGroup(ids)
+    // Reposition to the cursor.
+    await save(ea, true)
+  }
 
-      // First, so the panels can name it as their container.
-      const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
+  setParameter(target: NodeTarget, value: string): Promise<boolean> {
+    return write(this.emptied(), parameterEdits(this.ea.getViewElements(), target, value))
+  }
 
-      for (const { placed, notePath } of outputs) {
-        ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
-        const element = embedNote(app, ea, placed.box, notePath)
-        // A scripted element has to claim its frame; only a drop is worked out.
-        if (element && frameId) element.frameId = frameId
-      }
-      ea.style.strokeWidth = PLAIN_STROKE
+  setChain(target: NodeTarget, chain: ChainSummary, value?: string): Promise<boolean> {
+    const reshape = chainEdits(this.ea.getViewElements(), target, chain, value)
+    return write(this.emptied(), reshape.edits, reshape.removals, reshape.additions)
+  }
 
-      const label = buildDirectLabel(frame.box, frame.runId)
-      ea.style.strokeColor = label.strokeColor
-      ea.style.fontSize = label.fontSize
-      const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
-      if (made) {
+  reflow(): Promise<boolean> {
+    const scene = this.ea.getViewElements()
+    // Every node is asked; only one the reader dragged answers with anything.
+    const edits = nodeTargets(scene).flatMap(target => reflowEdits(scene, target))
+    return write(this.emptied(), edits)
+  }
+
+  selectedNode(): MaybeNodeElement | undefined {
+    const selected = selectedElements(this.ea)
+    // One element, so a double-click on a rubber-banded group runs nothing.
+    const only = selected.length === 1 ? selected[0] : undefined
+    return only && chainNodeData(only) ? only : undefined
+  }
+
+  read(target: NodeTarget): NodeReading | undefined {
+    const scene = this.ea.getViewElements()
+    const box = nodeBox(scene, target)
+    if (!box) return undefined
+    return { box, inputs: resolveInputs(scene, target, imageNoteLookup(this.ea)), drawing: drawingPath(this.view) }
+  }
+
+  setRunStatus(target: NodeTarget, status: NodeRunStatus): Promise<boolean> {
+    return write(this.emptied(), runEdits(this.ea.getViewElements(), target, status))
+  }
+
+  async placeRun(frame: RunFrame, outputs: readonly PlacedOutput[]): Promise<boolean> {
+    const ea = this.emptied()
+
+    // First, so the panels can name it as their container.
+    const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
+
+    for (const { placed, notePath } of outputs) {
+      ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
+      const element = embedNote(this.app, ea, placed.box, notePath)
+      // A scripted element has to claim its frame; only a drop is worked out.
+      if (element && frameId) element.frameId = frameId
+    }
+    ea.style.strokeWidth = PLAIN_STROKE
+
+    const label = buildDirectLabel(frame.box, frame.runId)
+    ea.style.strokeColor = label.strokeColor
+    ea.style.fontSize = label.fontSize
+    const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
+    if (made) {
+      made.link = label.link
+      made.customData = label.customData
+      if (frameId) made.frameId = frameId
+    }
+    // Not repositioned to the cursor: the coordinates are the node's own.
+    await save(ea, false)
+    return frameId !== undefined
+  }
+
+  async followRerun(
+    from: readonly string[],
+    to: string,
+    noteFor: (output: string) => Promise<string | undefined>,
+  ): Promise<boolean> {
+    const found = rerunScene(this.ea.getViewElements(), from, to, noteFrontmatter(this.app, this.view))
+    if (!found) return false
+    const notePaths = new Map<SceneElement, string>()
+    for (const card of found.cards) {
+      const notePath = await noteFor(card.output)
+      if (notePath) notePaths.set(card.element, notePath)
+    }
+
+    const ea = this.emptied()
+    ea.copyViewElementsToEAforEditing([...notePaths.keys(), ...found.labels, ...found.frames.map(frame => frame.element)])
+    const copy = (element: SceneElement): SceneElement | undefined => ea.getElement(element.id)
+    for (const [element, notePath] of notePaths) {
+      const card = copy(element)
+      if (card) card.link = `[[${notePath}]]`
+    }
+    for (const element of found.labels) {
+      const label = copy(element)
+      if (label) label.customData = relabel(label.customData, to)
+    }
+    for (const { element, name } of found.frames) {
+      const frame = copy(element)
+      if (frame) frame.name = name
+    }
+    await save(ea, false)
+    return true
+  }
+
+  selection(): BlockReading | undefined {
+    const selected = selectedElements(this.ea)
+    if (selected.length !== 1) return undefined
+    const element = selected[0]
+    // Our own furniture is not material to expand: a node, or another proposal.
+    if (!element || chainNodeData(element) || proposalData(element)) return undefined
+    const input = blockInput(element, this.ea.getViewElements(), imageNoteLookup(this.ea))
+    if (!input) return undefined
+    return {
+      id: element.id,
+      box: {
+        x: element.x ?? 0,
+        y: element.y ?? 0,
+        width: element.width ?? 0,
+        height: element.height ?? 0,
+      },
+      input,
+      drawing: drawingPath(this.view),
+    }
+  }
+
+  async placeProposals(proposals: readonly PlacedProposal[], source: BlockReading): Promise<void> {
+    const ea = this.emptied()
+    /** Marks a drawn element as this proposal's, and greys it. */
+    const mark = (id: string | undefined, identity: ProposalIdentity, role: ProposalRole): void => {
+      const element = id ? ea.getElement(id) : undefined
+      if (!element) return
+      element.strokeColor = PROPOSAL_STROKE
+      element.strokeStyle = PROPOSAL_STROKE_STYLE
+      element.customData = { chainRunnerProposal: { ...identity, role } }
+      ids.push(element.id)
+    }
+
+    let ids: string[] = []
+    for (const { box, notePath, identity } of proposals) {
+      ea.style.strokeColor = PROPOSAL_STROKE
+      ea.style.strokeStyle = PROPOSAL_STROKE_STYLE
+      ids = []
+
+      const card = embedNote(this.app, ea, box, notePath)
+      mark(card?.id, identity, 'card')
+
+      // The connector is what makes a card read as this block's proposal. Drawn
+      // from the source's own edge: a stub short of it points at nothing.
+      mark(
+        ea.addArrow?.(
+          [
+            [source.box.x + source.box.width, source.box.y + source.box.height / 2],
+            [box.x, box.y + box.height / 2],
+          ],
+          { startObjectId: source.id, ...(card ? { endObjectId: card.id } : {}) },
+        ),
+        identity,
+        'link',
+      )
+
+      for (const label of buildProposalLabels(box, identity)) {
+        ea.style.strokeColor = label.strokeColor
+        ea.style.strokeStyle = ACCEPTED_STROKE_STYLE
+        ea.style.fontSize = label.fontSize
+        const made = ea.getElement(ea.addText(label.x, label.y, label.text, { textAlign: 'left' }))
+        if (!made) continue
         made.link = label.link
         made.customData = label.customData
-        if (frameId) made.frameId = frameId
+        ids.push(made.id)
       }
-      ea.style.strokeColor = ACCEPTED_STROKE
-      // Not repositioned to the cursor: the coordinates are the node's own.
-      await ea.addElementsToView(false, true)
-      return frameId !== undefined
-    },
+      // One group, so a proposal's card, connector and labels move together.
+      if (ids.length > 1) ea.addToGroup(ids)
+    }
+    // Not repositioned to the cursor: the coordinates are the source block's own.
+    await save(ea, false)
+  }
+
+  selectedProposal(): ProposalData | undefined {
+    for (const element of selectedElements(this.ea)) {
+      const data = proposalData(element)
+      if (data) return data
+    }
+    return undefined
+  }
+
+  async editProposal(proposalId: string, action: 'accept' | 'dismiss'): Promise<boolean> {
+    const scene = this.ea.getViewElements()
+    const edits: ProposalEdits<SceneElement> =
+      action === 'accept' ? acceptEdits(scene, proposalId) : dismissEdits(scene, proposalId)
+    const touched = [...edits.normalise, ...edits.remove]
+    if (touched.length === 0) return false
+
+    const ea = this.emptied()
+    // The copies keep their ids, so writing them back edits the drawing in place.
+    ea.copyViewElementsToEAforEditing(touched)
+    for (const element of edits.normalise) {
+      const live = ea.getElement(element.id)
+      if (!live) continue
+      live.strokeColor = ACCEPTED_STROKE
+      live.strokeStyle = ACCEPTED_STROKE_STYLE
+      // Only our own key: another plugin's stamp on the same element is not ours to drop.
+      live.customData = withoutProposal(live.customData)
+    }
+    for (const element of edits.remove) {
+      const live = ea.getElement(element.id)
+      if (live) live.isDeleted = true
+    }
+    await save(ea, false)
+    return true
+  }
+
+  /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
+  selectedRun(): string | undefined {
+    return selectedRunId(selectedElements(this.ea), noteFrontmatter(this.app, this.view))
   }
 }
 
@@ -585,6 +626,15 @@ function embedNote(app: App, ea: ExcalidrawAutomate, box: Box, notePath: string)
   const element = ea.getElement(id)
   if (element && !element.link) element.link = `[[${note.path}]]`
   return element
+}
+
+/** Said when a gesture's drawing was closed before it could be written to. */
+export const DRAWING_CLOSED = 'That drawing was closed, so nothing was written to it.'
+
+/** Writes the workbench to the view and saves; `repositionToCursor` for what lands at the cursor. */
+async function save(ea: ExcalidrawAutomate, repositionToCursor: boolean): Promise<void> {
+  // `false` is Excalidraw's word for a view that has unloaded since it was bound.
+  if (!(await ea.addElementsToView(repositionToCursor, true))) throw new Error(DRAWING_CLOSED)
 }
 
 /** Outputs the layout is about are drawn heavier. */
@@ -665,13 +715,13 @@ async function write(
     if (box?.groupIds) made.groupIds = [...box.groupIds]
     if (box?.frameId) made.frameId = box.frameId
   }
-  await ea.addElementsToView(false, true)
+  await save(ea, false)
   return true
 }
 
 /** The drawing a view is showing, as a vault path; `''` when it has no file. */
 function drawingPath(view: DrawingView): string {
-  return (view as { file?: TFile }).file?.path ?? ''
+  return view.file?.path ?? ''
 }
 
 /** A linked note's frontmatter, resolving the link from the drawing it sits on. */
@@ -780,9 +830,14 @@ export function registerSelectionHook(app: App, gestures: NodeGestures): () => v
 }
 
 /** The drawing in front of the reader, or `undefined` when the tab is something else. */
-function activeDrawing(app: App): unknown | undefined {
+function activeDrawing(app: App): DrawingView | undefined {
   const leaf = app.workspace.getMostRecentLeaf()
-  return leaf?.view.getViewType() === EXCALIDRAW_VIEW ? leaf.view : undefined
+  return leaf ? excalidrawView(leaf) : undefined
+}
+
+/** The leaf's view when it is Excalidraw's; a drawing open as markdown is not one. */
+function excalidrawView(leaf: WorkspaceLeaf): DrawingView | undefined {
+  return leaf.view.getViewType() === EXCALIDRAW_VIEW ? (leaf.view as FileView) : undefined
 }
 
 /** Excalidraw's own plugin instance, or `undefined` when it is not loaded. */
@@ -848,15 +903,14 @@ function openDrawings(app: App): string[] {
 
 /** Every leaf and the file it holds; the one place a view is assumed to know its file. */
 function eachLeaf(app: App, visit: (leaf: WorkspaceLeaf, file: TFile | undefined) => void): void {
-  app.workspace.iterateAllLeaves(leaf => visit(leaf, (leaf.view as { file?: TFile }).file))
+  app.workspace.iterateAllLeaves(leaf => visit(leaf, (leaf.view as FileView).file ?? undefined))
 }
 
 /**
  * The drawing's live view: the tab it is already in, or a new one. The view is
- * waited for because `setView` on a half-built one fails silently
- * (`docs/spike-ea.md`).
+ * waited for because binding a half-built one fails silently (`docs/spike-ea.md`).
  */
-async function openDrawing(app: App, path: string): Promise<unknown> {
+async function openDrawing(app: App, path: string): Promise<DrawingView> {
   const file = app.vault.getAbstractFileByPath(path)
   if (!(file instanceof TFile)) throw new Error(`That drawing is no longer in the vault: ${path}`)
 
@@ -872,7 +926,7 @@ async function openDrawing(app: App, path: string): Promise<unknown> {
     if (Date.now() > deadline) throw new Error('That drawing did not open as an Excalidraw view.')
     await new Promise(resolve => setTimeout(resolve, VIEW_READY_POLL_MS))
   }
-  return leaf.view
+  return leaf.view as FileView
 }
 
 /**
