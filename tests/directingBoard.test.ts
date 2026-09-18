@@ -141,6 +141,7 @@ let menus: MenuItem[][]
 /** Every editor the board has opened, in the order it opened them. */
 let editors: FakeEditor[]
 let clock: number
+let reruns: RerunWatch
 /** The board's running timers, ticked by the test. */
 let timers: Set<() => void>
 /** Holds every streaming call until the test lets it go. */
@@ -216,7 +217,7 @@ function makeHolds(): Holds {
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
-    reruns: new RerunWatch(),
+    reruns,
     runUrl: runId => `http://engine/history/${runId}`,
   })
 }
@@ -224,6 +225,7 @@ function makeHolds(): Holds {
 function board(): DirectingBoard {
   return new DirectingBoard(root, {
     holds,
+    reruns,
     chains: () => {
       chainsAsked++
       return Promise.resolve(chainNames)
@@ -329,6 +331,7 @@ beforeEach(() => {
   rerunFrames = [...started(NEW), complete(NEW)]
   resumeFrames = [...started(RUN), complete(RUN)]
   chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Because it is.' } }]
+  reruns = new RerunWatch(() => clock)
   holds = makeHolds()
 })
 
@@ -625,6 +628,7 @@ describe('rerunning downstream', () => {
     holdEngine()
     await openNote('world')
     button('⟳ Rerun downstream').click()
+    await settled()
     expect(button('Rerunning…').disabled).toBe(true)
     expect(button('✎ Edit').disabled).toBe(true)
     button('Rerunning…').click()
@@ -765,6 +769,42 @@ describe('a rerun going', () => {
     expect(header()).toContain('ubqPU2')
   })
 
+  it('shows a rerun the palette started, as the drawing and the header read it, and lets go when it lands', async () => {
+    feed = new Feed()
+    await openNote()
+    const going = holds.rerun(RUN)
+    await settled()
+    feed.push(...started(NEW), waitingOn('creative-director'), stepOn('creative-director'))
+    await settled()
+    tick(7)
+    expect(reruns.rewriting(RUN, 'creative-director')?.step?.writesVerdict).toBe(true)
+    expect(progress()).toEqual(['⟳ Writing a new verdict… 0:07'])
+    expect(stale('.chain-runner-directing-verdict')).toBe(true)
+    expect(button('Rerunning…').disabled).toBe(true)
+    expect(button('▶ Resume · 1 of 2 canon ticked').disabled).toBe(true)
+    feed.end(complete(NEW))
+    await going
+    await settled()
+    expect(reruns.going(RUN)).toBeUndefined()
+    expect(progress()).toEqual([])
+    expect(header()).toContain('Xy9zW2')
+  })
+
+  it('starts nothing else on the run a rerun is landing on, until it has landed', async () => {
+    const resume = (): HTMLButtonElement | null => root.querySelector('.chain-runner-directing-footer button')
+    let whileLanding: { header: string; resume: boolean | undefined } | undefined
+    reruns.onLanding(async () => {
+      await settled()
+      whileLanding = { header: header(), resume: resume()?.disabled }
+    })
+    await openNote()
+    button('⟳ Rerun downstream').click()
+    await settled()
+    await settled()
+    expect(whileLanding).toEqual({ header: expect.stringContaining('Xy9zW2'), resume: true })
+    expect(resume()?.disabled).toBe(false)
+  })
+
   it('shows no line for a run the panel has moved on from, and stays there when it lands', async () => {
     const made = board()
     feed = new Feed()
@@ -901,6 +941,7 @@ describe('a proposal tab, chatting', () => {
     notes[PATH] = talking('@world who watches?\n> [turn 2]\n> \n> The player.')
     await openNote('world')
     button('Use this reply as the revision & rerun').click()
+    await settled()
     expect(button('Rerunning…').disabled).toBe(true)
     button('Rerunning…').click()
     await settled()
@@ -1249,6 +1290,7 @@ describe('resume', () => {
     holdEngine()
     open()
     button(RESUME).click()
+    await settled()
     expect(button('Resuming…').disabled).toBe(true)
     button('Resuming…').click()
     await settled()

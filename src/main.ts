@@ -82,7 +82,7 @@ export default class ChainRunnerPlugin extends Plugin {
       folder: () => this.settings.outputFolder,
       engineUrl: () => this.settings.engineUrl,
     })
-    // Every rerun reports here, so the drawing follows one wherever it was started.
+    // Every rerun reports here, wherever it was started.
     const reruns = new RerunWatch()
     // Every rendering of an output note says which run wrote it (ADR-0004), and what a rerun is doing to it.
     const sourceRun = createSourceRunHeader({
@@ -218,6 +218,7 @@ export default class ChainRunnerPlugin extends Plugin {
       leaf =>
         new DirectingView(leaf, {
           holds,
+          reruns,
           chains: () => this.engine.listChains().then(
             chains => chains.map(chain => chain.name),
             () => [],

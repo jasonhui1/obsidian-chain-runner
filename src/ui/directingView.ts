@@ -5,7 +5,7 @@ import { markdownEditor } from './proposalEditor'
 
 export const DIRECTING_VIEW_TYPE = 'chain-runner-directing'
 
-export type DirectingPanelDeps = Pick<DirectingBoardDeps, 'holds' | 'chains' | 'runUrl'>
+export type DirectingPanelDeps = Pick<DirectingBoardDeps, 'holds' | 'reruns' | 'chains' | 'runUrl'>
 
 /** The directing panel's leaf in the right sidebar; what it shows is `./directingBoard`. */
 export class DirectingView extends ItemView {

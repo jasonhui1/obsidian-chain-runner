@@ -1,10 +1,22 @@
+import type { RepliedTurn } from './chat'
 import type { RerunProgress } from './rerunProgress'
 import type { LayoutPanel } from '../engine/types'
 
 /**
- * Every rerun going, for whatever follows one without having started it — the
- * drawing's cards. Told by the rerun itself, so no panel has to be open.
+ * Every rerun going, from its start to its end: the one registry the drawing's
+ * cards, the header and the directing panel all read. Told by the rerun itself,
+ * so no panel has to be open.
  */
+
+/** What started a rerun: the edited proposals, a reply used as the revision, or a resume. */
+export type RerunCause = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn } | { kind: 'resume' }
+
+/** A rerun going: what started it, when, and how it is getting on once it has said. */
+export interface GoingRerun {
+  readonly cause: RerunCause
+  readonly startedAt: number
+  readonly progress?: RerunProgress
+}
 
 /** A rerun that landed: the runs its hold was under, and the run it moved to. */
 export interface RerunLanding {
@@ -25,38 +37,47 @@ export interface RerunReport {
 /** Follows a landed rerun; must not throw, since the hold has already moved. */
 export type RerunLander = (landing: RerunLanding) => Promise<void>
 
-/** One rerun, as the watch holds it; `progress` is unset until its first frame. */
-interface WatchedRerun {
-  progress?: RerunProgress
-}
-
 export class RerunWatch {
-  private readonly going = new Map<string, WatchedRerun>()
+  private readonly reruns = new Map<string, GoingRerun>()
   private readonly listeners = new Set<() => void>()
   private readonly landers = new Set<RerunLander>()
 
+  constructor(private readonly now: () => number = Date.now) {}
+
   /** A rerun of the hold under `from`: the run it branches from, then the runs that hold was under before. */
-  begin(from: readonly string[]): RerunReport {
-    const rerun: WatchedRerun = {}
-    for (const runId of from) this.going.set(runId, rerun)
+  begin(from: readonly string[], cause: RerunCause): RerunReport {
+    let rerun: GoingRerun = { cause, startedAt: this.now() }
+    let ended = false
+    const record = (): void => {
+      for (const runId of from) this.reruns.set(runId, rerun)
+      this.changed()
+    }
+    record()
     return {
       hear: progress => {
-        rerun.progress = progress
-        this.changed()
+        if (ended) return
+        rerun = { ...rerun, progress }
+        record()
       },
       land: async landed => {
         for (const lander of [...this.landers]) await lander({ from, ...landed })
       },
       end: () => {
-        for (const runId of from) if (this.going.get(runId) === rerun) this.going.delete(runId)
+        ended = true
+        for (const runId of from) if (this.reruns.get(runId) === rerun) this.reruns.delete(runId)
         this.changed()
       },
     }
   }
 
+  /** The rerun going under run `runId`, if one is. */
+  going(runId: string): GoingRerun | undefined {
+    return this.reruns.get(runId)
+  }
+
   /** The rerun writing run `runId`'s card `card` again, if one is. */
   rewriting(runId: string, card: string): RerunProgress | undefined {
-    const progress = this.going.get(runId)?.progress
+    const progress = this.reruns.get(runId)?.progress
     return progress?.cards.includes(card) ? progress : undefined
   }
 

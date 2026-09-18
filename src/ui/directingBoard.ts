@@ -4,7 +4,8 @@ import type { ProposalEditor } from './proposalEditor'
 import { TypingBoxes, type TypingBox } from './typingBoxes'
 import { sameTurn, type RepliedTurn } from '../run/chat'
 import type { ConversationEntry } from '../run/conversation'
-import { rerunDoing, type OnRerunProgress, type RerunProgress } from '../run/rerunProgress'
+import { rerunDoing } from '../run/rerunProgress'
+import type { GoingRerun, RerunWatch } from '../run/rerunWatch'
 
 /**
  * The directing panel: one run's hold, drawn from what the hold module answers,
@@ -16,6 +17,8 @@ import { rerunDoing, type OnRerunProgress, type RerunProgress } from '../run/rer
 
 export interface DirectingBoardDeps {
   holds: Holds
+  /** Every rerun going, wherever it was started; each start is told by the same clock as `clock`. */
+  reruns: Pick<RerunWatch, 'going' | 'onChange'>
   /** The chains a side quest can go through; none while the engine cannot say. */
   chains: () => Promise<string[]>
   /** Where a run is shown on the engine, as it is set now (ADR-0004). */
@@ -66,6 +69,8 @@ export class DirectingBoard {
   private opened = 0
   private body: HTMLElement | undefined
   private listening: { runId: string; stop: () => void } | undefined
+  /** Stops hearing the reruns, heard while the panel shows a run. */
+  private stopWatching: (() => void) | undefined
   /** Counts draws, so a slow read overtaken by a later draw draws nothing. */
   private draws = 0
 
@@ -89,15 +94,18 @@ export class DirectingBoard {
   close(): void {
     for (const shown of this.runs.values()) for (const edit of shown.edits.values()) edit.editor.destroy()
     this.runs.clear()
+    this.stopWatching?.()
+    this.stopWatching = undefined
     this.draw({ kind: 'idle' })
   }
 
-  /** Draws `state`, keeping the reader's tab, and follows its run. */
+  /** Draws `state`, keeping the reader's tab, and follows its run and every rerun. */
   private draw(state: DirectingState): void {
     ++this.draws
     this.state = state
     if (state.kind === 'hold') this.follow(state.hold)
     this.listen(runIdOf(state))
+    if (state.kind !== 'idle') this.stopWatching ??= this.deps.reruns.onChange(() => this.redraw())
     this.redraw()
   }
 
@@ -147,9 +155,24 @@ export class DirectingBoard {
     return shown
   }
 
-  /** The run's rerun, while it goes. */
-  private going(runId: string): Rerun | undefined {
-    return this.runs.get(runId)?.rerun
+  /** What is going on the hold, found by its earlier runs too while a rerun lands it on a new one. */
+  private going(hold: Hold): GoingRerun | undefined {
+    for (const runId of [hold.runId, ...hold.earlierRuns]) {
+      const going = this.deps.reruns.going(runId)
+      if (going) return going
+    }
+    return undefined
+  }
+
+  /** The hold's rerun or revise, while it goes; a resume is said in the footer instead. */
+  private rerunning(hold: Hold): GoingRerun | undefined {
+    const going = this.going(hold)
+    return going?.cause.kind === 'resume' ? undefined : going
+  }
+
+  private resuming(hold: Hold): GoingRerun | undefined {
+    const going = this.going(hold)
+    return going?.cause.kind === 'resume' ? going : undefined
   }
 
   /** The run's open edit of a proposal. */
@@ -157,15 +180,13 @@ export class DirectingBoard {
     return this.runs.get(runId)?.edits.get(proposal)
   }
 
-  /** A hold that landed on another run takes what the panel held under its earlier runs: an open edit, and the rerun still going. */
+  /** A hold that landed on another run takes the edits the panel held open under its earlier runs. */
   private follow(hold: Hold): void {
     for (const earlier of hold.earlierRuns) {
       const was = this.runs.get(earlier)
       if (!was) continue
       this.runs.delete(earlier)
       const now = this.shownFor(hold.runId)
-      now.rerun ??= was.rerun
-      if (was.resume?.kind === 'running') now.resume ??= was.resume
       for (const [name, edit] of was.edits) {
         if (now.edits.has(name)) edit.editor.destroy()
         else now.edits.set(name, edit)
@@ -199,7 +220,7 @@ export class DirectingBoard {
     this.tabButton(tabs, 'Run', undefined, !proposal)
     for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal, one.edited)
     this.rerunButton(row, hold)
-    const going = this.going(hold.runId)
+    const going = this.rerunning(hold)
     const rewritten = proposal !== undefined && going?.progress?.proposals.includes(proposal.name) === true
     if (going && rewritten) this.progress(body, going)
 
@@ -224,7 +245,7 @@ export class DirectingBoard {
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
     const edit = this.editing(hold.runId, proposal.name)
     if (edit) this.drawEditor(top, proposal.name, edit)
-    else this.proposalText(top, hold.runId, proposal.name, proposal.text, rewritten)
+    else this.proposalText(top, hold, proposal.name, proposal.text, rewritten)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, `${proposal.name} canon`, 'Canon from this proposal'), canon, false)
     this.chat(this.section(body, `${proposal.name} chat`, `Chat with ${proposal.name}`), hold, proposal.name)
@@ -322,22 +343,25 @@ export class DirectingBoard {
   }
 
   private reviseButton(el: HTMLElement, hold: Hold, turn: RepliedTurn): void {
-    const going = this.going(hold.runId)?.from
+    const going = this.rerunning(hold)?.cause
     const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = !this.canRerun(hold)
-    button.onclick = (): void => void this.startRerun(hold, { kind: 'reply', turn }, (runId, onProgress) => this.deps.holds.revise(runId, turn, onProgress))
+    button.onclick = (): void => void this.startRerun(hold, runId => this.deps.holds.revise(runId, turn))
   }
 
   /** Pinned under every tab: the Direction run as it stands, and what the last run of it landed on. */
   private resumeBar(hold: Hold): void {
     const bar = this.add(this.root, 'div', `${CLS}-footer`)
+    const resuming = this.resuming(hold)
+    const button = this.button(bar, resuming ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
+    button.disabled = this.going(hold) !== undefined
+    button.onclick = (): void => void this.startResume(hold)
+    if (resuming) {
+      if (resuming.progress?.step) this.add(bar, 'div', `${CLS}-progress`, rerunDoing(resuming.progress.step))
+      return
+    }
     const shown = this.runs.get(hold.runId)?.resume
-    const running = shown?.kind === 'running'
-    const button = this.button(bar, running ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
-    button.disabled = running
-    button.onclick = (): void => void this.startResume(hold.runId)
-    if (shown?.kind === 'running' && shown.progress?.step) this.add(bar, 'div', `${CLS}-progress`, rerunDoing(shown.progress.step))
     if (shown?.kind === 'stopped') this.add(bar, 'div', `${CLS}-faint`, 'Resume did not run.')
     if (shown?.kind === 'landed') this.resumeStatus(bar, shown.result)
   }
@@ -352,18 +376,13 @@ export class DirectingBoard {
   }
 
   /** One resume at a time per run; the panel follows the hold to the run it carried on as. */
-  private async startResume(runId: string): Promise<void> {
+  private async startResume(hold: Hold): Promise<void> {
+    if (this.going(hold)) return
+    const { runId } = hold
     const shown = this.shownFor(runId)
-    if (shown.resume?.kind === 'running') return
-    const going: ResumeShown = { kind: 'running' }
-    shown.resume = going
-    this.redraw()
     let outcome: ResumeShown = { kind: 'stopped' }
     try {
-      const result = await this.deps.holds.resume(runId, progress => {
-        going.progress = progress
-        this.redraw()
-      })
+      const result = await this.deps.holds.resume(runId)
       if (result) outcome = { kind: 'landed', result }
     } finally {
       shown.resume = outcome
@@ -376,21 +395,21 @@ export class DirectingBoard {
   /** At the end of the tab row, once a proposal is edited; the edited ones are marked on their tabs. */
   private rerunButton(row: HTMLElement, hold: Hold): void {
     if (!hold.proposals.some(one => one.edited)) return
-    const going = this.going(hold.runId)?.from
+    const going = this.rerunning(hold)?.cause
     const button = this.button(row, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', `mod-cta ${CLS}-rerun`)
     button.disabled = !this.canRerun(hold)
     titled(button, this.editOpen(hold) ? 'Save or cancel the edit first' : undefined)
-    button.onclick = (): void => void this.startRerun(hold, { kind: 'edits' }, (runId, onProgress) => this.deps.holds.rerun(runId, onProgress))
+    button.onclick = (): void => void this.startRerun(hold, runId => this.deps.holds.rerun(runId))
   }
 
-  /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
+  /** One rerun or resume at a time per run, and no rerun while an edit is open: the run it lands on would leave the edit behind. */
   private canRerun(hold: Hold): boolean {
-    return !this.going(hold.runId) && !this.editOpen(hold)
+    return !this.going(hold) && !this.editOpen(hold)
   }
 
   /** Whether a rerun going may write `name` again: until it has said which it writes, any proposal may be. */
-  private rewriting(runId: string, name: string): boolean {
-    const going = this.going(runId)
+  private rewriting(hold: Hold, name: string): boolean {
+    const going = this.rerunning(hold)
     if (!going) return false
     return going.progress ? going.progress.proposals.includes(name) : true
   }
@@ -404,7 +423,7 @@ export class DirectingBoard {
    * until the run it lands on replaces it. Until it says, it is taken to.
    */
   private verdict(body: HTMLElement, hold: Hold): void {
-    const going = this.going(hold.runId)
+    const going = this.rerunning(hold)
     const rewriting = going !== undefined && going.progress?.verdict !== false
     if (!hold.verdict && !rewriting) return
     const section = this.section(body, 'verdict', 'Verdict')
@@ -416,7 +435,7 @@ export class DirectingBoard {
   }
 
   /** The step a rerun is on, and how long it has gone; the line keeps one timer while it is shown. */
-  private progress(el: HTMLElement, going: Rerun): void {
+  private progress(el: HTMLElement, going: GoingRerun): void {
     const { el: line, fresh } = this.tree.place(el, 'div', `${CLS}-progress`)
     const doing = rerunDoing(going.progress?.step)
     const tick = this.tree.latest(line, () => void (line.textContent = `${doing} ${elapsed(this.deps.clock.now() - going.startedAt)}`))
@@ -425,24 +444,9 @@ export class DirectingBoard {
   }
 
   /** The panel follows the hold to the run the rerun lands on. */
-  private async startRerun(hold: Hold, from: RerunFrom, rerun: (runId: string, onProgress: OnRerunProgress) => Promise<Landing | undefined>): Promise<void> {
-    const runId = hold.runId
+  private async startRerun(hold: Hold, rerun: (runId: string) => Promise<Landing | undefined>): Promise<void> {
     if (!this.canRerun(hold)) return
-    const going: Rerun = { from, startedAt: this.deps.clock.now() }
-    this.shownFor(runId).rerun = going
-    this.redraw()
-    const onProgress = (progress: RerunProgress): void => {
-      going.progress = progress
-      this.redraw()
-    }
-    let landing: Landing | undefined
-    try {
-      landing = await rerun(runId, onProgress)
-    } finally {
-      // By identity: the hold may have moved it to the run it landed on.
-      for (const shown of this.runs.values()) if (shown.rerun === going) delete shown.rerun
-      if (!this.landed(runId, landing?.hold)) this.redraw()
-    }
+    this.landed(hold.runId, (await rerun(hold.runId))?.hold)
   }
 
   private tabButton(tabs: HTMLElement, label: string, proposal: string | undefined, selected: boolean, edited = false): void {
@@ -507,7 +511,8 @@ export class DirectingBoard {
   }
 
   /** A `stale` proposal is being written again, so it is shown greyed. */
-  private proposalText(el: HTMLElement, runId: string, name: string, text: string, stale: boolean): void {
+  private proposalText(el: HTMLElement, hold: Hold, name: string, text: string, stale: boolean): void {
+    const { runId } = hold
     const { el: shown, fresh } = this.tree.place(el, 'div', `${CLS}-proposal`)
     shown.classList.toggle('is-stale', stale)
     this.markdown(shown, text || '*This proposal is empty.*')
@@ -516,7 +521,7 @@ export class DirectingBoard {
     const actions = this.add(el, 'div', `${CLS}-proposal-actions`)
     const toggle = this.button(actions, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
-    edit.disabled = this.rewriting(runId, name)
+    edit.disabled = this.rewriting(hold, name)
     edit.onclick = (): void => {
       const open: OpenEdit = { id: ++this.opened, editor: this.deps.openEditor(text, () => open.refreshSave()), saving: false, refreshSave: () => {} }
       this.shownFor(runId).edits.set(name, open)
@@ -661,25 +666,15 @@ type HoldProposal = Hold['proposals'][number]
 type CanonChoice = Hold['canon'][number]
 type HoldPick = Hold['holds'][number]
 
-type RerunFrom = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn }
-
-/** A rerun going: what it was started from, when, and how it is getting on once it has said. */
-interface Rerun {
-  from: RerunFrom
-  startedAt: number
-  progress?: RerunProgress
-}
-
 /** What the panel holds for a run beyond its note. */
 interface RunShown {
-  rerun?: Rerun
   resume?: ResumeShown
   /** Each proposal being edited, by name. */
   edits: Map<string, OpenEdit>
 }
 
-/** A resume from the panel: going, landed, or stopped before it ran. */
-type ResumeShown = { kind: 'running'; progress?: RerunProgress } | { kind: 'landed'; result: Resumed } | { kind: 'stopped' }
+/** How the last resume from the panel ended: landed, or stopped before it ran. */
+type ResumeShown = { kind: 'landed'; result: Resumed } | { kind: 'stopped' }
 
 /** The button names what the run would lock, so nothing is resumed on ticks the reader forgot. */
 function resumeLabel(canon: CanonChoice[]): string {

@@ -13,8 +13,7 @@ import {
 } from '@/ui/holds'
 import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerunDownstreamFront, resumeFront, sendFront } from '@/ui/holdCommands'
 import { runViewUrl } from '@/run/provenance'
-import { RerunWatch } from '@/run/rerunWatch'
-import type { RerunProgress } from '@/run/rerunProgress'
+import { RerunWatch, type GoingRerun } from '@/run/rerunWatch'
 import { UNSUPPORTED_RESUME } from '@/run/resume'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
 import type {
@@ -785,7 +784,7 @@ describe('rerun', () => {
     expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
   })
 
-  it('tells the caller and the watch what it writes again, then each step the engine starts', async () => {
+  it('tells the watch it has started, what it writes again, then each step the engine starts', async () => {
     rerunFrames = [
       ...started(NEW),
       waitingOn('creative-director'),
@@ -793,19 +792,20 @@ describe('rerun', () => {
       { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 1 },
       { type: 'run_complete', runId: NEW },
     ]
-    const watched: (RerunProgress | undefined)[] = []
-    reruns.onChange(() => void watched.push(reruns.rewriting(RUN, 'creative-director')))
+    const watched: (GoingRerun | undefined)[] = []
+    reruns.onChange(() => void watched.push(reruns.going(RUN)))
     const holds = makeHolds()
     await holds.editProposal(RUN, 'world', 'The world is real.')
-    const heard: RerunProgress[] = []
-    await holds.rerun(RUN, progress => heard.push(progress))
+    await holds.rerun(RUN)
     const plan = { verdict: true, proposals: [], cards: ['creative-director'] }
-    expect(heard).toEqual([
+    expect(watched.map(going => going?.cause)).toEqual([...Array(4).fill({ kind: 'edits' }), undefined])
+    expect(watched.map(going => going?.progress)).toEqual([
+      undefined,
       plan,
       { ...plan, step: { name: 'critic', writesVerdict: false } },
       { ...plan, step: { name: 'creative-director', writesVerdict: true } },
+      undefined,
     ])
-    expect(watched).toEqual([...heard, undefined])
   })
 
   it('refuses a second rerun, revise or resume of the same hold while one goes', async () => {
@@ -924,11 +924,14 @@ describe('resume', () => {
     expect(notices.at(-1)).toBe(NO_HOLD_NOTE(RUN))
   })
 
-  it('tells the caller how the run is getting on', async () => {
+  it('tells the watch it is a resume, and how the run is getting on', async () => {
     resumeFrames = [...started(RUN), waitingOn('creative-director'), { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 }]
-    const heard: RerunProgress[] = []
-    await makeHolds().resume(RUN, progress => heard.push(progress))
-    expect(heard.at(-1)?.step).toEqual({ name: 'creative-director', writesVerdict: true })
+    const heard: (GoingRerun | undefined)[] = []
+    reruns.onChange(() => void heard.push(reruns.going(RUN)))
+    await makeHolds().resume(RUN)
+    expect(heard.at(0)?.cause).toEqual({ kind: 'resume' })
+    expect(heard.at(-2)?.progress?.step).toEqual({ name: 'creative-director', writesVerdict: true })
+    expect(heard.at(-1)).toBeUndefined()
   })
 
   it('says why when the engine cannot resume a hold', async () => {

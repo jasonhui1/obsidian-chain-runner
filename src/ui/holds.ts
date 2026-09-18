@@ -47,8 +47,8 @@ import { proposerPanels } from '../run/panels'
 import { runPromote } from '../run/promote'
 import { chatReply, repliesSoFar } from '../run/proposerChat'
 import { rerunRequest } from '../run/rerun'
-import { RerunProgressTracker, type OnRerunProgress } from '../run/rerunProgress'
-import type { RerunReport, RerunWatch } from '../run/rerunWatch'
+import { RerunProgressTracker } from '../run/rerunProgress'
+import type { RerunCause, RerunReport, RerunWatch } from '../run/rerunWatch'
 import { resumeRequest, runResume } from '../run/resume'
 import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
 import type { EngineClient } from '../engine/client'
@@ -124,7 +124,7 @@ export interface HoldsDeps {
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
-  /** Hears every rerun, revise and resume, so the drawing follows one no panel started. */
+  /** Hears every rerun, revise and resume from its start, and says which are going. */
   reruns: RerunWatch
   /** Where a run is shown on the engine, for the links the note keeps (ADR-0004). */
   runUrl: (runId: string) => string | undefined
@@ -178,14 +178,11 @@ interface LandingOptions {
   beforeRefresh?: (content: string, newRunId: string) => string
   /** Decides which edits made meanwhile outlive the refresh. */
   edits: Omit<RerunEdits, 'landed'>
-  onProgress?: OnRerunProgress | undefined
   wording: LandingWording
 }
 
 export class Holds {
   private readonly panels: RunPanels
-  /** Every run id of a hold with a rerun, revise or resume going. */
-  private readonly going = new Set<string>()
 
   constructor(private readonly deps: HoldsDeps) {
     this.panels = new RunPanels(deps.engine)
@@ -296,31 +293,31 @@ export class Holds {
   }
 
   /** Answers the pending trigger of `kind` a human typed; a chat ending in a bare `revise` is a revise. */
-  async send(runId: string, kind: TriggerKind, onProgress?: OnRerunProgress): Promise<Hold | Landing | undefined> {
+  async send(runId: string, kind: TriggerKind): Promise<Hold | Landing | undefined> {
     const found = await this.locateOrRefuse(runId)
     if (!found) return undefined
     const revise = kind === 'chat' ? pendingRevise(found.content) : undefined
-    if (revise?.reply !== undefined) return this.revised(found, { ...revise, reply: revise.reply }, markRevised, onProgress)
+    if (revise?.reply !== undefined) return this.revised(found, { ...revise, reply: revise.reply }, markRevised)
     const trigger = unanswered(readHold(found.content, [])?.conversation ?? [], kind)
     return trigger ? this.answer(found, trigger) : this.refuse(NOTHING_PENDING[kind])
   }
 
   /** The edited proposals rerun downstream; the hold lands on the run that ran. */
-  async rerun(runId: string, onProgress?: OnRerunProgress): Promise<Landing | undefined> {
+  async rerun(runId: string): Promise<Landing | undefined> {
     const found = await this.locateOrRefuse(runId)
-    return found && this.exclusive(found, () => this.rerunDownstream(found, onProgress))
+    return found && this.exclusive(found, { kind: 'edits' }, report => this.rerunDownstream(found, report))
   }
 
   /** A reply made its proposal's revision through the engine's promote; the hold lands where the stream names. */
-  async revise(runId: string, turn: RepliedTurn, onProgress?: OnRerunProgress): Promise<Landing | undefined> {
+  async revise(runId: string, turn: RepliedTurn): Promise<Landing | undefined> {
     const found = await this.locateOrRefuse(runId)
-    return found && this.revised(found, turn, (content, newRunId) => markTurnRevised(content, turn, newRunId), onProgress)
+    return found && this.revised(found, turn, (content, newRunId) => markTurnRevised(content, turn, newRunId))
   }
 
   /** The hold answered and the run carried on: ticks locked, the run linked back, a fork given its own hold. */
-  async resume(runId: string, onProgress?: OnRerunProgress): Promise<Resumed | undefined> {
+  async resume(runId: string): Promise<Resumed | undefined> {
     const found = await this.locateOrRefuse(runId)
-    return found && this.exclusive(found, () => this.resumed(found, onProgress))
+    return found && this.exclusive(found, { kind: 'resume' }, report => this.resumed(found, report))
   }
 
   private pathOf(runId: string): string {
@@ -527,18 +524,19 @@ export class Holds {
     return { runId: ran, ...(url ? { url } : {}), result: landed.agentOutputs.at(-1)?.output ?? '' }
   }
 
-  /** One rerun, revise or resume at a time per hold, its earlier runs included. */
-  private async exclusive<T>(found: Located, act: () => Promise<T | undefined>): Promise<T | undefined> {
-    if (found.runIds.some(runId => this.going.has(runId))) return this.refuse(ALREADY_GOING)
-    for (const runId of found.runIds) this.going.add(runId)
+  /** One rerun, revise or resume at a time per hold, its earlier runs included, held by the watch while it goes. */
+  private async exclusive<T>(found: Located, cause: RerunCause, act: (report: RerunReport) => Promise<T | undefined>): Promise<T | undefined> {
+    const { reruns } = this.deps
+    if (found.runIds.some(runId => reruns.going(runId))) return this.refuse(ALREADY_GOING)
+    const report = reruns.begin(found.runIds, cause)
     try {
-      return await act()
+      return await act(report)
     } finally {
-      for (const runId of found.runIds) this.going.delete(runId)
+      report.end()
     }
   }
 
-  private async rerunDownstream(found: Located, onProgress: OnRerunProgress | undefined): Promise<Landing | undefined> {
+  private async rerunDownstream(found: Located, report: RerunReport): Promise<Landing | undefined> {
     const { engine } = this.deps
     const { runId } = found.heading
     const source = await this.deps.withEngine(() => fetchRun(engine, runId))
@@ -548,9 +546,8 @@ export class Holds {
     if (Object.keys(edits).length === 0) return this.refuse(NO_EDITED_PROPOSAL)
     const request = rerunRequest(source.run, panels, edits, await this.canon())
     if (!request) return this.refuse(`Run ${runId} carries no graph to rerun from`)
-    return this.land(found, onEvent => launch(engine, request, onEvent), {
+    return this.land(found, report, onEvent => launch(engine, request, onEvent), {
       edits: { before: panels, sent: edits },
-      onProgress,
       wording: RERUN_DOWNSTREAM_WORDING,
     })
   }
@@ -559,9 +556,8 @@ export class Holds {
     found: Located,
     turn: RepliedTurn,
     mark: (content: string, newRunId: string) => string,
-    onProgress: OnRerunProgress | undefined,
   ): Promise<Landing | undefined> {
-    return this.exclusive(found, async () => {
+    return this.exclusive(found, { kind: 'reply', turn }, async report => {
       const { engine } = this.deps
       const { runId } = found.heading
       const proposer = await this.proposer(runId, turn.name, NOT_A_PROPOSER)
@@ -571,34 +567,31 @@ export class Holds {
       if (turn.turn === undefined) return this.refuse(REPLY_NOT_ON_ENGINE(turn.name))
       const canon = await this.canon()
       const promote = { runId, nodeId: panel.node, name: turn.name, turn: turn.turn, ...(canon !== undefined ? { canon } : {}) }
-      return this.land(found, onEvent => runPromote(engine, promote, onEvent), {
+      return this.land(found, report, onEvent => runPromote(engine, promote, onEvent), {
         beforeRefresh: mark,
-        onProgress,
         edits: { before: source.layout.panels, sent: {}, revised: panel.node },
         wording: reviseWording(turn.name),
       })
     })
   }
 
-  private async resumed(found: Located, onProgress: OnRerunProgress | undefined): Promise<Resumed | undefined> {
+  private async resumed(found: Located, report: RerunReport): Promise<Resumed | undefined> {
     const { content, heading } = found
     const direction = directionBlock(content) ?? ''
     const canon = await this.canon()
     const request = resumeRequest({ direction, said: directionLines(direction), holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
 
-    return this.withProgress(found, onProgress, async (onEvent, report) => {
-      const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, onEvent))
-      if (!resumed) return undefined
-      if (resumed.kind === 'refused') return this.refuse(resumed.said)
-      const { runId, forked, error } = resumed
-      if (!runId) return this.refuse(error ? `Resume failed: ${error}` : 'Resume produced no run')
+    const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, progressTo(report)))
+    if (!resumed) return undefined
+    if (resumed.kind === 'refused') return this.refuse(resumed.said)
+    const { runId, forked, error } = resumed
+    if (!runId) return this.refuse(error ? `Resume failed: ${error}` : 'Resume produced no run')
 
-      const locked = await this.lockCanon(tickedCanonLines(direction), error)
-      const url = this.deps.runUrl(runId)
-      await this.rewrite(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
-      const hold = forked ? await this.fork(heading, runId, report) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
-      return hold && { hold, forked, ...(error !== undefined ? { error } : {}), canon: locked }
-    })
+    const locked = await this.lockCanon(tickedCanonLines(direction), error)
+    const url = this.deps.runUrl(runId)
+    await this.rewrite(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
+    const hold = forked ? await this.fork(heading, runId, report) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
+    return hold && { hold, forked, ...(error !== undefined ? { error } : {}), canon: locked }
   }
 
   /**
@@ -638,35 +631,16 @@ export class Holds {
     return this.deps.store.read(CANON_NOTE)
   }
 
-  /** Progress told to the caller and to the watch, which hears the end whatever happens. */
-  private async withProgress<T>(found: Located, onProgress: OnRerunProgress | undefined, use: (onEvent: OnEvent, report: RerunReport) => Promise<T>): Promise<T> {
-    const report = this.deps.reruns.begin(found.runIds)
-    const tracker = new RerunProgressTracker()
-    const onEvent: OnEvent = event => {
-      const progress = tracker.hear(event)
-      if (!progress) return
-      onProgress?.(progress)
-      report.hear(progress)
-    }
-    try {
-      return await use(onEvent, report)
-    } finally {
-      report.end()
-    }
-  }
-
   /**
    * The call run, and the run it lands on folded into the note, which is then
    * named for that run. The run of record is the one the stream names (ADR-0013).
    */
-  private land(found: Located, call: (onEvent: OnEvent) => Promise<Answer>, options: LandingOptions): Promise<Landing | undefined> {
-    return this.withProgress(found, options.onProgress, async (onEvent, report) => {
-      const streamed = await this.deps.withEngine(() => call(onEvent))
-      if (!streamed) return undefined
-      if (streamed.kind === 'refused') return this.refuse(streamed.said)
-      if (!streamed.runId || streamed.error) return this.refuse(options.wording.failed(streamed.runId, streamed.error))
-      return this.fold(found, streamed.runId, streamed.forked, options, report)
-    })
+  private async land(found: Located, report: RerunReport, call: (onEvent: OnEvent) => Promise<Answer>, options: LandingOptions): Promise<Landing | undefined> {
+    const streamed = await this.deps.withEngine(() => call(progressTo(report)))
+    if (!streamed) return undefined
+    if (streamed.kind === 'refused') return this.refuse(streamed.said)
+    if (!streamed.runId || streamed.error) return this.refuse(options.wording.failed(streamed.runId, streamed.error))
+    return this.fold(found, streamed.runId, streamed.forked, options, report)
   }
 
   private async fold(found: Located, newRunId: string, forked: boolean, options: LandingOptions, report: RerunReport): Promise<Landing | undefined> {
@@ -704,6 +678,15 @@ export class Holds {
     await report.land({ runId: newRunId, chainName: heading.chainName, panels: landedRun.layout.panels })
     const hold = await this.read(newRunId)
     return hold && { hold, forked }
+  }
+}
+
+/** The engine's frames, told to the watch as progress. */
+function progressTo(report: RerunReport): OnEvent {
+  const tracker = new RerunProgressTracker()
+  return event => {
+    const progress = tracker.hear(event)
+    if (progress) report.hear(progress)
   }
 }
 

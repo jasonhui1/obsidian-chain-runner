@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { RerunWatch, type RerunLanding } from '@/run/rerunWatch'
+import { RerunWatch, type RerunCause, type RerunLanding } from '@/run/rerunWatch'
 import type { LayoutPanel } from '@/engine/types'
 import type { RerunProgress } from '@/run/rerunProgress'
 
@@ -10,39 +10,67 @@ const OLDER = '2026-09-14-older'
 const NEW = '2026-09-16-new'
 
 const writing: RerunProgress = { verdict: true, proposals: ['world'], cards: ['world', 'verdict'] }
+const EDITS: RerunCause = { kind: 'edits' }
 const panels: LayoutPanel[] = [{ name: 'verdict', node: 'v', text: 'New.', lines: 1, state: 'filled', emphasis: 'join' }]
 
 describe('RerunWatch', () => {
   it('says nothing is rewritten before a rerun has named its cards', () => {
     const watch = new RerunWatch()
-    watch.begin([OLD])
+    watch.begin([OLD], EDITS)
     expect(watch.rewriting(OLD, 'verdict')).toBeUndefined()
   })
 
   it('names the cards a rerun writes again, under every run its hold has been', () => {
     const watch = new RerunWatch()
-    watch.begin([OLD, OLDER]).hear(writing)
+    watch.begin([OLD, OLDER], EDITS).hear(writing)
     expect(watch.rewriting(OLD, 'verdict')).toEqual(writing)
     expect(watch.rewriting(OLDER, 'world')).toEqual(writing)
     expect(watch.rewriting(OLD, 'gameplay')).toBeUndefined()
     expect(watch.rewriting(NEW, 'verdict')).toBeUndefined()
   })
 
-  it('tells its listeners of each change, until they stop listening', () => {
+  it('holds a rerun from its start, under every run its hold has been: what started it, when, and how it is getting on', () => {
+    let now = 5000
+    const watch = new RerunWatch(() => now)
+    const reply: RerunCause = { kind: 'reply', turn: { name: 'world', message: 'who watches?', reply: 'The player.', turn: 2 } }
+    const rerun = watch.begin([OLD, OLDER], reply)
+    now = 9000
+    expect(watch.going(OLD)).toEqual({ cause: reply, startedAt: 5000 })
+    rerun.hear(writing)
+    expect(watch.going(OLDER)).toEqual({ cause: reply, startedAt: 5000, progress: writing })
+    expect(watch.going(NEW)).toBeUndefined()
+  })
+
+  it('lets go of a rerun once it ends', () => {
+    const watch = new RerunWatch()
+    watch.begin([OLD, OLDER], { kind: 'resume' }).end()
+    expect(watch.going(OLD)).toBeUndefined()
+    expect(watch.going(OLDER)).toBeUndefined()
+  })
+
+  it('takes no word from a rerun that has ended', () => {
+    const watch = new RerunWatch()
+    const rerun = watch.begin([OLD], EDITS)
+    rerun.end()
+    rerun.hear(writing)
+    expect(watch.going(OLD)).toBeUndefined()
+  })
+
+  it('tells its listeners of each change, its start included, until they stop listening', () => {
     const watch = new RerunWatch()
     let heard = 0
     const stop = watch.onChange(() => heard++)
-    const rerun = watch.begin([OLD])
+    const rerun = watch.begin([OLD], EDITS)
     rerun.hear(writing)
     rerun.end()
     stop()
-    watch.begin([OLD]).hear(writing)
-    expect(heard).toBe(2)
+    watch.begin([OLD], EDITS).hear(writing)
+    expect(heard).toBe(3)
   })
 
   it('forgets the cards once the rerun ends, however it ended', () => {
     const watch = new RerunWatch()
-    const rerun = watch.begin([OLD])
+    const rerun = watch.begin([OLD], EDITS)
     rerun.hear(writing)
     rerun.end()
     expect(watch.rewriting(OLD, 'verdict')).toBeUndefined()
@@ -50,8 +78,8 @@ describe('RerunWatch', () => {
 
   it('leaves a later rerun of the same run alone when an earlier one ends', () => {
     const watch = new RerunWatch()
-    const first = watch.begin([OLD])
-    const second = watch.begin([OLD])
+    const first = watch.begin([OLD], EDITS)
+    const second = watch.begin([OLD], EDITS)
     second.hear(writing)
     first.end()
     expect(watch.rewriting(OLD, 'verdict')).toEqual(writing)
@@ -65,7 +93,7 @@ describe('RerunWatch', () => {
       stillRewriting = watch.rewriting(OLD, 'verdict')
       landed.push(landing)
     })
-    const rerun = watch.begin([OLD, OLDER])
+    const rerun = watch.begin([OLD, OLDER], EDITS)
     rerun.hear(writing)
     await rerun.land({ runId: NEW, chainName: 'creative-director', panels })
     expect(landed).toEqual([{ from: [OLD, OLDER], runId: NEW, chainName: 'creative-director', panels }])
@@ -76,7 +104,7 @@ describe('RerunWatch', () => {
     const watch = new RerunWatch()
     let landed = 0
     watch.onLanding(async () => void landed++)()
-    await watch.begin([OLD]).land({ runId: NEW, chainName: 'c', panels })
+    await watch.begin([OLD], EDITS).land({ runId: NEW, chainName: 'c', panels })
     expect(landed).toBe(0)
   })
 })

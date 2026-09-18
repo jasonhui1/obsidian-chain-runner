@@ -26,8 +26,6 @@ export function rerunDoing(step: RerunStep | undefined): string {
   return `⟳ ${doing}…`
 }
 
-export type OnRerunProgress = (progress: RerunProgress) => void
-
 export class RerunProgressTracker {
   private panels: LayoutPanel[] = []
   /** The nodes the first frame had waiting; `undefined` until it comes. */
