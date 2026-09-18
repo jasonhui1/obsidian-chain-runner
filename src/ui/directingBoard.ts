@@ -1,50 +1,45 @@
-import { canonNote, DIRECTION_VERBS, oneLine, type DirectionVerb, type Hold, type Resumed } from './holds'
+import { canonNote, DIRECTION_VERBS, oneLine, type DirectionVerb, type Hold, type Holds, type Landing, type Resumed } from './holds'
 import type { ProposalEditor } from './proposalEditor'
 import { TypingBoxes } from './typingBoxes'
 import { sameTurn, type RepliedTurn } from '../run/chat'
 import type { ConversationEntry } from '../run/conversation'
 import { rerunDoing, type OnRerunProgress, type RerunProgress } from '../run/rerunProgress'
 
-/** The directing panel's elements: a Run tab, and a tab per proposal. Plain DOM; every button is handed to the deps. */
+/**
+ * The directing panel: one run's hold, drawn from what the hold module answers,
+ * read again when the note changes by any hand, and followed to wherever a
+ * rerun or a resume lands it. Plain DOM; every button is one hold module call.
+ */
 
 export interface DirectingBoardDeps {
-  /** Renders markdown into an empty element, returning what releases the render. */
-  renderMarkdown: (text: string, into: HTMLElement) => () => void
-  direct: (verb: DirectionVerb, proposal: string, other?: string) => void
-  undirect: (verb: DirectionVerb, proposal: string, other?: string) => void
-  tickCanon: (id: string, ticked: boolean) => void
-  /** A hold's candidate, by its heading, picked or unpicked. */
-  tickCandidate: (nodeId: string, heading: string, ticked: boolean) => void
-  /** Writes the hold for a run that has none. */
-  writeHold: () => void
-  /** Each answers whether what was typed reached the hold. */
-  chat: (proposal: string, message: string) => Promise<boolean>
-  askRoom: (question: string) => Promise<boolean>
-  change: (text: string) => Promise<boolean>
-  /** Each rerun tells `onProgress` what it writes again, and each step the engine starts. */
-  revise: (turn: RepliedTurn, onProgress: OnRerunProgress) => Promise<void>
-  /** Answers whether the proposal’s new words reached the hold. */
-  editProposal: (proposal: string, text: string) => Promise<boolean>
-  /** Reruns downstream of every edited proposal. */
-  rerun: (onProgress: OnRerunProgress) => Promise<void>
-  /** Answers the hold and carries the run on; `undefined` when nothing ran. */
-  resume: (runId: string, onProgress: OnRerunProgress) => Promise<Resumed | undefined>
-  /** Answers whether the side quest's result reached the hold. */
-  sideQuest: (proposal: string, chain: string) => Promise<boolean>
+  holds: Holds
   /** The chains a side quest can go through; none while the engine cannot say. */
   chains: () => Promise<string[]>
+  /** Where a run is shown on the engine, as it is set now (ADR-0004). */
   runUrl: (runId: string) => string | undefined
+  /** Renders markdown into an empty element, returning what releases the render. */
+  renderMarkdown: (text: string, into: HTMLElement) => () => void
   /** Opens an editor on a proposal's words, which reports every change. */
   openEditor: (text: string, changed: () => void) => ProposalEditor
-  openMenu: (event: MouseEvent) => void
-  now: () => number
-  /** Calls `tick` every `ms`; returns what stops it. */
-  every: (ms: number, tick: () => void) => () => void
+  openMenu: (event: MouseEvent, items: MenuItem[]) => void
+  clock: Clock
   /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
   watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
 }
 
-export type DirectingState =
+export interface MenuItem {
+  title: string
+  icon: string
+  click: () => void
+}
+
+export interface Clock {
+  now: () => number
+  /** Calls `tick` every `ms`; returns what stops it. */
+  every: (ms: number, tick: () => void) => () => void
+}
+
+type DirectingState =
   | { kind: 'idle' }
   | { kind: 'missing'; runId: string }
   | { kind: 'hold'; hold: Hold }
@@ -56,40 +51,52 @@ export class DirectingBoard {
   /** The proposal whose tab is open; `undefined` is the Run tab. */
   private tab: string | undefined
   private readonly unclamped = new Set<string>()
-  private readonly boxes = new TypingBoxes(() => this.draw(this.state))
-  /** Each run's rerun, while it goes. */
-  private readonly rerunning = new Map<string, Rerun>()
-  /** Each run's resume, while it goes and once it has landed. */
-  private readonly resumes = new Map<string, ResumeShown>()
-  /** Each proposal being edited, by `editKey`. */
-  private readonly edits = new Map<string, OpenEdit>()
+  private readonly boxes = new TypingBoxes(() => this.redraw())
+  /** What the panel holds for each run beyond its note, moved on with the hold when it lands elsewhere. */
+  private readonly runs = new Map<string, RunShown>()
   /** The chains the engine named when a tab was last opened. */
   private chains: string[] = []
   private releases: (() => void)[] = []
   private body: HTMLElement | undefined
+  private listening: { runId: string; stop: () => void } | undefined
+  /** Counts draws, so a slow read overtaken by a later draw draws nothing. */
+  private draws = 0
 
   constructor(
     private readonly root: HTMLElement,
     private readonly deps: DirectingBoardDeps,
-  ) {}
+  ) {
+    this.redraw()
+  }
 
-  /** Shows a run afresh, on the named proposal's tab or else the Run tab. */
-  open(state: DirectingState, proposal?: string): void {
+  /** Shows a run afresh, on the named proposal's tab or else the Run tab; `hold` is what the hold module answered for it. */
+  show(runId: string, hold: Hold | undefined, proposal?: string): void {
     this.unclamped.clear()
-    this.showTab(state, proposal)
+    this.tab = proposal
+    this.draw(stateOf(hold, runId))
+    this.tabOpened()
   }
 
-  /** Lets go of every open editor; the panel is going away. */
+  /** Lets go of the run shown and every open editor; the panel is going away. */
   close(): void {
-    for (const key of [...this.edits.keys()]) this.closeEdit(key)
+    for (const shown of this.runs.values()) for (const edit of shown.edits.values()) edit.editor.destroy()
+    this.runs.clear()
+    this.draw({ kind: 'idle' })
   }
 
-  /** Redraws what the hold now says, keeping the reader's tab and scroll. */
-  draw(state: DirectingState): void {
+  /** Draws `state`, keeping the reader's tab and scroll, and follows its run. */
+  private draw(state: DirectingState): void {
+    ++this.draws
     this.state = state
-    if (state.kind === 'hold') this.followHold(state.hold)
+    if (state.kind === 'hold') this.follow(state.hold)
+    this.listen(runIdOf(state))
+    this.redraw()
+  }
+
+  private redraw(): void {
+    const state = this.state
     const scroll = this.body?.scrollTop ?? 0
-    const typing = [...this.edits.values()].find(edit => edit.editor.hasFocus())
+    const typing = [...this.runs.values()].flatMap(shown => [...shown.edits.values()]).find(edit => edit.editor.hasFocus())
     const keepTyping = this.boxes.keepTyping(this.root)
     this.releases.forEach(release => release())
     this.releases = []
@@ -109,21 +116,61 @@ export class DirectingBoard {
     typing?.editor.focus()
   }
 
-  /** A hold a rerun moved takes what the panel held under its earlier runs: an open edit, and the rerun still going. */
-  private followHold(hold: Hold): void {
+  /** Hears the note of the run shown, by any hand, and draws it again. */
+  private listen(runId: string | undefined): void {
+    if (runId === this.listening?.runId) return
+    this.listening?.stop()
+    this.listening = runId === undefined ? undefined : { runId, stop: this.deps.holds.onChange(runId, () => void this.reread(runId)) }
+  }
+
+  private async reread(runId: string): Promise<void> {
+    const draws = this.draws
+    const hold = await this.deps.holds.read(runId)
+    if (draws === this.draws) this.draw(stateOf(hold, runId))
+  }
+
+  /** A call on the run shown; what it answered is drawn, unless the panel moved on meanwhile. Whether it wrote anything. */
+  private async act(call: (runId: string) => Promise<Hold | undefined>): Promise<boolean> {
+    const runId = runIdOf(this.state)
+    return runId !== undefined && this.landed(runId, await call(runId))
+  }
+
+  private landed(from: string, hold: Hold | undefined): boolean {
+    if (!hold) return false
+    const shown = runIdOf(this.state)
+    if (shown === from || shown === hold.runId) this.draw({ kind: 'hold', hold })
+    return true
+  }
+
+  /** What the panel holds for `runId`, made when it holds nothing yet. */
+  private shownFor(runId: string): RunShown {
+    let shown = this.runs.get(runId)
+    if (!shown) this.runs.set(runId, (shown = { edits: new Map() }))
+    return shown
+  }
+
+  /** The run's rerun, while it goes. */
+  private going(runId: string): Rerun | undefined {
+    return this.runs.get(runId)?.rerun
+  }
+
+  /** The run's open edit of a proposal. */
+  private editing(runId: string, proposal: string): OpenEdit | undefined {
+    return this.runs.get(runId)?.edits.get(proposal)
+  }
+
+  /** A hold that landed on another run takes what the panel held under its earlier runs: an open edit, and the rerun still going. */
+  private follow(hold: Hold): void {
     for (const earlier of hold.earlierRuns) {
-      const going = this.rerunning.get(earlier)
-      this.rerunning.delete(earlier)
-      if (going && !this.rerunning.has(hold.runId)) this.rerunning.set(hold.runId, going)
-      const prefix = editKey(earlier, '')
-      for (const [key, edit] of [...this.edits]) {
-        if (!key.startsWith(prefix)) continue
-        const moved = editKey(hold.runId, key.slice(prefix.length))
-        if (this.edits.has(moved)) this.closeEdit(key)
-        else {
-          this.edits.delete(key)
-          this.edits.set(moved, edit)
-        }
+      const was = this.runs.get(earlier)
+      if (!was) continue
+      this.runs.delete(earlier)
+      const now = this.shownFor(hold.runId)
+      now.rerun ??= was.rerun
+      if (was.resume?.kind === 'running') now.resume ??= was.resume
+      for (const [name, edit] of was.edits) {
+        if (now.edits.has(name)) edit.editor.destroy()
+        else now.edits.set(name, edit)
       }
     }
   }
@@ -137,12 +184,15 @@ export class DirectingBoard {
     if (this.state.kind !== 'hold') return
     const more = this.button(header, '⋯', `${CLS}-more`)
     more.setAttribute('aria-label', 'More')
-    more.addEventListener('click', event => this.deps.openMenu(event))
+    const { runId: shown } = this.state.hold
+    more.addEventListener('click', event =>
+      this.deps.openMenu(event, [{ title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(shown) }]),
+    )
   }
 
   private missing(body: HTMLElement, runId: string): void {
     this.add(body, 'div', `${CLS}-empty`, `Run ${runId} has no hold note yet.`)
-    this.button(body, '✎ Direct this run', 'mod-cta').addEventListener('click', () => this.deps.writeHold())
+    this.button(body, '✎ Direct this run', 'mod-cta').addEventListener('click', () => void this.act(runId => this.deps.holds.write(runId)))
   }
 
   private hold(body: HTMLElement, hold: Hold): void {
@@ -153,7 +203,7 @@ export class DirectingBoard {
     this.tabButton(tabs, 'Run', undefined, !proposal)
     for (const one of hold.proposals) this.tabButton(tabs, one.name, one.name, one === proposal, one.edited)
     this.rerunButton(row, hold)
-    const going = this.rerunning.get(hold.runId)
+    const going = this.going(hold.runId)
     const rewritten = proposal !== undefined && going?.progress?.proposals.includes(proposal.name) === true
     if (going && rewritten) this.progress(body, going)
 
@@ -166,7 +216,7 @@ export class DirectingBoard {
         key: boxKey(hold.runId, 'change'),
         placeholder: 'What should change…',
         label: 'Add',
-        send: text => this.deps.change(text),
+        send: text => this.act(runId => this.deps.holds.change(runId, text)),
       })
       this.room(this.section(body, 'Ask the room'), hold)
       const ticked = hold.canon.filter(line => line.ticked).length
@@ -176,9 +226,8 @@ export class DirectingBoard {
 
     const top = this.section(body)
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
-    const key = editKey(hold.runId, proposal.name)
-    const edit = this.edits.get(key)
-    if (edit) this.drawEditor(top, key, proposal.name, edit)
+    const edit = this.editing(hold.runId, proposal.name)
+    if (edit) this.drawEditor(top, proposal.name, edit)
     else this.proposalText(top, hold.runId, proposal.name, proposal.text, rewritten)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
     if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
@@ -202,13 +251,13 @@ export class DirectingBoard {
       this.runLink(shown, quest.runId)
     }
     if (pending !== undefined && !sent) this.add(this.turn(el, `Sent through ${pending}`), 'div', `${CLS}-faint`, `${pending} is running…`)
-    if (this.edits.has(editKey(hold.runId, name))) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
+    if (this.editing(hold.runId, name)) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
     this.boxes.draw(el, {
       key,
       placeholder: 'Chain to send it through…',
       label: 'Go',
       choices: this.chains,
-      send: chain => this.deps.sideQuest(name, chain),
+      send: chain => this.act(runId => this.deps.holds.sideQuest(runId, name, chain)),
     })
   }
 
@@ -227,7 +276,7 @@ export class DirectingBoard {
     const names = await this.deps.chains()
     if (names.length === 0 || names.join('\n') === this.chains.join('\n')) return
     this.chains = names
-    this.draw(this.state)
+    this.redraw()
   }
 
   private chat(el: HTMLElement, hold: Hold, name: string): void {
@@ -246,7 +295,7 @@ export class DirectingBoard {
       }
     }
     if (pending !== undefined && !sent) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
-    this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.deps.chat(name, text) })
+    this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.act(runId => this.deps.holds.chat(runId, name, text)) })
   }
 
   private room(el: HTMLElement, hold: Hold): void {
@@ -263,7 +312,7 @@ export class DirectingBoard {
       }
     }
     if (pending !== undefined && !sent) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, 'The room is answering…')
-    this.boxes.draw(el, { key, placeholder: 'Ask every proposal…', label: 'Ask', send: text => this.deps.askRoom(text) })
+    this.boxes.draw(el, { key, placeholder: 'Ask every proposal…', label: 'Ask', send: text => this.act(runId => this.deps.holds.askRoom(runId, text)) })
   }
 
   /** One exchange: what was said, with whatever came back added under it by the caller. */
@@ -274,17 +323,17 @@ export class DirectingBoard {
   }
 
   private reviseButton(el: HTMLElement, hold: Hold, turn: RepliedTurn): void {
-    const going = this.rerunning.get(hold.runId)?.from
+    const going = this.going(hold.runId)?.from
     const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = !this.canRerun(hold)
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, onProgress => this.deps.revise(turn, onProgress)))
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, (runId, onProgress) => this.deps.holds.revise(runId, turn, onProgress)))
   }
 
   /** Pinned under every tab: the Direction run as it stands, and what the last run of it landed on. */
   private resumeBar(hold: Hold): void {
     const bar = this.add(this.root, 'div', `${CLS}-footer`)
-    const shown = this.resumes.get(hold.runId)
+    const shown = this.runs.get(hold.runId)?.resume
     const running = shown?.kind === 'running'
     const button = this.button(bar, running ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
     button.disabled = running
@@ -303,51 +352,52 @@ export class DirectingBoard {
     this.runLink(line, result.hold.runId)
   }
 
-  /** One resume at a time per run. */
+  /** One resume at a time per run; the panel follows the hold to the run it carried on as. */
   private async startResume(runId: string): Promise<void> {
-    if (this.resumes.get(runId)?.kind === 'running') return
+    const shown = this.shownFor(runId)
+    if (shown.resume?.kind === 'running') return
     const going: ResumeShown = { kind: 'running' }
-    this.resumes.set(runId, going)
-    this.draw(this.state)
+    shown.resume = going
+    this.redraw()
     let outcome: ResumeShown = { kind: 'stopped' }
     try {
-      const result = await this.deps.resume(runId, progress => {
+      const result = await this.deps.holds.resume(runId, progress => {
         going.progress = progress
-        this.draw(this.state)
+        this.redraw()
       })
       if (result) outcome = { kind: 'landed', result }
     } finally {
-      this.resumes.set(runId, outcome)
+      shown.resume = outcome
       // A fork is shown as its own hold, which says what landed it.
-      if (outcome.kind === 'landed') this.resumes.set(outcome.result.hold.runId, outcome)
-      this.draw(this.state)
+      if (outcome.kind === 'landed') this.shownFor(outcome.result.hold.runId).resume = outcome
+      if (outcome.kind !== 'landed' || !this.landed(runId, outcome.result.hold)) this.redraw()
     }
   }
 
   /** At the end of the tab row, once a proposal is edited; the edited ones are marked on their tabs. */
   private rerunButton(row: HTMLElement, hold: Hold): void {
     if (!hold.proposals.some(one => one.edited)) return
-    const going = this.rerunning.get(hold.runId)?.from
+    const going = this.going(hold.runId)?.from
     const button = this.button(row, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', `mod-cta ${CLS}-rerun`)
     button.disabled = !this.canRerun(hold)
     if (this.editOpen(hold)) button.title = 'Save or cancel the edit first'
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, onProgress => this.deps.rerun(onProgress)))
+    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, (runId, onProgress) => this.deps.holds.rerun(runId, onProgress)))
   }
 
   /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
   private canRerun(hold: Hold): boolean {
-    return !this.rerunning.has(hold.runId) && !this.editOpen(hold)
+    return !this.going(hold.runId) && !this.editOpen(hold)
   }
 
   /** Whether a rerun going may write `name` again: until it has said which it writes, any proposal may be. */
   private rewriting(runId: string, name: string): boolean {
-    const going = this.rerunning.get(runId)
+    const going = this.going(runId)
     if (!going) return false
     return going.progress ? going.progress.proposals.includes(name) : true
   }
 
   private editOpen(hold: Hold): boolean {
-    return hold.proposals.some(one => this.edits.has(editKey(hold.runId, one.name)))
+    return hold.proposals.some(one => this.editing(hold.runId, one.name))
   }
 
   /**
@@ -355,7 +405,7 @@ export class DirectingBoard {
    * until the run it lands on replaces it. Until it says, it is taken to.
    */
   private verdict(body: HTMLElement, hold: Hold): void {
-    const going = this.rerunning.get(hold.runId)
+    const going = this.going(hold.runId)
     const rewriting = going !== undefined && going.progress?.verdict !== false
     if (!hold.verdict && !rewriting) return
     const section = this.section(body, 'Verdict')
@@ -371,28 +421,30 @@ export class DirectingBoard {
     const line = this.add(el, 'div', `${CLS}-progress`)
     const doing = rerunDoing(going.progress?.step)
     const show = (): void => {
-      line.textContent = `${doing} ${elapsed(this.deps.now() - going.startedAt)}`
+      line.textContent = `${doing} ${elapsed(this.deps.clock.now() - going.startedAt)}`
     }
     show()
-    this.releases.push(this.deps.every(1000, show))
+    this.releases.push(this.deps.clock.every(1000, show))
   }
 
-  private async startRerun(hold: Hold, from: RerunFrom, rerun: (onProgress: OnRerunProgress) => Promise<void>): Promise<void> {
+  /** The panel follows the hold to the run the rerun lands on. */
+  private async startRerun(hold: Hold, from: RerunFrom, rerun: (runId: string, onProgress: OnRerunProgress) => Promise<Landing | undefined>): Promise<void> {
     const runId = hold.runId
     if (!this.canRerun(hold)) return
-    const going: Rerun = { from, startedAt: this.deps.now() }
-    this.rerunning.set(runId, going)
-    this.draw(this.state)
+    const going: Rerun = { from, startedAt: this.deps.clock.now() }
+    this.shownFor(runId).rerun = going
+    this.redraw()
     const onProgress = (progress: RerunProgress): void => {
       going.progress = progress
-      this.draw(this.state)
+      this.redraw()
     }
+    let landing: Landing | undefined
     try {
-      await rerun(onProgress)
+      landing = await rerun(runId, onProgress)
     } finally {
       // By identity: the hold may have moved it to the run it landed on.
-      for (const [key, one] of [...this.rerunning]) if (one === going) this.rerunning.delete(key)
-      this.draw(this.state)
+      for (const shown of this.runs.values()) if (shown.rerun === going) delete shown.rerun
+      if (!this.landed(runId, landing?.hold)) this.redraw()
     }
   }
 
@@ -402,12 +454,15 @@ export class DirectingBoard {
     if (edited) tab.title = 'Edited since the run'
     tab.setAttribute('role', 'tab')
     tab.setAttribute('aria-selected', String(selected))
-    tab.addEventListener('click', () => this.showTab(this.state, proposal))
+    tab.addEventListener('click', () => {
+      this.tab = proposal
+      this.redraw()
+      this.tabOpened()
+    })
   }
 
-  private showTab(state: DirectingState, proposal: string | undefined): void {
-    this.tab = proposal
-    this.draw(state)
+  /** A tab just opened shows its top, and the chains the engine names now. */
+  private tabOpened(): void {
     if (this.body) this.body.scrollTop = 0
     void this.askForChains()
   }
@@ -423,7 +478,7 @@ export class DirectingBoard {
       const given = proposal.given.includes(verb)
       const button = this.button(row, verb, given ? 'is-given' : '')
       button.setAttribute('aria-pressed', String(given))
-      button.addEventListener('click', () => (given ? this.deps.undirect : this.deps.direct)(verb, proposal.name))
+      button.addEventListener('click', () => this.direct(given, verb, proposal.name))
     }
   }
 
@@ -435,8 +490,14 @@ export class DirectingBoard {
     select.addEventListener('change', () => {
       const other = select.value
       if (!other) return
-      ;(proposal.combinedWith.includes(other) ? this.deps.undirect : this.deps.direct)('COMBINE', proposal.name, other)
+      this.direct(proposal.combinedWith.includes(other), 'COMBINE', proposal.name, other)
     })
+  }
+
+  /** A verb given, or taken back when it was. */
+  private direct(given: boolean, verb: DirectionVerb, proposal: string, other?: string): void {
+    const { holds } = this.deps
+    void this.act(runId => (given ? holds.undirect(runId, verb, proposal, other) : holds.direct(runId, verb, proposal, other)))
   }
 
   private option(select: HTMLSelectElement, value: string, label: string): void {
@@ -457,15 +518,14 @@ export class DirectingBoard {
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
     edit.disabled = this.rewriting(runId, name)
     edit.addEventListener('click', () => {
-      const key = editKey(runId, name)
       const open: OpenEdit = { editor: this.deps.openEditor(text, () => open.refreshSave()), saving: false, refreshSave: () => {} }
-      this.edits.set(key, open)
-      this.draw(this.state)
+      this.shownFor(runId).edits.set(name, open)
+      this.redraw()
     })
     toggle.addEventListener('click', () => {
       if (whole) this.unclamped.delete(name)
       else this.unclamped.add(name)
-      this.draw(this.state)
+      this.redraw()
     })
     if (whole) return
     this.releases.push(
@@ -477,7 +537,7 @@ export class DirectingBoard {
   }
 
   /** The editor outlives the redraw, so it is put back rather than made again. */
-  private drawEditor(el: HTMLElement, key: string, name: string, edit: OpenEdit): void {
+  private drawEditor(el: HTMLElement, name: string, edit: OpenEdit): void {
     const frame = this.add(el, 'div', `${CLS}-editor`)
     frame.append(edit.editor.el)
     const row = this.add(frame, 'div', `${CLS}-editor-actions`)
@@ -485,32 +545,28 @@ export class DirectingBoard {
     const savable = (): boolean => !edit.saving && edit.editor.text().trim() !== ''
     save.disabled = !savable()
     edit.refreshSave = () => void (save.disabled = !savable())
-    save.addEventListener('click', () => void this.save(key, name))
+    save.addEventListener('click', () => void this.save(name, edit))
     this.button(row, 'Cancel', '').addEventListener('click', () => {
-      this.closeEdit(key)
-      this.draw(this.state)
+      this.closeEdit(edit)
+      this.redraw()
     })
   }
 
-  private closeEdit(key: string): void {
-    this.edits.get(key)?.editor.destroy()
-    this.edits.delete(key)
+  /** By identity: a rerun landing moves an edit to the run it landed on. */
+  private closeEdit(edit: OpenEdit): void {
+    edit.editor.destroy()
+    for (const shown of this.runs.values()) for (const [name, one] of shown.edits) if (one === edit) shown.edits.delete(name)
   }
 
-  private async save(key: string, name: string): Promise<void> {
-    const edit = this.edits.get(key)
-    if (!edit || edit.saving) return
+  private async save(name: string, edit: OpenEdit): Promise<void> {
+    if (edit.saving) return
     edit.saving = true
-    this.draw(this.state)
+    this.redraw()
     try {
-      // By identity: a rerun landing meanwhile moves the edit to the run it landed on.
-      if (await this.deps.editProposal(name, edit.editor.text())) {
-        const now = [...this.edits].find(([, one]) => one === edit)?.[0]
-        if (now) this.closeEdit(now)
-      }
+      if (await this.act(runId => this.deps.holds.editProposal(runId, name, edit.editor.text()))) this.closeEdit(edit)
     } finally {
       edit.saving = false
-      this.draw(this.state)
+      this.redraw()
     }
   }
 
@@ -530,7 +586,9 @@ export class DirectingBoard {
     if (hold.prompt) this.add(el, 'div', '', hold.prompt)
     if (hold.candidates.length === 0) this.add(el, 'div', `${CLS}-faint`, 'No candidates')
     for (const candidate of hold.candidates) {
-      this.checkbox(el, candidate.heading, candidate.ticked, ticked => this.deps.tickCandidate(hold.nodeId, candidate.heading, ticked))
+      this.checkbox(el, candidate.heading, candidate.ticked, ticked =>
+        void this.act(runId => this.deps.holds.pickCandidate(runId, hold.nodeId, candidate.heading, ticked)),
+      )
       this.markdown(el, candidate.body)
     }
   }
@@ -540,7 +598,7 @@ export class DirectingBoard {
     let proposer: string | undefined
     for (const line of lines) {
       if (grouped && line.proposer !== proposer) this.add(el, 'div', `${CLS}-faint`, (proposer = line.proposer))
-      this.checkbox(el, line.text, line.ticked, ticked => this.deps.tickCanon(line.id, ticked))
+      this.checkbox(el, line.text, line.ticked, ticked => void this.act(runId => this.deps.holds.tickCanon(runId, line.id, ticked)))
     }
   }
 
@@ -600,6 +658,14 @@ interface Rerun {
   progress?: RerunProgress
 }
 
+/** What the panel holds for a run beyond its note. */
+interface RunShown {
+  rerun?: Rerun
+  resume?: ResumeShown
+  /** Each proposal being edited, by name. */
+  edits: Map<string, OpenEdit>
+}
+
 /** A resume from the panel: going, landed, or stopped before it ran. */
 type ResumeShown = { kind: 'running'; progress?: RerunProgress } | { kind: 'landed'; result: Resumed } | { kind: 'stopped' }
 
@@ -613,10 +679,6 @@ function resumeLabel(canon: CanonChoice[]): string {
 function elapsed(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
-
-function editKey(runId: string, proposal: string): string {
-  return boxKey(runId, `edit ${proposal}`)
 }
 
 function boxKey(runId: string, box: string): string {
@@ -634,6 +696,10 @@ function sentEntry<T>(entries: T[], pending: string | undefined, unanswered: (en
 
 function shortId(runId: string): string {
   return runId.split('-').pop() ?? runId
+}
+
+function stateOf(hold: Hold | undefined, runId: string): DirectingState {
+  return hold ? { kind: 'hold', hold } : { kind: 'missing', runId }
 }
 
 function runIdOf(state: DirectingState): string | undefined {

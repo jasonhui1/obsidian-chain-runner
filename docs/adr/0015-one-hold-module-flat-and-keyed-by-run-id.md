@@ -51,8 +51,8 @@ hypothetical seam.
 ## Consequences
 
 **A future action is explicit, not free.** A new conversation trigger costs one
-grammar module under `src/run/`, one method here, one board dep and one palette
-shell. Nothing generic, nothing hidden.
+grammar module under `src/run/`, one method here, one board button calling it
+and one palette shell. Nothing generic, nothing hidden.
 
 **`chains` and `runUrl` leave the hold module.** They are the engine's and the
 settings', not the hold's; the view gets them from `main.ts`.

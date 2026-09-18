@@ -1,19 +1,64 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
-import { DirectingBoard, type DirectingState } from '@/ui/directingBoard'
+import { DirectingBoard, type MenuItem } from '@/ui/directingBoard'
+import { Holds, type Hold } from '@/ui/holds'
 import type { ProposalEditor } from '@/ui/proposalEditor'
-import type { Hold as HoldReading, Resumed } from '@/ui/holds'
-import type { RerunProgress } from '@/run/rerunProgress'
+import { RerunWatch } from '@/run/rerunWatch'
+import type { AgentOutput, ChatEvent, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import { MemoryNoteStore } from './memoryNoteStore'
+import { stubEngine } from './stubEngine'
 
 /**
- * The directing panel's elements: which tab shows what, and that every button
- * is handed to the hold module rather than done here. What a hold reads as is
- * `holds.test.ts`.
+ * The directing panel at its interface: which tab shows what, what each button
+ * leaves in the hold note through the hold module, and that the panel follows
+ * the hold as the note changes and as a rerun or resume lands it elsewhere.
+ * What a hold reads as is `holds.test.ts`.
  */
 
 const RUN = '2026-09-15-ubqPU2'
+const PATH = `Maestro/holds/${RUN}.md`
+const NEW = '2026-09-16-Xy9zW2'
+const RESUMED = '2026-09-16-Rs1Kq4'
+const NONE = '2026-09-15-none'
+const QUEST = '2026-09-16-quest3'
 
-const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
+const NOTE = `# Hold: run ${RUN} · creative-director
+
+## Verdict (creative-director)
+
+A combat trial in a void.
+
+## Proposals
+### gameplay
+
+Rotate abilities mid-fight.
+
+### world
+
+A controlled test.
+
+## Direction
+KEEP: gameplay
+CHANGE:
+KILL:
+COMBINE:
+PUSH:
+
+CANON?
+- [x] LOCKED: Abilities rotate. — gameplay
+- [ ] LOCKED: A test. — world
+
+## Conversation
+`
+
+/** The note with `text` written into its Conversation. */
+const talking = (text: string): string => `${NOTE}\n${text}\n`
+
+/** The note with gameplay's words edited since the run. */
+const EDITED = NOTE.replace('Rotate abilities mid-fight.', 'Rotate stances.')
+
+/** The hold as `NOTE` reads, which a test can change to draw what the note does not say. */
+const hold = (over: Partial<Hold> = {}): Hold => ({
   runId: RUN,
   earlierRuns: [],
   chainName: 'creative-director',
@@ -32,25 +77,99 @@ const hold = (over: Partial<HoldReading> = {}): HoldReading => ({
   ...over,
 })
 
-const showing = (reading: HoldReading = hold()): DirectingState => ({ kind: 'hold', hold: reading })
+const panel = (name: string, text: string, state: LayoutPanel['state'] = 'filled', emphasis?: 'join'): LayoutPanel => ({
+  name,
+  node: name,
+  text,
+  lines: 1,
+  state,
+  ...(emphasis ? { emphasis } : {}),
+})
+
+const panels = (...waiting: string[]): LayoutPanel[] => [
+  panel('gameplay', 'Rotate abilities mid-fight.', waiting.includes('gameplay') ? 'pending' : 'filled'),
+  panel('world', 'A controlled test.', waiting.includes('world') ? 'pending' : 'filled'),
+  panel('creative-director', 'A combat trial in a void.', waiting.includes('creative-director') ? 'pending' : 'filled', 'join'),
+]
+
+const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
+
+const theRun = (runId: string): RunMeta => ({
+  runId,
+  chainName: 'creative-director',
+  seedPrompt: 'a combat trial',
+  startedAt: '',
+  status: 'complete',
+  agentOutputs: [output('gameplay', 'Rotate abilities mid-fight.'), output('world', 'A controlled test.'), output('creative-director', 'A combat trial in a void.')],
+  graph: {
+    edges: [
+      { fromNode: 'gameplay', toNode: 'creative-director' },
+      { fromNode: 'world', toNode: 'creative-director' },
+    ],
+  },
+})
+
+const started = (runId: string): RunEvent => ({ type: 'run_start', runId })
+const complete = (runId: string): RunEvent => ({ type: 'run_complete', runId })
+const layoutFrame = (...waiting: string[]): RunEvent => ({ type: 'layout', model: { kind: 'columns', panels: panels(...waiting) } })
+const stepOn = (nodeId: string, agentName = nodeId): RunEvent => ({ type: 'agent_start', agentName, nodeId, step: 0 })
+const answer = (agentName: string, text: string): RunEvent => ({ type: 'agent_done', agentName, nodeId: agentName, step: 0, output: output(agentName, text) })
+
+/** A stream the test feeds a frame at a time, and ends. */
+class Feed<T> {
+  private readonly queue: T[] = []
+  private done = false
+  private wake: () => void = () => {}
+
+  push(...frames: T[]): void {
+    this.queue.push(...frames)
+    this.wake()
+  }
+
+  end(...frames: T[]): void {
+    this.done = true
+    this.push(...frames)
+  }
+
+  async *frames(): AsyncGenerator<T> {
+    for (;;) {
+      const next = this.queue.shift()
+      if (next !== undefined) yield next
+      else if (this.done) return
+      else await new Promise<void>(resolve => (this.wake = resolve))
+    }
+  }
+}
 
 let root: HTMLElement
-let calls: string[]
+let store: MemoryNoteStore
+let notes: Record<string, string>
+let holds: Holds
+let notices: string[]
+let online: boolean
 let released: number
 let overflowing: boolean
-/** Each call still waiting on the hold actions, answered by the test. */
-let waiting: ((done: boolean) => void)[]
 let chainNames: string[]
 let chainsAsked: number
-/** Each resume still waiting on the hold actions, answered by the test. */
-let resumesWaiting: ((result: Resumed | undefined) => void)[]
+let menus: MenuItem[][]
 /** Every editor the board has opened, in the order it opened them. */
 let editors: FakeEditor[]
-/** Tells the rerun going now how it is getting on. */
-let progressTo: (progress: RerunProgress) => void
 let clock: number
 /** The board's running timers, ticked by the test. */
 let timers: Set<() => void>
+/** Holds every streaming call until the test lets it go. */
+let gate: Promise<void> | undefined
+let release: () => void
+/** Feeds the one streaming call a test watches frame by frame, in place of the frames below. */
+let feed: Feed<RunEvent> | undefined
+let requests: RunRequest[]
+let resumed: string[]
+let promoted: { nodeId: string; turn: number }[]
+let chats: string[]
+let framesByAgent: Record<string, RunEvent[]>
+let rerunFrames: RunEvent[]
+let resumeFrames: RunEvent[]
+let chatFrames: ChatEvent[]
 
 /** Stands in for the CodeMirror editor: a textarea, so a test can type into it. */
 interface FakeEditor extends ProposalEditor {
@@ -74,51 +193,70 @@ const openEditor = (words: string, changed: () => void): FakeEditor => {
   return editor
 }
 
-const answered = (call: string): Promise<boolean> => {
-  calls.push(call)
-  return new Promise(resolve => waiting.push(resolve))
+async function* stream<T>(frames: () => T[]): AsyncGenerator<T> {
+  if (feed) {
+    yield* feed.frames() as AsyncGenerator<T>
+    return
+  }
+  await gate
+  yield* frames()
+}
+
+function makeHolds(): Holds {
+  const engine = stubEngine({
+    capabilities: () => Promise.resolve({}),
+    getRun: (runId: string) => Promise.resolve(theRun(runId)),
+    getLayout: () => Promise.resolve({ kind: 'columns', panels: panels() }),
+    waitingRun: () => Promise.resolve(undefined),
+    launchRun: (request: RunRequest) => {
+      requests.push(request)
+      if (request.branchedFromRunId) return stream(() => rerunFrames)
+      if (request.agentName) return stream(() => framesByAgent[request.agentName!] ?? [])
+      return stream(() => [started(QUEST), complete(QUEST)])
+    },
+    resumeRun: (runId: string) => {
+      resumed.push(runId)
+      return stream(() => resumeFrames)
+    },
+    promoteNode: (node: { nodeId: string }, request: { turn: number }) => {
+      promoted.push({ nodeId: node.nodeId, turn: request.turn })
+      return stream(() => rerunFrames)
+    },
+    chatWithNode: (chat: { nodeId: string; message: string }) => {
+      chats.push(`${chat.nodeId} ${chat.message}`)
+      return stream(() => chatFrames)
+    },
+  })
+  return new Holds({
+    store,
+    engine,
+    withEngine: async action => (online ? action() : undefined),
+    notify: message => void notices.push(message),
+    reruns: new RerunWatch(),
+    runUrl: runId => `http://engine/history/${runId}`,
+  })
 }
 
 function board(): DirectingBoard {
   return new DirectingBoard(root, {
-    renderMarkdown: (text, into) => {
-      into.append(document.createTextNode(text))
-      return () => void released++
-    },
-    direct: (verb, proposal, other) => void calls.push(`direct ${verb} ${proposal}${other ? ` ${other}` : ''}`),
-    undirect: (verb, proposal, other) => void calls.push(`undirect ${verb} ${proposal}${other ? ` ${other}` : ''}`),
-    tickCanon: (id, ticked) => void calls.push(`tick ${id} ${ticked}`),
-    tickCandidate: (nodeId, heading, ticked) => void calls.push(`pick ${nodeId} ${heading} ${ticked}`),
-    writeHold: () => void calls.push('write hold'),
-    openMenu: () => void calls.push('menu'),
-    chat: (proposal, message) => answered(`chat ${proposal} ${message}`),
-    askRoom: question => answered(`ask ${question}`),
-    change: text => answered(`change ${text}`),
-    revise: (turn, onProgress) => {
-      progressTo = onProgress
-      return answered(`revise ${turn.name} ${turn.reply} turn ${turn.turn ?? 'none'}`).then(() => {})
-    },
-    editProposal: (proposal, words) => answered(`edit ${proposal} ${words}`),
-    rerun: onProgress => {
-      progressTo = onProgress
-      return answered('rerun').then(() => {})
-    },
-    resume: (runId, onProgress) => {
-      progressTo = onProgress
-      calls.push(`resume ${runId}`)
-      return new Promise(resolve => resumesWaiting.push(resolve))
-    },
-    sideQuest: (proposal, chain) => answered(`quest ${proposal} ${chain}`),
+    holds,
     chains: () => {
       chainsAsked++
       return Promise.resolve(chainNames)
     },
     runUrl: runId => `http://engine/history/${runId}`,
+    renderMarkdown: (text, into) => {
+      into.append(document.createTextNode(text))
+      return () => void released++
+    },
     openEditor,
-    now: () => clock,
-    every: (_ms, tick) => {
-      timers.add(tick)
-      return () => void timers.delete(tick)
+    openMenu: (_event, items) => void menus.push(items),
+    clock: {
+      now: () => clock,
+      every: (_ms, tick) => {
+        timers.add(tick)
+        return () => void timers.delete(tick)
+      },
     },
     watchOverflow: (_frame, changed) => {
       changed(overflowing)
@@ -127,16 +265,43 @@ function board(): DirectingBoard {
   })
 }
 
+/** A board showing `reading` of the run, as a card click hands it over. */
+function open(reading: Hold | undefined = hold(), proposal?: string): DirectingBoard {
+  const made = board()
+  made.show(reading?.runId ?? RUN, reading, proposal)
+  return made
+}
+
+/** A board showing the hold as the note now reads. */
+async function openNote(proposal?: string): Promise<DirectingBoard> {
+  return open(await holds.read(RUN), proposal)
+}
+
+/** Lets the board's awaited answers land. */
+const settled = (): Promise<void> => new Promise(resolve => setTimeout(resolve))
+
+/** The note touched by another hand, which the panel draws again. */
+const touched = async (): Promise<void> => {
+  await store.process(PATH, content => content)
+  await settled()
+}
+
+/** Holds every streaming call until `release`. */
+const holdEngine = (): void => void (gate = new Promise(resolve => (release = resolve)))
+
 const buttons = (): HTMLButtonElement[] => Array.from(root.querySelectorAll('button'))
 const button = (text: string): HTMLButtonElement => {
   const found = buttons().find(candidate => candidate.textContent === text)
   if (!found) throw new Error(`no "${text}" button among ${buttons().map(b => b.textContent).join(', ')}`)
   return found
 }
+const has = (text: string): boolean => buttons().some(b => b.textContent === text)
 const tabs = (): string[] => Array.from(root.querySelectorAll('[role="tab"]')).map(tab => tab.textContent ?? '')
 const selectedTab = (): string | null | undefined => root.querySelector('[role="tab"][aria-selected="true"]')?.textContent
 const boxes = (): HTMLInputElement[] => Array.from(root.querySelectorAll('input[type="checkbox"]'))
 const text = (): string => root.textContent ?? ''
+const header = (): string => root.querySelector('.chain-runner-directing-header')?.textContent ?? ''
+const turns = (): string[] => Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent ?? '')
 const composer = (placeholder: string): HTMLTextAreaElement => {
   const found = Array.from(root.querySelectorAll('textarea')).find(box => box.placeholder === placeholder)
   if (!found) throw new Error(`no "${placeholder}" box`)
@@ -151,139 +316,185 @@ const press = (box: HTMLElement, key: string, shiftKey = false): KeyboardEvent =
   box.dispatchEvent(event)
   return event
 }
-/** Lets the board's awaited answers land. */
-const settled = (): Promise<void> => new Promise(resolve => setTimeout(resolve))
+const direction = async (): Promise<string[] | undefined> => (await holds.read(RUN))?.direction
 
 beforeEach(() => {
   document.body.replaceChildren()
   root = document.createElement('div')
   document.body.append(root)
-  calls = []
+  store = new MemoryNoteStore({ [PATH]: NOTE })
+  notes = store.notes
+  notices = []
+  online = true
   released = 0
   overflowing = false
-  waiting = []
   chainNames = []
   chainsAsked = 0
-  resumesWaiting = []
+  menus = []
   editors = []
-  progressTo = () => {}
   clock = 0
   timers = new Set()
+  gate = undefined
+  release = () => {}
+  feed = undefined
+  requests = []
+  resumed = []
+  promoted = []
+  chats = []
+  framesByAgent = {}
+  rerunFrames = [started(NEW), complete(NEW)]
+  resumeFrames = [started(RUN), complete(RUN)]
+  chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Because it is.' } }]
+  holds = makeHolds()
+})
+
+it('draws the hold the note reads as, which every other test draws by hand', async () => {
+  expect(await holds.read(RUN)).toEqual(hold())
 })
 
 describe('header', () => {
   it('names the chain and the run’s short id', () => {
-    board().open(showing())
-    const header = root.querySelector('.chain-runner-directing-header')
-    expect(header?.textContent).toContain('creative-director')
-    expect(header?.textContent).toContain('ubqPU2')
+    open()
+    expect(header()).toContain('creative-director')
+    expect(header()).toContain('ubqPU2')
   })
 
-  it('opens the ⋯ menu', () => {
-    board().open(showing())
+  it('offers the hold note in a tab from the ⋯ menu', async () => {
+    open()
     root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
-    expect(calls).toEqual(['menu'])
+    menus[0]![0]!.click()
+    await settled()
+    expect(store.opened).toEqual([PATH])
   })
 })
 
 describe('tabs', () => {
   it('has Run, then one tab per proposal', () => {
-    board().open(showing())
+    open()
     expect(tabs()).toEqual(['Run', 'gameplay', 'world'])
   })
 
   it('opens on the Run tab when no proposal is named', () => {
-    board().open(showing())
+    open()
     expect(selectedTab()).toBe('Run')
   })
 
   it('opens on the proposal a card named', () => {
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     expect(selectedTab()).toBe('world')
   })
 
   it('falls back to Run for a proposal the hold does not have', () => {
-    board().open(showing(), 'nobody')
+    open(hold(), 'nobody')
     expect(selectedTab()).toBe('Run')
   })
 
-  it('switches on a click, and keeps the tab across a redraw', () => {
-    const panel = board()
-    panel.open(showing())
+  it('switches on a click, and keeps the tab when the note changes', async () => {
+    open()
     button('gameplay').click()
     expect(selectedTab()).toBe('gameplay')
-    panel.draw(showing())
+    await touched()
     expect(selectedTab()).toBe('gameplay')
   })
 
-  it('releases every markdown render a redraw replaces', () => {
-    const panel = board()
-    panel.open(showing())
-    panel.draw(showing())
+  it('releases every markdown render a redraw replaces', async () => {
+    open()
+    await touched()
     expect(released).toBe(1)
   })
 
   it('shows the top of a tab it switches to', () => {
-    board().open(showing())
-    const body = root.querySelector<HTMLElement>('.chain-runner-directing-body')!
-    body.scrollTop = 200
+    open()
+    root.querySelector<HTMLElement>('.chain-runner-directing-body')!.scrollTop = 200
     button('world').click()
     expect(root.querySelector<HTMLElement>('.chain-runner-directing-body')!.scrollTop).toBe(0)
   })
 })
 
+describe('following the note', () => {
+  it('draws the note again when it is edited by hand', async () => {
+    open()
+    notes[PATH] = NOTE.replace('A combat trial in a void.', 'A quiet shrine.')
+    await touched()
+    expect(text()).toContain('A quiet shrine.')
+  })
+
+  it('draws a change heard while the reader switches tab', async () => {
+    open()
+    notes[PATH] = NOTE.replace('A controlled test.', 'A real world.')
+    void store.process(PATH, content => content)
+    button('world').click()
+    await settled()
+    expect(text()).toContain('A real world.')
+  })
+
+  it('stops hearing the note once the panel goes away', async () => {
+    open().close()
+    notes[PATH] = NOTE.replace('A combat trial in a void.', 'A quiet shrine.')
+    await touched()
+    expect(text()).not.toContain('A quiet shrine.')
+  })
+
+  it('hears only the run it shows', async () => {
+    const made = open()
+    made.show(NONE, undefined)
+    await touched()
+    expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
+  })
+})
+
 describe('a proposal tab', () => {
   it('has a button for each verb but COMBINE, those already given marked', () => {
-    board().open(showing(), 'gameplay')
+    open(hold(), 'gameplay')
     const verbs = Array.from(root.querySelectorAll<HTMLButtonElement>('.chain-runner-directing-verbs button'))
     expect(verbs.map(verb => verb.textContent)).toEqual(['KEEP', 'KILL', 'PUSH', 'REDUCE', 'MUTATE'])
     expect(verbs.filter(verb => verb.getAttribute('aria-pressed') === 'true').map(verb => verb.textContent)).toEqual(['KEEP'])
   })
 
-  it('hands a verb to the hold actions, for this proposal', () => {
-    board().open(showing(), 'world')
+  it('directs this proposal with a verb, and draws it given', async () => {
+    open(hold(), 'world')
     button('PUSH').click()
-    expect(calls).toEqual(['direct PUSH world'])
+    await settled()
+    expect(await direction()).toContain('PUSH: world')
+    expect(button('PUSH').getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('takes back a verb already given, rather than giving it twice', () => {
-    board().open(showing(), 'gameplay')
+  it('takes back a verb already given, rather than giving it twice', async () => {
+    open(hold(), 'gameplay')
     button('KEEP').click()
-    expect(calls).toEqual(['undirect KEEP gameplay'])
+    await settled()
+    expect(await direction()).toEqual([])
   })
 
-  it('combines with whichever other proposal is picked', () => {
-    board().open(showing(), 'gameplay')
+  it('combines with whichever other proposal is picked', async () => {
+    open(hold(), 'gameplay')
     const combine = root.querySelector<HTMLSelectElement>('.chain-runner-directing-verbs select')!
     expect(Array.from(combine.options).map(option => option.value)).toEqual(['', 'world'])
     combine.value = 'world'
     combine.dispatchEvent(new Event('change'))
-    expect(calls).toEqual(['direct COMBINE gameplay world'])
+    await settled()
+    expect(await direction()).toContain('COMBINE: gameplay + world')
   })
 
-  it('marks a proposal already combined with, and takes that COMBINE back when picked again', () => {
-    const combined = hold({
-      proposals: [
-        { name: 'gameplay', text: '', given: ['COMBINE'], combinedWith: ['world'], edited: false },
-        { name: 'world', text: '', given: ['COMBINE'], combinedWith: ['gameplay'], edited: false },
-      ],
-    })
-    board().open(showing(combined), 'gameplay')
+  it('marks a proposal already combined with, and takes that COMBINE back when picked again', async () => {
+    notes[PATH] = NOTE.replace('COMBINE:', 'COMBINE: world + gameplay')
+    await openNote('gameplay')
     const combine = root.querySelector<HTMLSelectElement>('.chain-runner-directing-verbs select')!
     expect(combine.options[1]!.textContent).toBe('✓ world')
     combine.value = 'world'
     combine.dispatchEvent(new Event('change'))
-    expect(calls).toEqual(['undirect COMBINE gameplay world'])
+    await settled()
+    expect(await direction()).toEqual(['KEEP: gameplay'])
   })
 
   it('shows the proposal’s text', () => {
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     expect(text()).toContain('A controlled test.')
   })
 
   it('offers the whole proposal once its text is cut off, and shows all of it when asked', () => {
     overflowing = true
-    board().open(showing(), 'gameplay')
+    open(hold(), 'gameplay')
     expect(root.querySelector('.is-clamped')).not.toBeNull()
     expect(button('Show the whole proposal').hidden).toBe(false)
     button('Show the whole proposal').click()
@@ -292,159 +503,129 @@ describe('a proposal tab', () => {
   })
 
   it('offers nothing when none of the text is cut off', () => {
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     expect(button('Show the whole proposal').hidden).toBe(true)
     expect(root.querySelector('.is-overflowing')).toBeNull()
   })
 
-  it('lists only that proposal’s canon lines, and hands a tick to the hold actions', () => {
-    board().open(showing(), 'world')
+  it('lists only that proposal’s canon lines, and ticks one in the note', async () => {
+    open(hold(), 'world')
     expect(boxes()).toHaveLength(1)
     expect(boxes()[0]!.checked).toBe(false)
     boxes()[0]!.click()
-    expect(calls).toEqual(['tick LOCKED: A test. — world true'])
+    await settled()
+    expect(notes[PATH]).toContain('- [x] LOCKED: A test. — world')
+    expect(boxes()[0]!.checked).toBe(true)
   })
 })
 
 describe('a proposal tab, editing', () => {
   const editor = (): HTMLTextAreaElement | null => root.querySelector('.chain-runner-directing-editor textarea')
-  const open = (): void => button('✎ Edit').click()
+  const edit = (): void => button('✎ Edit').click()
 
   it('turns the proposal’s text into an editor holding its words, with Save and Cancel', () => {
-    board().open(showing(), 'world')
-    open()
+    open(hold(), 'world')
+    edit()
     expect(editor()?.value).toBe('A controlled test.')
     expect(buttons().map(b => b.textContent)).toEqual(expect.arrayContaining(['Save', 'Cancel']))
-    expect(buttons().some(b => b.textContent === '✎ Edit')).toBe(false)
+    expect(has('✎ Edit')).toBe(false)
   })
 
-  it('hands the edited words to the hold actions on Save, and closes the editor once they are kept', async () => {
-    board().open(showing(), 'world')
-    open()
+  it('writes the edited words into the note on Save, and closes the editor once they are kept', async () => {
+    open(hold(), 'world')
+    edit()
     type(editor()!, 'A real world.\n\nWith a second line.')
     button('Save').click()
-    expect(calls).toEqual(['edit world A real world.\n\nWith a second line.'])
     expect(button('Save').disabled).toBe(true)
-    waiting[0]!(true)
     await settled()
+    expect((await holds.read(RUN))?.proposals[1]?.text).toBe('A real world.\n\nWith a second line.')
     expect(editor()).toBeNull()
+    expect(editors[0]!.destroyed).toBe(true)
   })
 
-  it('keeps the editor open, with its words, when they could not be kept', async () => {
-    board().open(showing(), 'world')
-    open()
+  it('keeps the editor open, with its words, when the note would not take them', async () => {
+    store.refuse(PATH)
+    open(hold(), 'world')
+    edit()
     type(editor()!, 'A real world.')
     button('Save').click()
-    waiting[0]!(false)
     await settled()
     expect(editor()?.value).toBe('A real world.')
     expect(button('Save').disabled).toBe(false)
+    expect(editors).toHaveLength(1)
+    expect(editors[0]!.destroyed).toBe(false)
   })
 
   it('cannot save blank words', () => {
-    board().open(showing(), 'world')
-    open()
+    open(hold(), 'world')
+    edit()
     type(editor()!, ' \n ')
     expect(button('Save').disabled).toBe(true)
     type(editor()!, 'Words.')
     expect(button('Save').disabled).toBe(false)
   })
 
-  it('puts the proposal back as it was on Cancel', () => {
-    board().open(showing(), 'world')
-    open()
+  it('puts the proposal back as it was on Cancel, letting go of the editor', () => {
+    open(hold(), 'world')
+    edit()
     type(editor()!, 'A real world.')
     button('Cancel').click()
     expect(editor()).toBeNull()
-    expect(calls).toEqual([])
-    button('✎ Edit').click()
+    expect(editors[0]!.destroyed).toBe(true)
+    expect(notes[PATH]).toBe(NOTE)
+    edit()
     expect(editor()?.value).toBe('A controlled test.')
   })
 
-  it('keeps the one editor, with its words and the focus, across a redraw', () => {
-    const panel = board()
-    panel.open(showing(), 'world')
-    open()
+  it('keeps the one editor, with its words and the focus, when the note changes', async () => {
+    open(hold(), 'world')
+    edit()
     type(editor()!, 'half an edit')
     editor()!.focus()
-    panel.draw(showing())
+    await touched()
     expect(editors).toHaveLength(1)
     expect(editor()).toBe(editors[0]!.el)
     expect(editor()?.value).toBe('half an edit')
     expect(document.activeElement).toBe(editor())
   })
 
-  it('leaves the editor be when the reader is typing somewhere else', () => {
-    const panel = board()
-    panel.open(showing(), 'world')
-    open()
+  it('leaves the editor be when the reader is typing somewhere else', async () => {
+    open(hold(), 'world')
+    edit()
     composer('Message world…').focus()
-    panel.draw(showing())
+    await touched()
     expect(document.activeElement).toBe(composer('Message world…'))
   })
 
-  it('lets go of the editor on Cancel, and again once the words are kept', async () => {
-    board().open(showing(), 'world')
-    open()
-    button('Cancel').click()
-    expect(editors[0]!.destroyed).toBe(true)
-    open()
-    type(editor()!, 'A real world.')
-    button('Save').click()
-    waiting[0]!(true)
-    await settled()
-    expect(editors[1]!.destroyed).toBe(true)
-    expect(editors).toHaveLength(2)
-  })
-
-  it('keeps the editor it has when the words could not be kept', async () => {
-    board().open(showing(), 'world')
-    open()
-    type(editor()!, 'A real world.')
-    button('Save').click()
-    waiting[0]!(false)
-    await settled()
-    expect(editors[0]!.destroyed).toBe(false)
-    expect(editors).toHaveLength(1)
-  })
-
   it('lets go of every open editor when the panel goes away', () => {
-    const panel = board()
-    panel.open(showing(), 'world')
-    open()
-    panel.close()
-    panel.draw({ kind: 'idle' })
+    const made = open(hold(), 'world')
+    edit()
+    made.close()
     expect(editors[0]!.destroyed).toBe(true)
     expect(editor()).toBeNull()
   })
 })
 
 describe('rerunning downstream', () => {
-  const edited = hold({
-    proposals: [
-      { name: 'gameplay', text: 'Rotate stances.', given: [], combinedWith: [], edited: true },
-      { name: 'world', text: 'A controlled test.', given: [], combinedWith: [], edited: false },
-    ],
-  })
+  beforeEach(() => void (notes[PATH] = EDITED))
 
   it('offers no rerun while no proposal is edited', () => {
-    board().open(showing(), 'world')
-    expect(buttons().some(b => b.textContent === '⟳ Rerun downstream')).toBe(false)
+    open(hold(), 'world')
+    expect(has('⟳ Rerun downstream')).toBe(false)
   })
 
-  it('offers a rerun in the tab row once a proposal is edited, marking the edited proposals’ tabs, on any tab', () => {
-    board().open(showing(edited), 'world')
+  it('offers a rerun in the tab row once a proposal is edited, marking the edited proposals’ tabs, on any tab', async () => {
+    await openNote('world')
     expect(button('⟳ Rerun downstream').parentElement?.className).toBe('chain-runner-directing-tabs')
     const marked = Array.from(root.querySelectorAll('[role="tab"].is-edited')).map(tab => tab.textContent)
     expect(marked).toEqual(['gameplay'])
-    expect(tabs()).toEqual(['Run', 'gameplay', 'world'])
     button('Run').click()
     expect(button('⟳ Rerun downstream')).toBeDefined()
   })
 
-  it('starts no rerun while an edit is open, so no unsaved words are left behind', () => {
-    const talked = hold({ ...edited, conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }] })
-    board().open(showing(talked), 'world')
+  it('starts no rerun while an edit is open, so no unsaved words are left behind', async () => {
+    notes[PATH] = talking('@world why?\n> [turn 1]\n> \n> Because.').replace('Rotate abilities mid-fight.', 'Rotate stances.')
+    await openNote('world')
     button('✎ Edit').click()
     expect(button('⟳ Rerun downstream').disabled).toBe(true)
     expect(button('Use this reply as the revision & rerun').disabled).toBe(true)
@@ -453,147 +634,132 @@ describe('rerunning downstream', () => {
     expect(button('⟳ Rerun downstream').disabled).toBe(false)
   })
 
-  it('hands the rerun to the hold actions, and starts no other rerun until it is done', async () => {
-    const talked = hold({
-      ...edited,
-      conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }],
-    })
-    board().open(showing(talked), 'world')
+  it('reruns downstream, starts no other rerun until it is done, and follows the hold to the run it landed on', async () => {
+    holdEngine()
+    await openNote('world')
     button('⟳ Rerun downstream').click()
-    expect(calls).toEqual(['rerun'])
     expect(button('Rerunning…').disabled).toBe(true)
-    expect(button('Use this reply as the revision & rerun').disabled).toBe(true)
     expect(button('✎ Edit').disabled).toBe(true)
     button('Rerunning…').click()
-    expect(calls).toEqual(['rerun'])
-    waiting[0]!(true)
     await settled()
-    expect(button('⟳ Rerun downstream').disabled).toBe(false)
+    expect(requests.map(request => request.branchedFromRunId)).toEqual([RUN])
+    release()
+    await settled()
+    expect(header()).toContain('Xy9zW2')
+    expect(has('Rerunning…')).toBe(false)
+    expect(selectedTab()).toBe('world')
+    expect(notes[`Maestro/holds/${NEW}.md`]).toBeDefined()
+  })
+
+  it('draws the note again under the run it landed on', async () => {
+    await openNote()
+    button('⟳ Rerun downstream').click()
+    await settled()
+    notes[`Maestro/holds/${NEW}.md`] = notes[`Maestro/holds/${NEW}.md`]!.replace('A combat trial in a void.', 'A quiet shrine.')
+    await store.process(`Maestro/holds/${NEW}.md`, content => content)
+    await settled()
+    expect(text()).toContain('A quiet shrine.')
   })
 })
 
 describe('a rerun going', () => {
-  const edited = hold({
-    proposals: [
-      { name: 'gameplay', text: 'Rotate stances.', given: [], combinedWith: [], edited: true },
-      { name: 'world', text: 'A controlled test.', given: [], combinedWith: [], edited: false },
-    ],
-  })
-  const verdictOnly = { verdict: true, proposals: [], cards: ['verdict'] }
-  const director = { name: 'director', writesVerdict: true }
   const progress = (): string[] => Array.from(root.querySelectorAll('.chain-runner-directing-progress')).map(line => line.textContent ?? '')
   const stale = (selector: string): boolean | undefined => root.querySelector(selector)?.classList.contains('is-stale')
   const tick = (seconds: number): void => {
     clock += seconds * 1000
     timers.forEach(one => one())
   }
-
-  it('shows the step and a timer over the old verdict, greyed out, on the Run tab', () => {
-    board().open(showing(edited))
+  /** A rerun started from the tab named, and the engine's frames so far. */
+  const rerunning = async (proposal?: string, ...frames: RunEvent[]): Promise<void> => {
+    feed = new Feed()
+    await openNote(proposal)
     button('⟳ Rerun downstream').click()
-    progressTo({ ...verdictOnly, step: director })
+    await settled()
+    feed.push(started(NEW), ...frames)
+    await settled()
+  }
+
+  beforeEach(() => void (notes[PATH] = EDITED))
+
+  it('shows the step and a timer over the old verdict, greyed out, on the Run tab', async () => {
+    await rerunning(undefined, layoutFrame('creative-director'), stepOn('creative-director'))
     tick(42)
     expect(progress()).toEqual(['⟳ Writing a new verdict… 0:42'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
     expect(root.querySelector('.chain-runner-directing-verdict')?.textContent).toContain('A combat trial in a void.')
   })
 
-  it('says it is starting, over a verdict not yet greyed, until it knows what it writes again', () => {
-    board().open(showing(edited))
-    button('⟳ Rerun downstream').click()
+  it('says it is starting, over a verdict not yet greyed, until it knows what it writes again', async () => {
+    await rerunning()
     expect(progress()).toEqual(['⟳ Starting the rerun… 0:00'])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
-    progressTo(verdictOnly)
+    feed!.push(layoutFrame('creative-director'))
+    await settled()
     expect(progress()).toEqual(['⟳ Starting the rerun… 0:00'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
   })
 
-  it('names a step that is not the verdict as running', () => {
-    board().open(showing(edited))
-    button('⟳ Rerun downstream').click()
-    progressTo({ ...verdictOnly, step: { name: 'critic', writesVerdict: false } })
+  it('names a step that is not the verdict as running', async () => {
+    await rerunning(undefined, layoutFrame('creative-director'), stepOn('scratch', 'critic'))
     tick(65)
     expect(progress()).toEqual(['⟳ critic is running… 1:05'])
   })
 
-  it('leaves the verdict as it is when the rerun does not write it again', () => {
-    board().open(showing(edited))
-    button('⟳ Rerun downstream').click()
-    progressTo({ verdict: false, proposals: ['world'], cards: ['world'], step: { name: 'world', writesVerdict: false } })
+  it('leaves the verdict as it is when the rerun does not write it again', async () => {
+    await rerunning(undefined, layoutFrame('world'), stepOn('world'))
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
   })
 
-  it('shows nothing on a proposal tab the rerun does not write again', () => {
-    board().open(showing(edited), 'gameplay')
-    button('⟳ Rerun downstream').click()
-    progressTo({ ...verdictOnly, step: director })
+  it('shows nothing on a proposal tab the rerun does not write again, and lets it be edited', async () => {
+    await rerunning('world')
+    expect(button('✎ Edit').disabled).toBe(true)
+    feed!.push(layoutFrame('creative-director'), stepOn('creative-director'))
+    await settled()
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-proposal')).toBe(false)
+    expect(button('✎ Edit').disabled).toBe(false)
   })
 
-  it('shows the line under the tabs, over the greyed proposal, on a tab the rerun writes again', () => {
-    board().open(showing(edited), 'world')
-    button('⟳ Rerun downstream').click()
-    progressTo({ verdict: true, proposals: ['world'], cards: ['world', 'verdict'], step: { name: 'world', writesVerdict: false } })
+  it('shows the line under the tabs, over the greyed proposal, on a tab the rerun writes again', async () => {
+    await rerunning('world', layoutFrame('world', 'creative-director'), stepOn('world'))
     expect(progress()).toEqual(['⟳ world is running… 0:00'])
     expect(root.querySelector('.chain-runner-directing-tabs')?.nextElementSibling?.className).toBe('chain-runner-directing-progress')
     expect(stale('.chain-runner-directing-proposal')).toBe(true)
-  })
-
-  it('lets a proposal the rerun only replays be edited, once the rerun has said which it writes again', () => {
-    const panel = board()
-    panel.open(showing(edited), 'world')
-    button('⟳ Rerun downstream').click()
-    expect(button('✎ Edit').disabled).toBe(true)
-    progressTo(verdictOnly)
-    expect(button('✎ Edit').disabled).toBe(false)
-    progressTo({ verdict: true, proposals: ['world'], cards: ['world', 'verdict'] })
     expect(button('✎ Edit').disabled).toBe(true)
   })
 
-  it('carries an open edit and the rerun going onto the hold as it reads once it has landed', () => {
-    const panel = board()
-    panel.open(showing(edited), 'world')
-    button('⟳ Rerun downstream').click()
-    progressTo(verdictOnly)
+  it('carries an open edit onto the run the rerun lands on', async () => {
+    await rerunning('world', layoutFrame('creative-director'))
     button('✎ Edit').click()
-    const editor = root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!
-    type(editor, 'A theme park.')
-    panel.draw(showing(hold({ ...edited, runId: 'landed', earlierRuns: [RUN] })))
+    type(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!, 'A theme park.')
+    feed!.end(complete(NEW))
+    await settled()
+    expect(header()).toContain('Xy9zW2')
     expect(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')?.value).toBe('A theme park.')
-    expect(button('Rerunning…').disabled).toBe(true)
+    expect(editors[0]!.destroyed).toBe(false)
   })
 
-  it('closes an edit saved while the rerun landed', async () => {
-    const panel = board()
-    panel.open(showing(edited), 'world')
-    button('⟳ Rerun downstream').click()
-    progressTo(verdictOnly)
+  it('closes an edit saved while the rerun lands', async () => {
+    await rerunning('world', layoutFrame('creative-director'))
     button('✎ Edit').click()
     type(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!, 'A theme park.')
     button('Save').click()
-    panel.draw(showing(hold({ ...edited, runId: 'landed', earlierRuns: [RUN] })))
-    waiting[1]!(true)
+    feed!.end(complete(NEW))
     await settled()
+    expect(header()).toContain('Xy9zW2')
     expect(root.querySelector('.chain-runner-directing-editor')).toBeNull()
   })
 
-  it('lets go of the rerun once it is done, wherever the hold has moved', async () => {
-    const panel = board()
-    panel.open(showing(edited), 'world')
-    button('⟳ Rerun downstream').click()
-    panel.draw(showing(hold({ ...edited, runId: 'landed', earlierRuns: [RUN] })))
-    waiting[0]!(true)
-    await settled()
-    expect(button('⟳ Rerun downstream').disabled).toBe(false)
-  })
-
-  it('shows the line for a reply used as the revision on the Run tab', () => {
-    const talked = hold({ conversation: [{ kind: 'chat', name: 'world', message: 'why?', reply: 'Because.' }] })
-    board().open(showing(talked), 'world')
+  it('shows the line for a reply used as the revision on the Run tab', async () => {
+    feed = new Feed()
+    notes[PATH] = talking('@world who watches?\n> [turn 2]\n> \n> The player.')
+    await openNote('world')
     button('Use this reply as the revision & rerun').click()
-    progressTo({ ...verdictOnly, step: director })
+    await settled()
+    expect(promoted).toEqual([{ nodeId: 'world', turn: 2 }])
+    feed.push(started(NEW), layoutFrame('creative-director'), stepOn('creative-director'))
+    await settled()
     expect(progress()).toEqual([])
     button('Run').click()
     tick(3)
@@ -601,51 +767,66 @@ describe('a rerun going', () => {
   })
 
   it('puts the panel back as it was when the rerun lands nowhere', async () => {
-    board().open(showing(edited))
-    button('⟳ Rerun downstream').click()
-    progressTo({ ...verdictOnly, step: director })
-    waiting[0]!(false)
+    await rerunning(undefined, layoutFrame('creative-director'), stepOn('creative-director'))
+    feed!.end({ type: 'error', error: 'the chain broke' })
     await settled()
+    expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
     expect(timers.size).toBe(0)
-    progressTo({ ...verdictOnly, step: { name: 'late', writesVerdict: false } })
-    expect(progress()).toEqual([])
+    expect(button('⟳ Rerun downstream').disabled).toBe(false)
+    expect(header()).toContain('ubqPU2')
   })
 
-  it('shows no line for a run the panel has moved on from', () => {
-    const b = board()
-    b.open(showing(edited))
+  it('shows no line for a run the panel has moved on from, and stays there when it lands', async () => {
+    const made = board()
+    feed = new Feed()
+    made.show(RUN, await holds.read(RUN))
     button('⟳ Rerun downstream').click()
-    b.draw(showing(hold({ runId: '2026-09-16-Xy9zW2' })))
+    await settled()
+    made.show(NONE, undefined)
     expect(progress()).toEqual([])
     expect(timers.size).toBe(0)
+    feed.end(started(NEW), complete(NEW))
+    await settled()
+    expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
   })
 })
 
 describe('the Run tab', () => {
   it('shows the verdict and the Direction so far', () => {
-    board().open(showing())
+    open()
     expect(text()).toContain('A combat trial in a void.')
     expect(Array.from(root.querySelectorAll('li')).map(li => li.textContent)).toEqual(['KEEP: gameplay'])
   })
 
   it('says when nothing has been directed yet', () => {
-    board().open(showing(hold({ direction: [] })))
+    open(hold({ direction: [] }))
     expect(text()).toContain('Nothing directed yet')
   })
 
-  it('lists every canon line, and hands an untick to the hold actions', () => {
-    board().open(showing())
+  it('lists every canon line, and unticks one in the note', async () => {
+    open()
     expect(boxes().map(box => box.checked)).toEqual([true, false])
     expect(text()).toContain('1 of 2 ticked')
     boxes()[0]!.click()
-    expect(calls).toEqual(['tick LOCKED: Abilities rotate. — gameplay false'])
+    await settled()
+    expect(notes[PATH]).toContain('- [ ] LOCKED: Abilities rotate. — gameplay')
+    expect(text()).toContain('0 of 2 ticked')
   })
 
   it('has no verb buttons', () => {
-    board().open(showing())
-    expect(buttons().some(b => b.textContent === 'KEEP')).toBe(false)
+    open()
+    expect(has('KEEP')).toBe(false)
+  })
+
+  it('adds a CHANGE to the Direction from its own box', async () => {
+    open()
+    type(composer('What should change…'), 'rotation should hurt')
+    press(composer('What should change…'), 'Enter')
+    await settled()
+    expect(await direction()).toEqual(['KEEP: gameplay', 'CHANGE: rotation should hurt'])
+    expect(Array.from(root.querySelectorAll('li')).map(li => li.textContent)).toContain('CHANGE: rotation should hurt')
   })
 })
 
@@ -667,31 +848,33 @@ describe('the Run tab, waiting at a hold', () => {
   const section = (): string => root.querySelector('.chain-runner-directing-hold')?.textContent ?? ''
 
   it('names the node, asks its question, and shows each candidate', () => {
-    board().open(showing(waitingAt))
+    open(waitingAt)
     expect(section()).toContain('Waiting at pick')
     expect(section()).toContain('Which pitch goes forward?')
     expect(section()).toContain('A combat trial.')
     expect(boxes().map(box => box.checked)).toEqual([false, true])
   })
 
-  it('hands a tick to the hold actions by the candidate’s heading', () => {
-    board().open(showing(waitingAt))
+  it('picks a candidate in the note by its heading', async () => {
+    notes[PATH] = NOTE.replace('## Verdict', '## Waiting at pick\n\nReached then\n\n- [ ] Candidate 1\n  A trial.\n- [ ] Candidate 2\n  A shrine.\n\n## Verdict')
+    await openNote()
     boxes()[0]!.click()
-    expect(calls).toEqual(['pick pick Candidate 1 true'])
+    await settled()
+    expect((await holds.read(RUN))?.holds[0]?.chosen).toBe('Candidate 1')
   })
 
   it('says a hold offered no candidates', () => {
-    board().open(showing(hold({ holds: [{ nodeId: 'pick', candidates: [] }] })))
+    open(hold({ holds: [{ nodeId: 'pick', candidates: [] }] }))
     expect(section()).toContain('No candidates')
   })
 
   it('shows nothing of a hold on a run that ended', () => {
-    board().open(showing())
+    open()
     expect(root.querySelector('.chain-runner-directing-hold')).toBeNull()
   })
 
   it('shows nothing of the hold on a proposal tab', () => {
-    board().open(showing(waitingAt), 'world')
+    open(waitingAt, 'world')
     expect(section()).toBe('')
   })
 })
@@ -708,122 +891,122 @@ describe('a proposal tab, chatting', () => {
   })
 
   it('shows only this proposal’s messages and replies, in order', () => {
-    board().open(showing(talked), 'world')
-    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent)
-    expect(turns).toHaveLength(3)
-    expect(turns[0]).toContain('why a test?')
-    expect(turns[0]).toContain('Someone is watching.')
-    expect(turns[1]).toContain('who watches?')
-    expect(turns[2]).toContain('No reply')
+    open(talked, 'world')
+    expect(turns()).toHaveLength(3)
+    expect(turns()[0]).toContain('why a test?')
+    expect(turns()[0]).toContain('Someone is watching.')
+    expect(turns()[1]).toContain('who watches?')
+    expect(turns()[2]).toContain('No reply')
     expect(text()).not.toContain('why rotate?')
     expect(text()).not.toContain('too much Nier?')
   })
 
   it('says which run a reply was revised as, and offers a reply not yet used', () => {
-    board().open(showing(talked), 'world')
-    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn'))
-    expect(turns[0]?.textContent).toContain('Used as the revision · run Xy9zW2')
-    expect(Array.from(turns[0]!.querySelectorAll('button'))).toEqual([])
-    button('Use this reply as the revision & rerun').click()
-    // The turn goes with the reply: it is the `### Turn N` promote is asked for.
-    expect(calls).toEqual(['revise world The player. turn 2'])
+    open(talked, 'world')
+    const shown = Array.from(root.querySelectorAll('.chain-runner-directing-turn'))
+    expect(shown[0]?.textContent).toContain('Used as the revision · run Xy9zW2')
+    expect(Array.from(shown[0]!.querySelectorAll('button'))).toEqual([])
+    expect(has('Use this reply as the revision & rerun')).toBe(true)
   })
 
-  it('says a rerun is going, and starts no second one, until it is done', async () => {
-    board().open(showing(talked), 'world')
+  it('revises with a reply, says a rerun is going and starts no second one, then follows the hold to where it landed', async () => {
+    holdEngine()
+    notes[PATH] = talking('@world who watches?\n> [turn 2]\n> \n> The player.')
+    await openNote('world')
     button('Use this reply as the revision & rerun').click()
     expect(button('Rerunning…').disabled).toBe(true)
     button('Rerunning…').click()
-    expect(calls).toHaveLength(1)
-    waiting[0]!(true)
     await settled()
-    expect(button('Use this reply as the revision & rerun').disabled).toBe(false)
+    expect(promoted).toEqual([{ nodeId: 'world', turn: 2 }])
+    release()
+    await settled()
+    expect(header()).toContain('Xy9zW2')
+    expect(text()).toContain('Used as the revision · run Xy9zW2')
   })
 
-  it('hands what is typed to the hold actions, for this proposal, on Send or Enter', async () => {
-    board().open(showing(), 'world')
+  it('sends what is typed to this proposal, on Send or Enter', async () => {
+    open(hold(), 'world')
     type(composer('Message world…'), 'really?')
     button('Send').click()
-    waiting[0]!(true)
     await settled()
     type(composer('Message world…'), 'truly?')
     expect(press(composer('Message world…'), 'Enter').defaultPrevented).toBe(true)
-    expect(calls).toEqual(['chat world really?', 'chat world truly?'])
+    await settled()
+    expect(chats).toEqual(['world really?', 'world truly?'])
+    expect(turns()).toEqual(['really?Because it is.Use this reply as the revision & rerun', 'truly?Because it is.Use this reply as the revision & rerun'])
   })
 
   it('sends nothing for a blank box', () => {
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     button('Send').click()
     press(composer('Message world…'), 'Enter')
-    expect(calls).toEqual([])
+    expect(notes[PATH]).toBe(NOTE)
   })
 
-  it('sends on Shift+Enter too, since a message is one line', () => {
-    board().open(showing(), 'world')
+  it('sends on Shift+Enter too, since a message is one line', async () => {
+    open(hold(), 'world')
     type(composer('Message world…'), 'two')
     expect(press(composer('Message world…'), 'Enter', true).defaultPrevented).toBe(true)
-    expect(calls).toEqual(['chat world two'])
+    await settled()
+    expect(chats).toEqual(['world two'])
   })
 
   it('shows the message and that a reply is coming, and cannot send again while it does', async () => {
-    board().open(showing(), 'world')
+    holdEngine()
+    open(hold(), 'world')
     type(composer('Message world…'), 'really?')
     button('Send').click()
     expect(composer('Message world…').value).toBe('')
-    expect(root.querySelector('.chain-runner-directing-turn')?.textContent).toContain('really?')
+    expect(turns()[0]).toContain('really?')
     expect(text()).toContain('world is replying…')
     expect(button('Send').disabled).toBe(true)
     type(composer('Message world…'), 'again?')
     press(composer('Message world…'), 'Enter')
-    expect(calls).toEqual(['chat world really?'])
-
-    waiting[0]!(true)
+    release()
     await settled()
+    expect(chats).toEqual(['world really?'])
     expect(text()).not.toContain('world is replying…')
     expect(button('Send').disabled).toBe(false)
     expect(composer('Message world…').value).toBe('again?')
   })
 
-  it('draws the message once the note has it, still waiting, rather than twice (ADR-0014)', () => {
-    const panel = board()
-    panel.open(showing(), 'world')
+  it('draws the message once the note has it, still waiting, rather than twice (ADR-0014)', async () => {
+    holdEngine()
+    open(hold(), 'world')
     type(composer('Message world…'), 'really\nso?')
     button('Send').click()
-    panel.draw(showing(hold({ conversation: [{ kind: 'chat', name: 'world', message: 'really so?' }] })))
-    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent)
-    expect(turns).toEqual(['really so?world is replying…'])
-  })
-
-  it('says a message the engine left unanswered has no reply', async () => {
-    const panel = board()
-    panel.open(showing(), 'world')
-    type(composer('Message world…'), 'really?')
-    button('Send').click()
-    const unanswered = showing(hold({ conversation: [{ kind: 'chat', name: 'world', message: 'really?' }] }))
-    panel.draw(unanswered)
-    waiting[0]!(true)
     await settled()
-    expect(root.querySelector('.chain-runner-directing-turn')?.textContent).toBe('really?No reply')
+    expect(notes[PATH]).toContain('@world really so?')
+    expect(turns()).toEqual(['really so?world is replying…'])
   })
 
-  it('puts the message back in the box when it could not be sent', async () => {
-    board().open(showing(), 'world')
+  it('says a message the engine left unanswered has no reply, and leaves it in the note', async () => {
+    chatFrames = [{ type: 'error', error: 'busy' }]
+    open(hold(), 'world')
     type(composer('Message world…'), 'really?')
     button('Send').click()
-    waiting[0]!(false)
+    await settled()
+    expect(turns()).toEqual(['really?No reply'])
+    expect(composer('Message world…').value).toBe('')
+  })
+
+  it('puts the message back in the box when the note would not take it', async () => {
+    store.refuse(PATH)
+    open(hold(), 'world')
+    type(composer('Message world…'), 'really?')
+    button('Send').click()
     await settled()
     expect(composer('Message world…').value).toBe('really?')
     expect(text()).not.toContain('world is replying…')
   })
 
-  it('keeps what is being typed, and where, across a redraw', () => {
-    const panel = board()
-    panel.open(showing(), 'world')
+  it('keeps what is being typed, and where, when the note changes', async () => {
+    open(hold(), 'world')
     const box = composer('Message world…')
     type(box, 'half a thou')
     box.focus()
     box.setSelectionRange(4, 4)
-    panel.draw(showing())
+    await touched()
     const again = composer('Message world…')
     expect(again).not.toBe(box)
     expect(again.value).toBe('half a thou')
@@ -832,7 +1015,7 @@ describe('a proposal tab, chatting', () => {
   })
 
   it('keeps a draft to its own proposal', () => {
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     type(composer('Message world…'), 'for world')
     button('gameplay').click()
     expect(composer('Message gameplay…').value).toBe('')
@@ -861,7 +1044,7 @@ describe('a proposal tab, side quests', () => {
   const quests = (): Element[] => Array.from(root.querySelectorAll('.chain-runner-directing-quests .chain-runner-directing-turn'))
 
   it('shows only this proposal’s side quests: the chain, its result, and a link to its run', () => {
-    board().open(showing(quested), 'world')
+    open(quested, 'world')
     expect(quests()).toHaveLength(2)
     expect(quests()[0]?.textContent).toContain('combat lab')
     expect(quests()[0]?.textContent).toContain('The test becomes an arena.')
@@ -874,7 +1057,7 @@ describe('a proposal tab, side quests', () => {
 
   it('offers the engine’s chains to pick from', async () => {
     chainNames = ['combat lab', 'world lab']
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     await settled()
     const list = root.querySelector<HTMLDataListElement>(`datalist#${chainBox().getAttribute('list')}`)
     expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab', 'world lab'])
@@ -882,10 +1065,9 @@ describe('a proposal tab, side quests', () => {
 
   it('asks the engine for its chains when a tab opens, not on every redraw', async () => {
     chainNames = ['combat lab']
-    const panel = board()
-    panel.open(showing(), 'world')
+    open(hold(), 'world')
     await settled()
-    panel.draw(showing())
+    await touched()
     expect(chainsAsked).toBe(1)
     chainNames = []
     button('gameplay').click()
@@ -895,39 +1077,33 @@ describe('a proposal tab, side quests', () => {
     expect(Array.from(list?.options ?? []).map(option => option.value)).toEqual(['combat lab'])
   })
 
-  it('takes a typed chain when the engine offers none', async () => {
-    board().open(showing(), 'world')
-    await settled()
+  it('sends this proposal through the chain typed, saying the quest is going until it is done', async () => {
+    holdEngine()
+    open(hold(), 'world')
     typeChain('combat lab')
     press(chainBox(), 'Enter')
-    expect(calls).toEqual(['quest world combat lab'])
-  })
-
-  it('hands the chain to the hold actions, for this proposal, and says the quest is going until it is done', async () => {
-    board().open(showing(), 'world')
-    typeChain('combat lab')
-    button('Go').click()
-    expect(calls).toEqual(['quest world combat lab'])
     expect(root.querySelector('.chain-runner-directing-quests')?.textContent).toContain('combat lab is running…')
     expect(button('Go').disabled).toBe(true)
-    waiting[0]!(true)
+    await settled()
+    expect(requests.map(request => request.chainName)).toEqual(['combat lab'])
+    release()
     await settled()
     expect(text()).not.toContain('is running…')
+    expect(quests()[0]?.querySelector('a')?.getAttribute('href')).toBe(`http://engine/history/${QUEST}`)
   })
 
   it('says an edit still open is not what a quest sends', () => {
-    board().open(showing(), 'world')
+    open(hold(), 'world')
     expect(text()).not.toContain('Sends the proposal as last saved')
     button('✎ Edit').click()
     expect(text()).toContain('Sends the proposal as last saved')
   })
 
-  it('keeps a chain being typed, and the focus, across a redraw', () => {
-    const panel = board()
-    panel.open(showing(), 'world')
+  it('keeps a chain being typed, and the focus, when the note changes', async () => {
+    open(hold(), 'world')
     typeChain('comb')
     chainBox().focus()
-    panel.draw(showing())
+    await touched()
     expect(chainBox().value).toBe('comb')
     expect(document.activeElement).toBe(chainBox())
   })
@@ -942,148 +1118,136 @@ describe('the Run tab, talking to the room', () => {
   })
 
   it('shows each question with who answered what, and no chats', () => {
-    board().open(showing(asked))
-    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent ?? '')
-    expect(turns).toHaveLength(1)
-    expect(turns[0]).toMatch(/too much Nier\?.*gameplay.*A bit\..*world.*No\./)
+    open(asked)
+    expect(turns()).toHaveLength(1)
+    expect(turns()[0]).toMatch(/too much Nier\?.*gameplay.*A bit\..*world.*No\./)
     expect(text()).not.toContain('why a test?')
   })
 
   it('asks the room what is typed, and says the room is answering until it has', async () => {
-    board().open(showing())
+    holdEngine()
+    framesByAgent = { gameplay: [answer('gameplay', 'Rotation.')], world: [answer('world', 'The watcher.')] }
+    open()
     type(composer('Ask every proposal…'), 'what is the hook?')
     button('Ask').click()
-    expect(calls).toEqual(['ask what is the hook?'])
     expect(text()).toContain('what is the hook?')
     expect(text()).toContain('The room is answering…')
     expect(button('Ask').disabled).toBe(true)
-    waiting[0]!(true)
+    await settled()
+    expect(turns()).toEqual(['what is the hook?The room is answering…'])
+    release()
     await settled()
     expect(text()).not.toContain('The room is answering…')
-  })
-
-  it('draws a question the note has, still waiting, once', () => {
-    const panel = board()
-    panel.open(showing())
-    type(composer('Ask every proposal…'), 'the hook?')
-    button('Ask').click()
-    panel.draw(showing(hold({ conversation: [{ kind: 'room', question: 'the hook?', answers: [] }] })))
-    const turns = Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent)
-    expect(turns).toEqual(['the hook?The room is answering…'])
-  })
-
-  it('adds a CHANGE to the Direction from its own box', () => {
-    board().open(showing())
-    type(composer('What should change…'), 'rotation should hurt')
-    press(composer('What should change…'), 'Enter')
-    expect(calls).toEqual(['change rotation should hurt'])
+    expect(turns()[0]).toMatch(/gameplay.*Rotation\..*world.*The watcher\./)
   })
 })
 
 describe('without a hold', () => {
   it('says where to click when it is showing no run', () => {
-    board().open({ kind: 'idle' })
+    board()
     expect(text()).toContain('✎ Direct')
     expect(tabs()).toEqual([])
   })
 
-  it('offers to write the hold for a run that has none', () => {
-    board().open({ kind: 'missing', runId: RUN })
-    expect(text()).toContain(`Run ${RUN} has no hold note yet.`)
+  it('writes the hold for a run that has none, and shows it', async () => {
+    board().show(NONE, undefined)
+    expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
     button('✎ Direct this run').click()
-    expect(calls).toEqual(['write hold'])
+    await settled()
+    expect(notes[`Maestro/holds/${NONE}.md`]).toContain(`# Hold: run ${NONE}`)
+    expect(tabs()).toEqual(['Run', 'gameplay', 'world'])
   })
 })
 
 describe('resume', () => {
-  const RESUMED = '2026-09-16-Rs1Kq4'
-
-  /** A resume that landed under `runId`, its hold as the hold module answers it. */
-  const resumed = (runId = RESUMED, over: Partial<Resumed> = {}): Resumed => ({ hold: hold({ runId }), forked: false, canon: 'written', ...over })
-
-  const land = async (result: Resumed | undefined): Promise<void> => {
-    resumesWaiting.pop()?.(result)
-    await settled()
-  }
-
   /** What the bar pinned under every tab says. */
   const footer = (): string => root.querySelector('.chain-runner-directing-footer')?.textContent ?? ''
+  const RESUME = '▶ Resume · 1 of 2 canon ticked'
 
   it('names how many canon lines are ticked', () => {
-    board().open(showing())
-    expect(button('▶ Resume · 1 of 2 canon ticked')).toBeTruthy()
+    open()
+    expect(button(RESUME)).toBeTruthy()
   })
 
   it('drops the count for a hold with no canon lines at all', () => {
-    board().open(showing(hold({ canon: [] })))
+    open(hold({ canon: [] }))
     expect(button('▶ Resume')).toBeTruthy()
   })
 
   it('stays under every tab', () => {
-    const made = board()
-    made.open(showing(), 'gameplay')
-    expect(button('▶ Resume · 1 of 2 canon ticked')).toBeTruthy()
+    open(hold(), 'gameplay')
+    expect(button(RESUME)).toBeTruthy()
   })
 
-  it('says so while the run goes, and takes no second press', () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
+  it('says so while the run goes, and takes no second press', async () => {
+    holdEngine()
+    open()
+    button(RESUME).click()
     expect(button('Resuming…').disabled).toBe(true)
-    expect(calls).toEqual([`resume ${RUN}`])
+    button('Resuming…').click()
+    await settled()
+    expect(resumed).toEqual([RUN])
   })
 
   it('says the hold was resumed, and that canon was written', async () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed())
+    open()
+    button(RESUME).click()
+    await settled()
     expect(footer()).toContain('Resumed')
     expect(footer()).toContain('canon written')
   })
 
-  it('names the run it carried on as, which a fork makes a different one', async () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed('2026-09-16-Forked', { forked: true }))
-    expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe('http://engine/history/2026-09-16-Forked')
+  it('follows a resume that forks to the fork’s own hold, and says so there', async () => {
+    resumeFrames = [started(RESUMED), complete(RESUMED)]
+    open(hold(), 'gameplay')
+    button(RESUME).click()
+    await settled()
+    expect(header()).toContain('Rs1Kq4')
+    expect(selectedTab()).toBe('gameplay')
+    expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe(`http://engine/history/${RESUMED}`)
+    expect(footer()).toContain('Resumed')
   })
 
   it('keeps the reader on their tab — what the run wrote comes back in the hold itself', async () => {
-    const made = board()
-    made.open(showing(), 'gameplay')
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed())
+    open(hold(), 'gameplay')
+    button(RESUME).click()
+    await settled()
     expect(selectedTab()).toBe('gameplay')
   })
 
-  it('says what the run is doing while it goes', () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    progressTo({ verdict: true, proposals: [], cards: ['creative-director'], step: { name: 'creative-director', writesVerdict: true } })
+  it('says what the run is doing while it goes', async () => {
+    feed = new Feed()
+    open()
+    button(RESUME).click()
+    await settled()
+    feed.push(started(RUN), layoutFrame('creative-director'), stepOn('creative-director'))
+    await settled()
     expect(footer()).toContain('⟳ Writing a new verdict…')
   })
 
   it('says a run failed, and that its canon was held back', async () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed(RESUMED, { error: 'the model refused', canon: 'held-back' }))
+    resumeFrames = [started(RUN), { type: 'error', error: 'the model refused' }]
+    open()
+    button(RESUME).click()
+    await settled()
     expect(text()).toContain('Failed: the model refused')
     expect(text()).toContain('canon not written')
   })
 
   it('says a resume that never ran did not run', async () => {
-    board().open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(undefined)
+    online = false
+    open()
+    button(RESUME).click()
+    await settled()
     expect(text()).toContain('Resume did not run.')
-    expect(button('▶ Resume · 1 of 2 canon ticked').disabled).toBe(false)
+    expect(button(RESUME).disabled).toBe(false)
   })
 
-  it('keeps what the last resume said when the hold is redrawn under it', async () => {
-    const made = board()
-    made.open(showing())
-    button('▶ Resume · 1 of 2 canon ticked').click()
-    await land(resumed())
-    made.draw(showing())
+  it('keeps what the last resume said when the note changes under it', async () => {
+    open()
+    button(RESUME).click()
+    await settled()
+    await touched()
     expect(footer()).toContain('canon written')
   })
 })
