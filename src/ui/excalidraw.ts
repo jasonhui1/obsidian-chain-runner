@@ -272,6 +272,14 @@ export interface RunDrawing {
   setRunStatus(target: NodeTarget, status: NodeRunStatus): Promise<boolean>
   /** `false` means no frame could be made and the outputs landed loose. */
   placeRun(frame: RunFrame, outputs: readonly PlacedOutput[]): Promise<boolean>
+}
+
+export interface RunSurface extends Reachable {
+  on: BindDrawing<RunDrawing>
+}
+
+/** Moving one drawing's cards, labels and frames on to a rerun that landed. */
+export interface RerunDrawing {
   /**
    * Moves the drawing on to a landed rerun: each card of the runs `from` to the
    * note `noteFor` files for its output, and the labels and frames to `to`.
@@ -284,10 +292,10 @@ export interface RunDrawing {
   ): Promise<boolean>
 }
 
-export interface RunSurface extends Reachable {
+export interface RerunSurface extends Reachable {
   /** Every drawing open in a view now; a drawing in a tab not yet loaded is not one. */
   openViews(): DrawingView[]
-  on: BindDrawing<RunDrawing>
+  on: BindDrawing<RerunDrawing>
 }
 
 /** Placing a block's proposals on one drawing, and keeping or dropping them. */
@@ -315,7 +323,7 @@ export interface SelectionSurface extends Reachable {
 }
 
 /** Excalidraw, in every role this plugin gives it. */
-export type ExcalidrawSurface = NodeSurface & RunSurface & ProposalSurface & SelectionSurface
+export type ExcalidrawSurface = NodeSurface & RunSurface & RerunSurface & ProposalSurface & SelectionSurface
 
 /** Said when Expand is asked for and the selection is not one readable block. */
 export const SELECT_ONE_BLOCK =
@@ -384,7 +392,7 @@ export function createExcalidrawSurface(app: App): ExcalidrawSurface {
  * One drawing, bound once for one gesture. Its own EA instance rather than the
  * shared one, whose binding any other action or tab can move while this one awaits.
  */
-class BoundDrawing implements NodeDrawing, RunDrawing, ProposalDrawing {
+class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDrawing {
   constructor(
     private readonly app: App,
     private readonly ea: ExcalidrawAutomate,

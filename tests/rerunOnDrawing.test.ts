@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { RerunOnDrawing } from '@/ui/rerunOnDrawing'
-import type { DrawingView, RunSurface } from '@/ui/excalidraw'
+import type { DrawingView, RerunSurface } from '@/ui/excalidraw'
 import type { RerunLanding } from '@/run/rerunWatch'
 import type { RunProvenance } from '@/ui/outputNotes'
 import type { RunPanel } from '@/run/panels'
@@ -33,16 +33,13 @@ let bound: string[]
 function makeFollower(): RerunOnDrawing {
   /** Each open drawing's view, known here by its name. */
   const names = new Map<DrawingView, string>(Object.keys(drawings).map(name => [{ file: null }, name]))
-  const surface: RunSurface = {
+  const surface: RerunSurface = {
     unavailable: () => unavailable,
     openViews: () => [...names.keys()],
     on: view => {
       const name = names.get(view as DrawingView) as string
       bound.push(name)
       return {
-        read: () => undefined,
-        setRunStatus: () => Promise.resolve(true),
-        placeRun: () => Promise.resolve(true),
         followRerun: async (from, to, noteFor) => {
           const shown = drawings[name]
           if (shown === 'unreachable') throw new Error('That drawing went away')

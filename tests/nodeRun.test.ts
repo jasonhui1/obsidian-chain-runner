@@ -62,6 +62,8 @@ let canFrame: boolean
 let boundOn: (DrawingView | undefined)[]
 /** Why the drawing cannot be bound, when it cannot. */
 let unbindable: string | undefined
+/** Set once the drawing has closed: every write after it throws. */
+let closed: string | undefined
 /** Every vault write, so the cadence of the streaming flush is visible. */
 let writes: string[]
 /** What the vault held after each event of the stream was handled. */
@@ -127,13 +129,13 @@ const joinFirst = (done: number): RunEvent => ({
 function makeRun(): NodeRun {
   const surface: RunSurface = {
     unavailable: () => undefined,
-    openViews: () => [],
     on: view => {
       boundOn.push(view)
       if (unbindable) throw new Error(unbindable)
       return {
         read: () => reading,
         setRunStatus: (_target, status) => {
+          if (closed) return Promise.reject(new Error(closed))
           labels.push(runLabel(status))
           return Promise.resolve(true)
         },
@@ -141,7 +143,6 @@ function makeRun(): NodeRun {
           framed.push({ frame, notes: outputs.map(output => output.notePath) })
           return Promise.resolve(canFrame)
         },
-        followRerun: () => Promise.resolve(false),
       }
     },
   }
@@ -205,6 +206,7 @@ beforeEach(() => {
   canFrame = true
   boundOn = []
   unbindable = undefined
+  closed = undefined
   store = new MemoryNoteStore()
   vault = store.notes
   offline = 0
@@ -380,6 +382,14 @@ describe('outputs that fill in place', () => {
 })
 
 describe('what the node says', () => {
+  it('says once that the drawing closed, however many writes follow', async () => {
+    closed = 'That drawing was closed, so nothing was written to it.'
+    await start()
+    expect(launched).toHaveLength(1)
+    expect(notices.filter(one => one === closed)).toHaveLength(1)
+    expect(framed).toEqual([])
+  })
+
   it('counts the panels that have landed, out of the panels declared', async () => {
     await start()
     expect(labels).toEqual([

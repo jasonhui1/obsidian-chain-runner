@@ -53,13 +53,16 @@ export interface NodeRunDeps {
   notes: OutputNotes
 }
 
+/** One write to a run's drawing; `false` means the node is no longer there. */
+type Touch = (write: (drawing: RunDrawing) => Promise<boolean>) => Promise<void>
+
 /** One run of one node, as the click assembled it. */
 interface NodeRunPlan {
   chain: ChainSummary
   seed: string
   target: NodeTarget
-  /** The drawing the click came from, bound once for the whole run. */
-  drawing: RunDrawing
+  /** Writes to the drawing the click came from, bound once for the whole run. */
+  touch: Touch
   node: Box
   parameterValue?: string
 }
@@ -143,7 +146,7 @@ export class NodeRun {
       chain,
       seed,
       target,
-      drawing,
+      touch: this.toucher(drawing),
       node: reading.box,
       ...(data.parameterValue ? { parameterValue: data.parameterValue } : {}),
     }
@@ -174,7 +177,7 @@ export class NodeRun {
   }
 
   private async launch(plan: NodeRunPlan, controller: AbortController): Promise<void> {
-    const { chain, seed, target, drawing, parameterValue } = plan
+    const { chain, seed, target, touch, parameterValue } = plan
 
     let said = ''
     // Every write to a drawing is a save, so only a change of words earns one.
@@ -182,7 +185,7 @@ export class NodeRun {
       const next = JSON.stringify(status)
       if (next === said) return
       said = next
-      await this.onDrawing(() => drawing.setRunStatus(target, status))
+      await touch(drawing => drawing.setRunStatus(target, status))
     }
 
     await say({ kind: 'running', done: 0 })
@@ -219,7 +222,7 @@ export class NodeRun {
     })
 
     const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, notePath: one.note.path }))
-    await this.place(frame, placed, plan.drawing)
+    await this.place(frame, placed, plan.touch)
     return outputs
   }
 
@@ -228,7 +231,7 @@ export class NodeRun {
    * produced no panels is done, not failed — an empty answer is still an answer.
    */
   private async finish(run: ChainRunOutcome<FramedPanel>, plan: NodeRunPlan): Promise<void> {
-    const { target, drawing } = plan
+    const { target, touch } = plan
     const error = runFailure(run.state)
     if (error && error !== run.failure) this.deps.notify(error)
     // The reason goes onto the node too: a notice is gone when the reader looks back.
@@ -239,27 +242,34 @@ export class NodeRun {
     if (!run.live) {
       if (!run.state.runId) {
         if (!error) this.deps.notify(NOTHING_WRITTEN)
-        await this.onDrawing(() =>
-          drawing.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }),
-        )
+        await touch(drawing => drawing.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }))
         return
       }
       this.deps.notify(NO_OUTPUTS)
     }
-    await this.onDrawing(() => drawing.setRunStatus(target, settled))
+    await touch(drawing => drawing.setRunStatus(target, settled))
   }
 
   /** Puts the frame on the drawing, saying so when it could not be a real frame. */
-  private async place(frame: RunFrame, outputs: PlacedOutput[], drawing: RunDrawing): Promise<void> {
-    await this.onDrawing(async () => {
+  private async place(frame: RunFrame, outputs: PlacedOutput[], touch: Touch): Promise<void> {
+    await touch(async drawing => {
       if (!(await drawing.placeRun(frame, outputs))) this.deps.notify(NO_FRAME)
       return true
     })
   }
 
-  /** Touches the drawing, saying so rather than throwing when it cannot. */
-  private async onDrawing(action: () => Promise<boolean>): Promise<void> {
-    if ((await onDrawing(action, this.deps.notify)) === false) this.deps.notify(NODE_GONE)
+  /**
+   * Writes to `drawing`, saying so rather than throwing when it cannot. A drawing
+   * that could not be written to is said once and left alone for the rest of the run.
+   */
+  private toucher(drawing: RunDrawing): Touch {
+    let lost = false
+    return async write => {
+      if (lost) return
+      const done = await onDrawing(() => write(drawing), this.deps.notify)
+      if (done === undefined) lost = true
+      if (done === false) this.deps.notify(NODE_GONE)
+    }
   }
 }
 

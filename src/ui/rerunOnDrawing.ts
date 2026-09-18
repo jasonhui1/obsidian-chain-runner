@@ -1,4 +1,4 @@
-import type { RunSurface } from './excalidraw'
+import type { RerunSurface } from './excalidraw'
 import { onDrawing } from './onDrawing'
 import type { OutputNotes } from './outputNotes'
 import type { RerunLanding } from '../run/rerunWatch'
@@ -10,7 +10,7 @@ import type { RerunLanding } from '../run/rerunWatch'
  */
 
 export interface RerunOnDrawingDeps {
-  surface: RunSurface
+  surface: RerunSurface
   notes: Pick<OutputNotes, 'write'>
   notify: (message: string) => void
 }
