@@ -1,7 +1,7 @@
 /**
  * The directing panel's typing boxes: Enter sends, a box empties while what it
- * sent waits and cannot send again, a failed send goes back in, and what is
- * typed survives a redraw. Plain DOM.
+ * sent waits and cannot send again, a failed send goes back in, and a box is
+ * kept across draws, so what is typed, and where, is never put back. Plain DOM.
  */
 
 export interface TypingBox {
@@ -21,6 +21,7 @@ let choiceLists = 0
 export class TypingBoxes {
   private readonly drafts = new Map<string, string>()
   private readonly sending = new Map<string, string>()
+  private readonly rows = new WeakMap<HTMLElement, BoxParts>()
 
   constructor(private readonly redraw: () => void) {}
 
@@ -29,42 +30,38 @@ export class TypingBoxes {
     return this.sending.get(key)
   }
 
-  draw(el: HTMLElement, box: TypingBox): void {
-    const doc = el.ownerDocument
-    const row = el.appendChild(doc.createElement('div'))
+  /** Fills `row`, which the panel keeps across draws, with `box`: made once, then updated in place. */
+  draw(row: HTMLElement, box: TypingBox): void {
+    const parts = this.rows.get(row) ?? this.build(row, box)
+    parts.box = box
+    parts.input.placeholder = box.placeholder
+    const draft = this.drafts.get(box.key) ?? ''
+    if (parts.input.value !== draft) parts.input.value = draft
+    parts.button.textContent = box.label
+    parts.button.disabled = this.sending.has(box.key)
+    if (parts.list && box.choices) choose(parts.list, box.choices)
+  }
+
+  private build(row: HTMLElement, box: TypingBox): BoxParts {
+    const doc = row.ownerDocument
     row.className = 'chain-runner-directing-box'
-    const input = box.choices === undefined ? this.textarea(row) : this.chooser(row, box.choices)
-    input.placeholder = box.placeholder
-    input.dataset.box = box.key
-    input.value = this.drafts.get(box.key) ?? ''
+    const input = box.choices === undefined ? this.textarea(row) : this.chooser(row)
     const button = row.appendChild(doc.createElement('button'))
     button.className = 'mod-cta'
-    button.textContent = box.label
-    button.disabled = this.sending.has(box.key)
+    const parts: BoxParts = { box, input, button, list: row.querySelector('datalist') ?? undefined }
+    this.rows.set(row, parts)
 
     // Widened: the input-or-textarea union loses addEventListener's typed events.
     const field: HTMLElement = input
-    field.addEventListener('input', () => void this.drafts.set(box.key, input.value))
+    field.addEventListener('input', () => void this.drafts.set(parts.box.key, input.value))
     // The hold keeps each message on one line, so Enter always sends.
     field.addEventListener('keydown', event => {
       if (event.key !== 'Enter' || event.isComposing) return
       event.preventDefault()
-      void this.send(box)
+      void this.send(parts.box)
     })
-    button.addEventListener('click', () => void this.send(box))
-  }
-
-  /** Call before a redraw empties `root`; what it returns puts the reader back in the box they were typing in. */
-  keepTyping(root: HTMLElement): () => void {
-    const active = root.ownerDocument.activeElement as TypedInto | null
-    const key = active?.dataset?.box
-    if (!active || key === undefined || !root.contains(active)) return () => {}
-    const { selectionStart, selectionEnd } = active
-    return () => {
-      const input = Array.from(root.querySelectorAll<TypedInto>('[data-box]')).find(box => box.dataset.box === key)
-      input?.focus()
-      input?.setSelectionRange(selectionStart, selectionEnd)
-    }
+    button.addEventListener('click', () => void this.send(parts.box))
+    return parts
   }
 
   private textarea(row: HTMLElement): HTMLTextAreaElement {
@@ -73,13 +70,12 @@ export class TypingBoxes {
     return input
   }
 
-  private chooser(row: HTMLElement, choices: string[]): HTMLInputElement {
+  private chooser(row: HTMLElement): HTMLInputElement {
     const doc = row.ownerDocument
     const input = row.appendChild(doc.createElement('input'))
     input.type = 'text'
     const list = row.appendChild(doc.createElement('datalist'))
     list.id = `chain-runner-directing-choices-${++choiceLists}`
-    for (const choice of choices) list.appendChild(doc.createElement('option')).value = choice
     input.setAttribute('list', list.id)
     return input
   }
@@ -101,4 +97,16 @@ export class TypingBoxes {
   }
 }
 
-type TypedInto = HTMLInputElement | HTMLTextAreaElement
+/** One box's elements; `box` is the last draw's, which the listeners read. */
+interface BoxParts {
+  box: TypingBox
+  input: HTMLInputElement | HTMLTextAreaElement
+  button: HTMLButtonElement
+  list: HTMLDataListElement | undefined
+}
+
+/** Puts `choices` in the list, leaving it be when it already holds them. */
+function choose(list: HTMLDataListElement, choices: string[]): void {
+  if (Array.from(list.options, option => option.value).join('\n') === choices.join('\n')) return
+  list.replaceChildren(...choices.map(choice => Object.assign(list.ownerDocument.createElement('option'), { value: choice })))
+}

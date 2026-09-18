@@ -54,3 +54,10 @@ the engine's order still decides what is where; nothing about ADR-0001 changes.
 
 **ADR-0006's hold on one-shot motion is lifted**, and its reduced-motion rule
 still covers what was added without naming it.
+
+**The directing panel draws by key too (#61).** Its elements are not one list
+but a tree of sections, so `src/ui/keyedTree.ts` keys each element by its path
+from the root — named where identity matters (a tab, a section, a typing box, an
+open edit), counted by kind and place elsewhere — over the same `KeyedChildren`.
+A box being typed in, and the proposal editor, are never rebuilt, so the board
+puts no focus, cursor or scroll back by hand.

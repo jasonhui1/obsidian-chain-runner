@@ -1,6 +1,7 @@
 import { canonNote, DIRECTION_VERBS, oneLine, type DirectionVerb, type Hold, type Holds, type Landing, type Resumed } from './holds'
+import { KeyedTree } from './keyedTree'
 import type { ProposalEditor } from './proposalEditor'
-import { TypingBoxes } from './typingBoxes'
+import { TypingBoxes, type TypingBox } from './typingBoxes'
 import { sameTurn, type RepliedTurn } from '../run/chat'
 import type { ConversationEntry } from '../run/conversation'
 import { rerunDoing, type OnRerunProgress, type RerunProgress } from '../run/rerunProgress'
@@ -8,7 +9,9 @@ import { rerunDoing, type OnRerunProgress, type RerunProgress } from '../run/rer
 /**
  * The directing panel: one run's hold, drawn from what the hold module answers,
  * read again when the note changes by any hand, and followed to wherever a
- * rerun or a resume lands it. Plain DOM; every button is one hold module call.
+ * rerun or a resume lands it. Plain DOM, drawn by key (ADR-0007): an element a
+ * draw still wants is kept and updated, so nothing typed or focused is put back.
+ * Every button is one hold module call.
  */
 
 export interface DirectingBoardDeps {
@@ -56,7 +59,11 @@ export class DirectingBoard {
   private readonly runs = new Map<string, RunShown>()
   /** The chains the engine named when a tab was last opened. */
   private chains: string[] = []
-  private releases: (() => void)[] = []
+  private readonly tree = new KeyedTree()
+  /** The words each markdown element shows, so words that did not change are not rendered again. */
+  private readonly rendered = new WeakMap<HTMLElement, string>()
+  /** Numbers the edits opened, so a new one gets a frame of its own. */
+  private opened = 0
   private body: HTMLElement | undefined
   private listening: { runId: string; stop: () => void } | undefined
   /** Counts draws, so a slow read overtaken by a later draw draws nothing. */
@@ -66,6 +73,7 @@ export class DirectingBoard {
     private readonly root: HTMLElement,
     private readonly deps: DirectingBoardDeps,
   ) {
+    root.classList.add(CLS)
     this.redraw()
   }
 
@@ -84,7 +92,7 @@ export class DirectingBoard {
     this.draw({ kind: 'idle' })
   }
 
-  /** Draws `state`, keeping the reader's tab and scroll, and follows its run. */
+  /** Draws `state`, keeping the reader's tab, and follows its run. */
   private draw(state: DirectingState): void {
     ++this.draws
     this.state = state
@@ -95,14 +103,6 @@ export class DirectingBoard {
 
   private redraw(): void {
     const state = this.state
-    const scroll = this.body?.scrollTop ?? 0
-    const typing = [...this.runs.values()].flatMap(shown => [...shown.edits.values()]).find(edit => edit.editor.hasFocus())
-    const keepTyping = this.boxes.keepTyping(this.root)
-    this.releases.forEach(release => release())
-    this.releases = []
-    this.root.replaceChildren()
-    this.root.classList.add(CLS)
-
     this.header()
     const body = (this.body = this.add(this.root, 'div', `${CLS}-body`))
     if (state.kind === 'idle') this.add(body, 'div', `${CLS}-empty`, 'Click a card, or a run’s ✎ Direct, on the drawing.')
@@ -111,9 +111,7 @@ export class DirectingBoard {
       this.hold(body, state.hold)
       this.resumeBar(state.hold)
     }
-    body.scrollTop = scroll
-    keepTyping()
-    typing?.editor.focus()
+    this.tree.end()
   }
 
   /** Hears the note of the run shown, by any hand, and draws it again. */
@@ -185,14 +183,12 @@ export class DirectingBoard {
     const more = this.button(header, '⋯', `${CLS}-more`)
     more.setAttribute('aria-label', 'More')
     const { runId: shown } = this.state.hold
-    more.addEventListener('click', event =>
-      this.deps.openMenu(event, [{ title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(shown) }]),
-    )
+    more.onclick = (event): void => this.deps.openMenu(event, [{ title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(shown) }])
   }
 
   private missing(body: HTMLElement, runId: string): void {
     this.add(body, 'div', `${CLS}-empty`, `Run ${runId} has no hold note yet.`)
-    this.button(body, '✎ Direct this run', 'mod-cta').addEventListener('click', () => void this.act(runId => this.deps.holds.write(runId)))
+    this.button(body, '✎ Direct this run', 'mod-cta').onclick = (): void => void this.act(runId => this.deps.holds.write(runId))
   }
 
   private hold(body: HTMLElement, hold: Hold): void {
@@ -210,29 +206,29 @@ export class DirectingBoard {
     if (!proposal) {
       for (const waiting of hold.holds) this.waitingAt(body, waiting)
       this.verdict(body, hold)
-      const direction = this.section(body, 'Direction so far')
+      const direction = this.section(body, 'direction', 'Direction so far')
       this.directionSoFar(direction, hold.direction)
-      this.boxes.draw(direction, {
+      this.box(direction, {
         key: boxKey(hold.runId, 'change'),
         placeholder: 'What should change…',
         label: 'Add',
         send: text => this.act(runId => this.deps.holds.change(runId, text)),
       })
-      this.room(this.section(body, 'Ask the room'), hold)
+      this.room(this.section(body, 'room', 'Ask the room'), hold)
       const ticked = hold.canon.filter(line => line.ticked).length
-      if (hold.canon.length > 0) this.canon(this.section(body, `Canon · ${ticked} of ${hold.canon.length} ticked`), hold.canon, true)
+      if (hold.canon.length > 0) this.canon(this.section(body, 'canon', `Canon · ${ticked} of ${hold.canon.length} ticked`), hold.canon, true)
       return
     }
 
-    const top = this.section(body)
+    const top = this.section(body, `${proposal.name} top`)
     this.verbs(top, proposal, hold.proposals.map(one => one.name).filter(name => name !== proposal.name))
     const edit = this.editing(hold.runId, proposal.name)
     if (edit) this.drawEditor(top, proposal.name, edit)
     else this.proposalText(top, hold.runId, proposal.name, proposal.text, rewritten)
     const canon = hold.canon.filter(line => line.proposer === proposal.name)
-    if (canon.length > 0) this.canon(this.section(body, 'Canon from this proposal'), canon, false)
-    this.chat(this.section(body, `Chat with ${proposal.name}`), hold, proposal.name)
-    this.sideQuests(this.section(body, 'Side quest'), hold, proposal.name)
+    if (canon.length > 0) this.canon(this.section(body, `${proposal.name} canon`, 'Canon from this proposal'), canon, false)
+    this.chat(this.section(body, `${proposal.name} chat`, `Chat with ${proposal.name}`), hold, proposal.name)
+    this.sideQuests(this.section(body, `${proposal.name} quests`, 'Side quest'), hold, proposal.name)
   }
 
   private sideQuests(el: HTMLElement, hold: Hold, name: string): void {
@@ -252,7 +248,7 @@ export class DirectingBoard {
     }
     if (pending !== undefined && !sent) this.add(this.turn(el, `Sent through ${pending}`), 'div', `${CLS}-faint`, `${pending} is running…`)
     if (this.editing(hold.runId, name)) this.add(el, 'div', `${CLS}-faint`, 'Sends the proposal as last saved')
-    this.boxes.draw(el, {
+    this.box(el, {
       key,
       placeholder: 'Chain to send it through…',
       label: 'Go',
@@ -265,7 +261,10 @@ export class DirectingBoard {
     const link = this.add(el, 'a', `${CLS}-run-link`, `→ run ${shortId(runId)}`)
     link.title = `run ${runId}`
     const url = this.deps.runUrl(runId)
-    if (!url) return
+    if (!url) {
+      for (const attribute of ['href', 'target', 'rel']) link.removeAttribute(attribute)
+      return
+    }
     link.href = url
     link.target = '_blank'
     link.rel = 'noopener'
@@ -295,7 +294,7 @@ export class DirectingBoard {
       }
     }
     if (pending !== undefined && !sent) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, `${name} is replying…`)
-    this.boxes.draw(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.act(runId => this.deps.holds.chat(runId, name, text)) })
+    this.box(el, { key, placeholder: `Message ${name}…`, label: 'Send', send: text => this.act(runId => this.deps.holds.chat(runId, name, text)) })
   }
 
   private room(el: HTMLElement, hold: Hold): void {
@@ -312,7 +311,7 @@ export class DirectingBoard {
       }
     }
     if (pending !== undefined && !sent) this.add(this.turn(el, pending), 'div', `${CLS}-faint`, 'The room is answering…')
-    this.boxes.draw(el, { key, placeholder: 'Ask every proposal…', label: 'Ask', send: text => this.act(runId => this.deps.holds.askRoom(runId, text)) })
+    this.box(el, { key, placeholder: 'Ask every proposal…', label: 'Ask', send: text => this.act(runId => this.deps.holds.askRoom(runId, text)) })
   }
 
   /** One exchange: what was said, with whatever came back added under it by the caller. */
@@ -327,7 +326,7 @@ export class DirectingBoard {
     const label = going?.kind === 'reply' && sameTurn(going.turn, turn) ? 'Rerunning…' : 'Use this reply as the revision & rerun'
     const button = this.button(el, label, `${CLS}-quiet`)
     button.disabled = !this.canRerun(hold)
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'reply', turn }, (runId, onProgress) => this.deps.holds.revise(runId, turn, onProgress)))
+    button.onclick = (): void => void this.startRerun(hold, { kind: 'reply', turn }, (runId, onProgress) => this.deps.holds.revise(runId, turn, onProgress))
   }
 
   /** Pinned under every tab: the Direction run as it stands, and what the last run of it landed on. */
@@ -337,7 +336,7 @@ export class DirectingBoard {
     const running = shown?.kind === 'running'
     const button = this.button(bar, running ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
     button.disabled = running
-    button.addEventListener('click', () => void this.startResume(hold.runId))
+    button.onclick = (): void => void this.startResume(hold.runId)
     if (shown?.kind === 'running' && shown.progress?.step) this.add(bar, 'div', `${CLS}-progress`, rerunDoing(shown.progress.step))
     if (shown?.kind === 'stopped') this.add(bar, 'div', `${CLS}-faint`, 'Resume did not run.')
     if (shown?.kind === 'landed') this.resumeStatus(bar, shown.result)
@@ -380,8 +379,8 @@ export class DirectingBoard {
     const going = this.going(hold.runId)?.from
     const button = this.button(row, going?.kind === 'edits' ? 'Rerunning…' : '⟳ Rerun downstream', `mod-cta ${CLS}-rerun`)
     button.disabled = !this.canRerun(hold)
-    if (this.editOpen(hold)) button.title = 'Save or cancel the edit first'
-    button.addEventListener('click', () => void this.startRerun(hold, { kind: 'edits' }, (runId, onProgress) => this.deps.holds.rerun(runId, onProgress)))
+    titled(button, this.editOpen(hold) ? 'Save or cancel the edit first' : undefined)
+    button.onclick = (): void => void this.startRerun(hold, { kind: 'edits' }, (runId, onProgress) => this.deps.holds.rerun(runId, onProgress))
   }
 
   /** One rerun at a time per run, and none while an edit is open: the run it lands on would leave the edit behind. */
@@ -408,7 +407,7 @@ export class DirectingBoard {
     const going = this.going(hold.runId)
     const rewriting = going !== undefined && going.progress?.verdict !== false
     if (!hold.verdict && !rewriting) return
-    const section = this.section(body, 'Verdict')
+    const section = this.section(body, 'verdict', 'Verdict')
     if (rewriting) this.progress(section, going)
     if (!hold.verdict) return
     const old = this.add(section, 'div', `${CLS}-verdict`)
@@ -416,15 +415,13 @@ export class DirectingBoard {
     this.markdown(old, hold.verdict)
   }
 
-  /** The step a rerun is on, and how long it has gone. */
+  /** The step a rerun is on, and how long it has gone; the line keeps one timer while it is shown. */
   private progress(el: HTMLElement, going: Rerun): void {
-    const line = this.add(el, 'div', `${CLS}-progress`)
+    const { el: line, fresh } = this.tree.place(el, 'div', `${CLS}-progress`)
     const doing = rerunDoing(going.progress?.step)
-    const show = (): void => {
-      line.textContent = `${doing} ${elapsed(this.deps.clock.now() - going.startedAt)}`
-    }
-    show()
-    this.releases.push(this.deps.clock.every(1000, show))
+    const tick = this.tree.latest(line, () => void (line.textContent = `${doing} ${elapsed(this.deps.clock.now() - going.startedAt)}`))
+    tick()
+    if (fresh) this.tree.bind(line, this.deps.clock.every(1000, tick))
   }
 
   /** The panel follows the hold to the run the rerun lands on. */
@@ -449,16 +446,17 @@ export class DirectingBoard {
   }
 
   private tabButton(tabs: HTMLElement, label: string, proposal: string | undefined, selected: boolean, edited = false): void {
-    const tab = this.button(tabs, label, selected ? 'is-selected' : '')
+    const tab = this.button(tabs, label, '', proposal === undefined ? 'run' : `tab ${proposal}`)
+    tab.classList.toggle('is-selected', selected)
     tab.classList.toggle('is-edited', edited)
-    if (edited) tab.title = 'Edited since the run'
+    titled(tab, edited ? 'Edited since the run' : undefined)
     tab.setAttribute('role', 'tab')
     tab.setAttribute('aria-selected', String(selected))
-    tab.addEventListener('click', () => {
+    tab.onclick = (): void => {
       this.tab = proposal
       this.redraw()
       this.tabOpened()
-    })
+    }
   }
 
   /** A tab just opened shows its top, and the chains the engine names now. */
@@ -476,22 +474,25 @@ export class DirectingBoard {
         continue
       }
       const given = proposal.given.includes(verb)
-      const button = this.button(row, verb, given ? 'is-given' : '')
+      const button = this.button(row, verb, '', verb)
+      button.classList.toggle('is-given', given)
       button.setAttribute('aria-pressed', String(given))
-      button.addEventListener('click', () => this.direct(given, verb, proposal.name))
+      button.onclick = (): void => this.direct(given, verb, proposal.name)
     }
   }
 
   private combine(row: HTMLElement, proposal: HoldProposal, others: string[]): void {
-    const select = this.add(row, 'select', proposal.combinedWith.length > 0 ? 'dropdown is-given' : 'dropdown')
+    const select = this.add(row, 'select', 'dropdown')
+    select.classList.toggle('is-given', proposal.combinedWith.length > 0)
     select.disabled = others.length === 0
     this.option(select, '', 'COMBINE…')
     for (const other of others) this.option(select, other, `${proposal.combinedWith.includes(other) ? '✓' : '+'} ${other}`)
-    select.addEventListener('change', () => {
+    select.value = ''
+    select.onchange = (): void => {
       const other = select.value
       if (!other) return
       this.direct(proposal.combinedWith.includes(other), 'COMBINE', proposal.name, other)
-    })
+    }
   }
 
   /** A verb given, or taken back when it was. */
@@ -501,55 +502,57 @@ export class DirectingBoard {
   }
 
   private option(select: HTMLSelectElement, value: string, label: string): void {
-    const option = this.add(select, 'option', '', label)
+    const option = this.add(select, 'option', '', label, `option ${value}`)
     option.value = value
   }
 
   /** A `stale` proposal is being written again, so it is shown greyed. */
   private proposalText(el: HTMLElement, runId: string, name: string, text: string, stale: boolean): void {
-    const shown = this.add(el, 'div', `${CLS}-proposal`)
+    const { el: shown, fresh } = this.tree.place(el, 'div', `${CLS}-proposal`)
     shown.classList.toggle('is-stale', stale)
     this.markdown(shown, text || '*This proposal is empty.*')
     const whole = this.unclamped.has(name)
     shown.classList.toggle('is-clamped', !whole)
     const actions = this.add(el, 'div', `${CLS}-proposal-actions`)
     const toggle = this.button(actions, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
-    toggle.hidden = !whole
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
     edit.disabled = this.rewriting(runId, name)
-    edit.addEventListener('click', () => {
-      const open: OpenEdit = { editor: this.deps.openEditor(text, () => open.refreshSave()), saving: false, refreshSave: () => {} }
+    edit.onclick = (): void => {
+      const open: OpenEdit = { id: ++this.opened, editor: this.deps.openEditor(text, () => open.refreshSave()), saving: false, refreshSave: () => {} }
       this.shownFor(runId).edits.set(name, open)
       this.redraw()
-    })
-    toggle.addEventListener('click', () => {
+    }
+    toggle.onclick = (): void => {
       if (whole) this.unclamped.delete(name)
       else this.unclamped.add(name)
       this.redraw()
-    })
-    if (whole) return
-    this.releases.push(
-      this.deps.watchOverflow(shown, overflowing => {
+    }
+    // Shown whole, the toggle is always there to clamp it again.
+    const offer = this.tree.latest(shown, () => void (toggle.hidden = !this.unclamped.has(name) && !shown.classList.contains('is-overflowing')))
+    if (fresh) {
+      const watching = this.deps.watchOverflow(shown, overflowing => {
         shown.classList.toggle('is-overflowing', overflowing)
-        toggle.hidden = !overflowing
-      }),
-    )
+        offer()
+      })
+      this.tree.bind(shown, watching)
+    }
+    offer()
   }
 
-  /** The editor outlives the redraw, so it is put back rather than made again. */
+  /** The editor's frame is kept by the edit, so the editor is never moved while it is open (ADR-0012). */
   private drawEditor(el: HTMLElement, name: string, edit: OpenEdit): void {
-    const frame = this.add(el, 'div', `${CLS}-editor`)
-    frame.append(edit.editor.el)
+    const frame = this.add(el, 'div', `${CLS}-editor`, undefined, `editor ${edit.id}`)
+    this.tree.use(frame, 'editor', () => edit.editor.el)
     const row = this.add(frame, 'div', `${CLS}-editor-actions`)
     const save = this.button(row, 'Save', 'mod-cta')
     const savable = (): boolean => !edit.saving && edit.editor.text().trim() !== ''
     save.disabled = !savable()
     edit.refreshSave = () => void (save.disabled = !savable())
-    save.addEventListener('click', () => void this.save(name, edit))
-    this.button(row, 'Cancel', '').addEventListener('click', () => {
+    save.onclick = (): void => void this.save(name, edit)
+    this.button(row, 'Cancel', '').onclick = (): void => {
       this.closeEdit(edit)
       this.redraw()
-    })
+    }
   }
 
   /** By identity: a rerun landing moves an edit to the run it landed on. */
@@ -581,12 +584,12 @@ export class DirectingBoard {
 
   /** A hold the run waits at: its question, and a checkbox per candidate. */
   private waitingAt(body: HTMLElement, hold: HoldPick): void {
-    const el = this.section(body, `Waiting at ${hold.nodeId}`)
+    const el = this.section(body, `waiting ${hold.nodeId}`, `Waiting at ${hold.nodeId}`)
     el.classList.add(`${CLS}-hold`)
     if (hold.prompt) this.add(el, 'div', '', hold.prompt)
     if (hold.candidates.length === 0) this.add(el, 'div', `${CLS}-faint`, 'No candidates')
     for (const candidate of hold.candidates) {
-      this.checkbox(el, candidate.heading, candidate.ticked, ticked =>
+      this.checkbox(el, undefined, candidate.heading, candidate.ticked, ticked =>
         void this.act(runId => this.deps.holds.pickCandidate(runId, hold.nodeId, candidate.heading, ticked)),
       )
       this.markdown(el, candidate.body)
@@ -598,45 +601,54 @@ export class DirectingBoard {
     let proposer: string | undefined
     for (const line of lines) {
       if (grouped && line.proposer !== proposer) this.add(el, 'div', `${CLS}-faint`, (proposer = line.proposer))
-      this.checkbox(el, line.text, line.ticked, ticked => void this.act(runId => this.deps.holds.tickCanon(runId, line.id, ticked)))
+      this.checkbox(el, `canon ${line.id}`, line.text, line.ticked, ticked => void this.act(runId => this.deps.holds.tickCanon(runId, line.id, ticked)))
     }
   }
 
-  private checkbox(el: HTMLElement, text: string, ticked: boolean, changed: (ticked: boolean) => void): void {
-    const label = this.add(el, 'label', `${CLS}-canon`)
+  private checkbox(el: HTMLElement, key: string | undefined, text: string, ticked: boolean, changed: (ticked: boolean) => void): void {
+    const label = this.add(el, 'label', `${CLS}-canon`, undefined, key)
     const box = this.add(label, 'input')
     box.type = 'checkbox'
     box.checked = ticked
-    box.addEventListener('change', () => changed(box.checked))
+    box.onchange = (): void => changed(box.checked)
     this.add(label, 'span', '', text)
   }
 
-  private section(el: HTMLElement, title?: string): HTMLElement {
-    const section = this.add(el, 'div', `${CLS}-section`)
+  private section(el: HTMLElement, key: string, title?: string): HTMLElement {
+    const section = this.add(el, 'div', `${CLS}-section`, undefined, key)
     if (title) this.add(section, 'div', `${CLS}-section-title`, title)
     return section
   }
 
+  /** A typing box, in a row kept under the box's own key. */
+  private box(el: HTMLElement, box: TypingBox): void {
+    this.boxes.draw(this.add(el, 'div', '', undefined, box.key), box)
+  }
+
+  /** Renders `text` into a kept element, unless that is what it already shows. */
   private markdown(el: HTMLElement, text: string): void {
     const into = this.add(el, 'div', `${CLS}-markdown`)
-    this.releases.push(this.deps.renderMarkdown(text, into))
+    if (this.rendered.get(into) === text) return
+    this.tree.unbind(into)
+    into.replaceChildren()
+    this.rendered.set(into, text)
+    this.tree.bind(into, this.deps.renderMarkdown(text, into))
   }
 
-  private button(el: HTMLElement, text: string, cls: string): HTMLButtonElement {
-    return this.add(el, 'button', cls, text)
+  private button(el: HTMLElement, text: string, cls: string, key?: string): HTMLButtonElement {
+    return this.add(el, 'button', cls, text, key)
   }
 
-  private add<K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text?: string): HTMLElementTagNameMap[K] {
-    const el = parent.ownerDocument.createElement(tag)
-    if (cls) el.className = cls
-    if (text !== undefined) el.textContent = text
-    parent.append(el)
+  private add<K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls = '', text?: string, key?: string): HTMLElementTagNameMap[K] {
+    const { el } = this.tree.place(parent, tag, cls, key)
+    if (text !== undefined && el.textContent !== text) el.textContent = text
     return el
   }
 }
 
 /** A proposal being edited: the live editor, whether its words are on their way to the hold, and how its Save button hears about a change. */
 interface OpenEdit {
+  id: number
   editor: ProposalEditor
   saving: boolean
   refreshSave: () => void
@@ -679,6 +691,12 @@ function resumeLabel(canon: CanonChoice[]): string {
 function elapsed(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000))
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/** A kept element's title, set or taken away. */
+function titled(el: HTMLElement, title: string | undefined): void {
+  if (title === undefined) el.removeAttribute('title')
+  else el.title = title
 }
 
 function boxKey(runId: string, box: string): string {

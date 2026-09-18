@@ -13,11 +13,9 @@ import { tags } from '@lezer/highlight'
 
 /** A live editor the panel keeps across its redraws, rather than making a new one. */
 export interface ProposalEditor {
-  /** The same element on every redraw; the panel puts it back where the proposal shows. */
+  /** The same element for as long as the edit is open; the panel keeps it in one frame. */
   el: HTMLElement
   text(): string
-  hasFocus(): boolean
-  focus(): void
   destroy(): void
 }
 
@@ -40,8 +38,6 @@ export function markdownEditor(doc: Document, text: string, changed: () => void)
   return {
     el,
     text: () => view.state.doc.toString(),
-    hasFocus: () => view.hasFocus,
-    focus: () => view.focus(),
     destroy: () => {
       view.destroy()
       el.remove()

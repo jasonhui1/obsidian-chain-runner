@@ -95,6 +95,15 @@ describe('KeyedChildren', () => {
     expect(document.activeElement).toBe(el)
   })
 
+  it('makes an element the way the draw that first uses it says, keeping it after', () => {
+    const kids = children()
+    const given = document.createElement('textarea')
+    expect(kids.use('a', parent, () => given).el).toBe(given)
+    kids.end()
+    expect(kids.use('a', parent, () => document.createElement('p')).el).toBe(given)
+    expect(made).toEqual([])
+  })
+
   it('releases everything on a clear, for a draw that can reuse none of it', () => {
     const kids = children()
     kids.use('a', parent)

@@ -1,5 +1,6 @@
 export interface KeyedOptions {
-  make: (key: string) => HTMLElement
+  /** Makes an element for a key; `use` can say instead, for a set whose elements differ. */
+  make?: (key: string) => HTMLElement
   /** Every element a draw drops, so whatever hangs off it is released with it. */
   onRemove?: (key: string, el: HTMLElement) => void
 }
@@ -17,10 +18,10 @@ export class KeyedChildren {
 
   constructor(private readonly options: KeyedOptions) {}
 
-  /** The element for `key`, made if this draw is its first, placed in `parent`. */
-  use(key: string, parent: HTMLElement): { el: HTMLElement; fresh: boolean } {
+  /** The element for `key`, made by `make` if this draw is its first, placed in `parent`. */
+  use(key: string, parent: HTMLElement, make = this.options.make): { el: HTMLElement; fresh: boolean } {
     const known = this.els.get(key)
-    const el = known ?? this.options.make(key)
+    const el = known ?? made(key, make)
     if (!known) this.els.set(key, el)
     this.used.add(key)
     const after = this.tails.get(parent)
@@ -48,4 +49,9 @@ export class KeyedChildren {
     this.used.clear()
     this.end()
   }
+}
+
+function made(key: string, make: KeyedOptions['make']): HTMLElement {
+  if (!make) throw new Error(`nothing makes the element for ${key}`)
+  return make(key)
 }

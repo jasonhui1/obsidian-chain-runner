@@ -30,9 +30,9 @@ editor refuses to start, with a message that does not say so.
 **The editor is a live object the panel keeps, not markup it draws.**
 `src/ui/proposalEditor.ts` answers a `ProposalEditor` — an element, its words,
 its focus, and how to let go of it. `DirectingBoard` holds one per proposal being
-edited and re-appends the *same* element on every redraw, so text, cursor,
-selection and undo history are never rebuilt. The board finds the editor the
-reader was typing in before it empties its root, and focuses it after.
+edited, in a frame kept by key for as long as the edit is open (ADR-0007, #61),
+so the element is never moved and text, cursor, selection, focus and undo
+history are never rebuilt.
 
 **What each mark looks like lives in `styles.css`, not in the extension.** The
 highlight style names classes (`chain-runner-md-h1`, `chain-runner-md-mark`) and

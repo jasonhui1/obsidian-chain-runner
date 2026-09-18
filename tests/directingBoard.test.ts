@@ -171,8 +171,6 @@ const openEditor = (words: string, changed: () => void): FakeEditor => {
     el,
     destroyed: false,
     text: () => el.value,
-    hasFocus: () => document.activeElement === el,
-    focus: () => el.focus(),
     destroy: () => void (editor.destroyed = true),
   }
   editors.push(editor)
@@ -383,8 +381,11 @@ describe('tabs', () => {
     expect(selectedTab()).toBe('gameplay')
   })
 
-  it('releases every markdown render a redraw replaces', async () => {
+  it('renders again only the markdown whose words changed, releasing what it replaces', async () => {
     open()
+    await touched()
+    expect(released).toBe(0)
+    notes[PATH] = NOTE.replace('A combat trial in a void.', 'A quiet shrine.')
     await touched()
     expect(released).toBe(1)
   })
@@ -993,11 +994,10 @@ describe('a proposal tab, chatting', () => {
     box.focus()
     box.setSelectionRange(4, 4)
     await touched()
-    const again = composer('Message world…')
-    expect(again).not.toBe(box)
-    expect(again.value).toBe('half a thou')
-    expect(document.activeElement).toBe(again)
-    expect(again.selectionStart).toBe(4)
+    expect(composer('Message world…')).toBe(box)
+    expect(box.value).toBe('half a thou')
+    expect(document.activeElement).toBe(box)
+    expect(box.selectionStart).toBe(4)
   })
 
   it('keeps a draft to its own proposal', () => {
@@ -1125,6 +1125,86 @@ describe('the Run tab, talking to the room', () => {
     await settled()
     expect(text()).not.toContain('The room is answering…')
     expect(turns()[0]).toMatch(/gameplay.*Rotation\..*world.*The watcher\./)
+  })
+})
+
+describe('drawing by key (ADR-0007)', () => {
+  /** Every element under the panel, in document order. */
+  const all = (): Element[] => Array.from(root.querySelectorAll('*'))
+
+  it('keeps every element when the note changes and the hold reads the same', async () => {
+    open(hold(), 'world')
+    const before = all()
+    await touched()
+    expect(all()).toHaveLength(before.length)
+    all().forEach((el, index) => expect(el).toBe(before[index]))
+  })
+
+  it('keeps the Run tab’s elements, changing only the one the note changed', async () => {
+    open()
+    const before = all()
+    const verdict = root.querySelector('.chain-runner-directing-markdown')
+    const list = root.querySelector('.chain-runner-directing-direction')
+    notes[PATH] = NOTE.replace('A combat trial in a void.', 'A quiet shrine.').replace('KILL:', 'KILL: world')
+    await touched()
+    expect(root.querySelector('.chain-runner-directing-markdown')).toBe(verdict)
+    expect(verdict?.textContent).toBe('A quiet shrine.')
+    expect(root.querySelector('.chain-runner-directing-direction')).toBe(list)
+    expect(before.filter(el => !root.contains(el))).toEqual([])
+  })
+
+  it('keeps the room box, and what is typed there, when the note changes', async () => {
+    open()
+    const box = composer('Ask every proposal…')
+    type(box, 'half a que')
+    box.focus()
+    box.setSelectionRange(5, 5)
+    await touched()
+    expect(composer('Ask every proposal…')).toBe(box)
+    expect(document.activeElement).toBe(box)
+    expect(box.selectionStart).toBe(5)
+  })
+
+  it('keeps the editor in the one frame while a rerun streams', async () => {
+    feed = new Feed()
+    notes[PATH] = EDITED
+    await openNote('world')
+    button('⟳ Rerun downstream').click()
+    await settled()
+    feed.push(...started(NEW), waitingOn('creative-director'))
+    await settled()
+    button('✎ Edit').click()
+    const frame = root.querySelector('.chain-runner-directing-editor')
+    const progress = root.querySelector('.chain-runner-directing-footer')
+    feed.push(stepOn('creative-director'))
+    await settled()
+    expect(root.querySelector('.chain-runner-directing-editor')).toBe(frame)
+    expect(frame?.firstElementChild).toBe(editors[0]!.el)
+    expect(root.querySelector('.chain-runner-directing-footer')).toBe(progress)
+  })
+
+  it('keeps the rerun’s progress line while its step changes', async () => {
+    feed = new Feed()
+    notes[PATH] = EDITED
+    await openNote()
+    button('⟳ Rerun downstream').click()
+    await settled()
+    feed.push(...started(NEW), waitingOn('creative-director'))
+    await settled()
+    const line = root.querySelector('.chain-runner-directing-progress')
+    feed.push(stepOn('creative-director'))
+    await settled()
+    expect(root.querySelector('.chain-runner-directing-progress')).toBe(line)
+    expect(line?.textContent).toContain('Writing a new verdict')
+    expect(timers.size).toBe(1)
+  })
+
+  it('gives a tab its own elements, and lets them go when another tab opens', () => {
+    open(hold(), 'world')
+    const world = root.querySelector('.chain-runner-directing-proposal')
+    button('gameplay').click()
+    expect(root.querySelector('.chain-runner-directing-proposal')).not.toBe(world)
+    expect(world?.isConnected).toBe(false)
   })
 })
 
