@@ -368,8 +368,8 @@ export class DirectingBoard {
       if (result) outcome = { kind: 'landed', result }
     } finally {
       shown.resume = outcome
-      // A fork is shown as its own hold, which says what landed it.
-      if (outcome.kind === 'landed') this.shownFor(outcome.result.hold.runId).resume = outcome
+      // A fork is shown as its own hold, which says what landed it — unless the panel let go of the run meanwhile.
+      if (outcome.kind === 'landed' && [...this.runs.values()].includes(shown)) this.shownFor(outcome.result.hold.runId).resume = outcome
       if (outcome.kind !== 'landed' || !this.landed(runId, outcome.result.hold)) this.redraw()
     }
   }

@@ -4,7 +4,8 @@ import { DirectingBoard, type MenuItem } from '@/ui/directingBoard'
 import { Holds, type Hold } from '@/ui/holds'
 import type { ProposalEditor } from '@/ui/proposalEditor'
 import { RerunWatch } from '@/run/rerunWatch'
-import type { AgentOutput, ChatEvent, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import type { ChatEvent, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import { answer, layoutFrame, output, panel, started } from './engineFrames'
 import { MemoryNoteStore } from './memoryNoteStore'
 import { stubEngine } from './stubEngine'
 
@@ -77,22 +78,8 @@ const hold = (over: Partial<Hold> = {}): Hold => ({
   ...over,
 })
 
-const panel = (name: string, text: string, state: LayoutPanel['state'] = 'filled', emphasis?: 'join'): LayoutPanel => ({
-  name,
-  node: name,
-  text,
-  lines: 1,
-  state,
-  ...(emphasis ? { emphasis } : {}),
-})
-
-const panels = (...waiting: string[]): LayoutPanel[] => [
-  panel('gameplay', 'Rotate abilities mid-fight.', waiting.includes('gameplay') ? 'pending' : 'filled'),
-  panel('world', 'A controlled test.', waiting.includes('world') ? 'pending' : 'filled'),
-  panel('creative-director', 'A combat trial in a void.', waiting.includes('creative-director') ? 'pending' : 'filled', 'join'),
-]
-
-const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
+/** What the run wrote, as the note shows it. */
+const PANELS = [panel('gameplay', 'Rotate abilities mid-fight.'), panel('world', 'A controlled test.'), panel('creative-director', 'A combat trial in a void.', 'join')]
 
 const theRun = (runId: string): RunMeta => ({
   runId,
@@ -109,11 +96,10 @@ const theRun = (runId: string): RunMeta => ({
   },
 })
 
-const started = (runId: string): RunEvent => ({ type: 'run_start', runId })
 const complete = (runId: string): RunEvent => ({ type: 'run_complete', runId })
-const layoutFrame = (...waiting: string[]): RunEvent => ({ type: 'layout', model: { kind: 'columns', panels: panels(...waiting) } })
+/** The frame a rerun of this hold sends, the named panels still waiting. */
+const waitingOn = (...waiting: string[]): RunEvent => layoutFrame(PANELS, ...waiting)
 const stepOn = (nodeId: string, agentName = nodeId): RunEvent => ({ type: 'agent_start', agentName, nodeId, step: 0 })
-const answer = (agentName: string, text: string): RunEvent => ({ type: 'agent_done', agentName, nodeId: agentName, step: 0, output: output(agentName, text) })
 
 /** A stream the test feeds a frame at a time, and ends. */
 class Feed<T> {
@@ -206,13 +192,13 @@ function makeHolds(): Holds {
   const engine = stubEngine({
     capabilities: () => Promise.resolve({}),
     getRun: (runId: string) => Promise.resolve(theRun(runId)),
-    getLayout: () => Promise.resolve({ kind: 'columns', panels: panels() }),
+    getLayout: () => Promise.resolve({ kind: 'columns', panels: PANELS }),
     waitingRun: () => Promise.resolve(undefined),
     launchRun: (request: RunRequest) => {
       requests.push(request)
       if (request.branchedFromRunId) return stream(() => rerunFrames)
       if (request.agentName) return stream(() => framesByAgent[request.agentName!] ?? [])
-      return stream(() => [started(QUEST), complete(QUEST)])
+      return stream(() => [...started(QUEST), complete(QUEST)])
     },
     resumeRun: (runId: string) => {
       resumed.push(runId)
@@ -342,8 +328,8 @@ beforeEach(() => {
   promoted = []
   chats = []
   framesByAgent = {}
-  rerunFrames = [started(NEW), complete(NEW)]
-  resumeFrames = [started(RUN), complete(RUN)]
+  rerunFrames = [...started(NEW), complete(NEW)]
+  resumeFrames = [...started(RUN), complete(RUN)]
   chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Because it is.' } }]
   holds = makeHolds()
 })
@@ -675,14 +661,14 @@ describe('a rerun going', () => {
     await openNote(proposal)
     button('⟳ Rerun downstream').click()
     await settled()
-    feed.push(started(NEW), ...frames)
+    feed.push(...started(NEW), ...frames)
     await settled()
   }
 
   beforeEach(() => void (notes[PATH] = EDITED))
 
   it('shows the step and a timer over the old verdict, greyed out, on the Run tab', async () => {
-    await rerunning(undefined, layoutFrame('creative-director'), stepOn('creative-director'))
+    await rerunning(undefined, waitingOn('creative-director'), stepOn('creative-director'))
     tick(42)
     expect(progress()).toEqual(['⟳ Writing a new verdict… 0:42'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
@@ -693,20 +679,20 @@ describe('a rerun going', () => {
     await rerunning()
     expect(progress()).toEqual(['⟳ Starting the rerun… 0:00'])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
-    feed!.push(layoutFrame('creative-director'))
+    feed!.push(waitingOn('creative-director'))
     await settled()
     expect(progress()).toEqual(['⟳ Starting the rerun… 0:00'])
     expect(stale('.chain-runner-directing-verdict')).toBe(true)
   })
 
   it('names a step that is not the verdict as running', async () => {
-    await rerunning(undefined, layoutFrame('creative-director'), stepOn('scratch', 'critic'))
+    await rerunning(undefined, waitingOn('creative-director'), stepOn('scratch', 'critic'))
     tick(65)
     expect(progress()).toEqual(['⟳ critic is running… 1:05'])
   })
 
   it('leaves the verdict as it is when the rerun does not write it again', async () => {
-    await rerunning(undefined, layoutFrame('world'), stepOn('world'))
+    await rerunning(undefined, waitingOn('world'), stepOn('world'))
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
   })
@@ -714,7 +700,7 @@ describe('a rerun going', () => {
   it('shows nothing on a proposal tab the rerun does not write again, and lets it be edited', async () => {
     await rerunning('world')
     expect(button('✎ Edit').disabled).toBe(true)
-    feed!.push(layoutFrame('creative-director'), stepOn('creative-director'))
+    feed!.push(waitingOn('creative-director'), stepOn('creative-director'))
     await settled()
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-proposal')).toBe(false)
@@ -722,7 +708,7 @@ describe('a rerun going', () => {
   })
 
   it('shows the line under the tabs, over the greyed proposal, on a tab the rerun writes again', async () => {
-    await rerunning('world', layoutFrame('world', 'creative-director'), stepOn('world'))
+    await rerunning('world', waitingOn('world', 'creative-director'), stepOn('world'))
     expect(progress()).toEqual(['⟳ world is running… 0:00'])
     expect(root.querySelector('.chain-runner-directing-tabs')?.nextElementSibling?.className).toBe('chain-runner-directing-progress')
     expect(stale('.chain-runner-directing-proposal')).toBe(true)
@@ -730,7 +716,7 @@ describe('a rerun going', () => {
   })
 
   it('carries an open edit onto the run the rerun lands on', async () => {
-    await rerunning('world', layoutFrame('creative-director'))
+    await rerunning('world', waitingOn('creative-director'))
     button('✎ Edit').click()
     type(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!, 'A theme park.')
     feed!.end(complete(NEW))
@@ -741,7 +727,7 @@ describe('a rerun going', () => {
   })
 
   it('closes an edit saved while the rerun lands', async () => {
-    await rerunning('world', layoutFrame('creative-director'))
+    await rerunning('world', waitingOn('creative-director'))
     button('✎ Edit').click()
     type(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!, 'A theme park.')
     button('Save').click()
@@ -758,7 +744,7 @@ describe('a rerun going', () => {
     button('Use this reply as the revision & rerun').click()
     await settled()
     expect(promoted).toEqual([{ nodeId: 'world', turn: 2 }])
-    feed.push(started(NEW), layoutFrame('creative-director'), stepOn('creative-director'))
+    feed.push(...started(NEW), waitingOn('creative-director'), stepOn('creative-director'))
     await settled()
     expect(progress()).toEqual([])
     button('Run').click()
@@ -767,7 +753,7 @@ describe('a rerun going', () => {
   })
 
   it('puts the panel back as it was when the rerun lands nowhere', async () => {
-    await rerunning(undefined, layoutFrame('creative-director'), stepOn('creative-director'))
+    await rerunning(undefined, waitingOn('creative-director'), stepOn('creative-director'))
     feed!.end({ type: 'error', error: 'the chain broke' })
     await settled()
     expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
@@ -787,7 +773,7 @@ describe('a rerun going', () => {
     made.show(NONE, undefined)
     expect(progress()).toEqual([])
     expect(timers.size).toBe(0)
-    feed.end(started(NEW), complete(NEW))
+    feed.end(...started(NEW), complete(NEW))
     await settled()
     expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
   })
@@ -1126,7 +1112,7 @@ describe('the Run tab, talking to the room', () => {
 
   it('asks the room what is typed, and says the room is answering until it has', async () => {
     holdEngine()
-    framesByAgent = { gameplay: [answer('gameplay', 'Rotation.')], world: [answer('world', 'The watcher.')] }
+    framesByAgent = { gameplay: answer('gameplay', 'Rotation.'), world: answer('world', 'The watcher.') }
     open()
     type(composer('Ask every proposal…'), 'what is the hook?')
     button('Ask').click()
@@ -1198,7 +1184,7 @@ describe('resume', () => {
   })
 
   it('follows a resume that forks to the fork’s own hold, and says so there', async () => {
-    resumeFrames = [started(RESUMED), complete(RESUMED)]
+    resumeFrames = [...started(RESUMED), complete(RESUMED)]
     open(hold(), 'gameplay')
     button(RESUME).click()
     await settled()
@@ -1206,6 +1192,20 @@ describe('resume', () => {
     expect(selectedTab()).toBe('gameplay')
     expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe(`http://engine/history/${RESUMED}`)
     expect(footer()).toContain('Resumed')
+  })
+
+  it('holds nothing of a resume that lands after the panel went away', async () => {
+    holdEngine()
+    resumeFrames = [...started(RESUMED), complete(RESUMED)]
+    const made = open()
+    button(RESUME).click()
+    await settled()
+    made.close()
+    release()
+    await settled()
+    expect(text()).toContain('Click a card')
+    made.show(RESUMED, await holds.read(RESUMED))
+    expect(footer()).not.toContain('Resumed')
   })
 
   it('keeps the reader on their tab — what the run wrote comes back in the hold itself', async () => {
@@ -1220,13 +1220,13 @@ describe('resume', () => {
     open()
     button(RESUME).click()
     await settled()
-    feed.push(started(RUN), layoutFrame('creative-director'), stepOn('creative-director'))
+    feed.push(...started(RUN), waitingOn('creative-director'), stepOn('creative-director'))
     await settled()
     expect(footer()).toContain('⟳ Writing a new verdict…')
   })
 
   it('says a run failed, and that its canon was held back', async () => {
-    resumeFrames = [started(RUN), { type: 'error', error: 'the model refused' }]
+    resumeFrames = [...started(RUN), { type: 'error', error: 'the model refused' }]
     open()
     button(RESUME).click()
     await settled()

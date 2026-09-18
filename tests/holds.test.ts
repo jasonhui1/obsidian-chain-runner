@@ -24,13 +24,13 @@ import type {
   ChatMessage,
   HoldRecord,
   LayoutModel,
-  LayoutPanel,
   PromoteRequest,
   ResumeRequest,
   RunEvent,
   RunMeta,
   RunRequest,
 } from '@/engine/types'
+import { answer, layoutFrame, output, panel, started } from './engineFrames'
 import { MemoryNoteStore } from './memoryNoteStore'
 import { stubEngine } from './stubEngine'
 
@@ -130,17 +130,6 @@ const RESUMED_PATH = `Maestro/holds/${RESUMED}.md`
 const ENGINE_URL = 'http://localhost:4000'
 const CANON = 'context/canon-anime-game.md'
 
-const panel = (name: string, text: string, emphasis?: 'join'): LayoutPanel => ({
-  name,
-  node: name,
-  text,
-  lines: 1,
-  state: 'filled',
-  ...(emphasis ? { emphasis } : {}),
-})
-
-const output = (nodeId: string, text: string): AgentOutput => ({ nodeId, agentName: nodeId, output: text, status: 'success', timestamp: '' })
-
 /** A human's words replayed in place of a node's output: nothing ran, so nothing was spent. */
 const revision = (nodeId: string, text: string): AgentOutput => ({ ...output(nodeId, text), tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 })
 
@@ -150,17 +139,8 @@ const WORLD = '## The rule\nThe world is a test — and someone is watching.\n\n
 /** What the run wrote: each proposal as the hold note shows it, unedited. */
 const panels = [panel('gameplay', GAMEPLAY), panel('world', WORLD), panel('creative-director', 'A combat trial in a void.', 'join')]
 
-/** The frame a rerun sends: every panel filled but those named, still waiting. */
-const layoutFrame = (...waiting: string[]): RunEvent => ({
-  type: 'layout',
-  model: { kind: 'columns', panels: panels.map(one => (waiting.includes(one.node) ? { ...one, state: 'pending' as const } : one)) },
-})
-
-const answer = (agentName: string, text: string): RunEvent[] => [
-  { type: 'agent_done', agentName, nodeId: agentName, step: 0, output: output(agentName, text) },
-]
-
-const started = (runId: string): RunEvent[] => [{ type: 'run_start', runId }]
+/** The frame a rerun of this hold sends, the named panels still waiting. */
+const waitingOn = (...waiting: string[]): RunEvent => layoutFrame(panels, ...waiting)
 
 const questRun: RunMeta = {
   runId: QUEST,
@@ -808,7 +788,7 @@ describe('rerun', () => {
   it('tells the caller and the watch what it writes again, then each step the engine starts', async () => {
     rerunFrames = [
       ...started(NEW),
-      layoutFrame('creative-director'),
+      waitingOn('creative-director'),
       { type: 'agent_start', agentName: 'critic', nodeId: 'scratch', step: 0 },
       { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 1 },
       { type: 'run_complete', runId: NEW },
@@ -945,7 +925,7 @@ describe('resume', () => {
   })
 
   it('tells the caller how the run is getting on', async () => {
-    resumeFrames = [...started(RUN), layoutFrame('creative-director'), { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 }]
+    resumeFrames = [...started(RUN), waitingOn('creative-director'), { type: 'agent_start', agentName: 'director', nodeId: 'creative-director', step: 0 }]
     const heard: RerunProgress[] = []
     await makeHolds().resume(RUN, progress => heard.push(progress))
     expect(heard.at(-1)?.step).toEqual({ name: 'creative-director', writesVerdict: true })
