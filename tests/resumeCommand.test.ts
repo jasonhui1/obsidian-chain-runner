@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { NOT_A_HOLD_NOTE, Resume } from '@/ui/resume'
+import { UNSUPPORTED_RESUME } from '@/run/resume'
 import type { EngineClient } from '@/engine/client'
 import { EngineHttpError } from '@/engine/transport'
-import type { RunEvent } from '@/engine/types'
+import type { Capabilities, RunEvent } from '@/engine/types'
 import type { App, TFile } from 'obsidian'
 import { TFile as StubFile, TFolder } from './obsidian'
 
@@ -43,6 +44,7 @@ let refusal: unknown
 let refreshed: string[]
 let openedForks: string[]
 let refuseWrites: boolean
+let capabilities: Capabilities
 
 function file(path: string): TFile {
   const stub = new StubFile()
@@ -85,6 +87,7 @@ function makeResume(): Resume {
   } as unknown as App
 
   const engine = {
+    loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
     resumeRun: function* (runId: string, request: unknown) {
       requests.push({ runId, request })
       if (refusal) throw refusal
@@ -115,9 +118,19 @@ beforeEach(() => {
   refreshed = []
   openedForks = []
   refuseWrites = false
+  capabilities = { runResume: true }
 })
 
 describe('start', () => {
+  it('asks nothing of an engine that says it cannot resume, leaves the note, and says so', async () => {
+    capabilities = { runResume: false }
+    const before = notes[HOLD_PATH]
+    await makeResume().start()
+    expect(requests).toEqual([])
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([UNSUPPORTED_RESUME])
+  })
+
   it('says there is nothing to resume when no note is open', async () => {
     active = undefined
     await makeResume().start()

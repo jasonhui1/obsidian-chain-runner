@@ -1,4 +1,5 @@
 import { engineFailureMessage, engineSaid } from '../engine/guard'
+import { disclaims, mayLackRoute } from '../engine/capabilities'
 import { EngineHttpError } from '../engine/transport'
 import { latestOutput } from './chat'
 import type { EngineClient } from '../engine/client'
@@ -25,14 +26,6 @@ export type ChatOutcome =
   | { kind: 'refused'; said: string }
   | { kind: 'unsupported' }
 
-/**
- * Whether the engine has the chat endpoint: `undefined` on one too old to say,
- * which only the call itself can find out (ADR-0017, #54).
- */
-export function chatsWithNodes(capabilities: Capabilities): boolean | undefined {
-  return capabilities.proposerChat
-}
-
 /** The engine turns already on a node: the assistant replies its transcript holds. */
 export function repliesSoFar(outputs: AgentOutput[], nodeId: string): number {
   return (latestOutput(outputs, nodeId)?.conversation ?? []).filter(message => message.role === 'assistant').length
@@ -43,7 +36,7 @@ export function repliesSoFar(outputs: AgentOutput[], nodeId: string): number {
  * show, never a throw; only an unreachable engine still throws.
  */
 export async function chatReply(engine: EngineClient, capabilities: Capabilities, chat: ProposerChat): Promise<ChatOutcome> {
-  if (chatsWithNodes(capabilities) === false) return { kind: 'unsupported' }
+  if (disclaims(capabilities, 'proposerChat')) return { kind: 'unsupported' }
   try {
     let outcome: ChatOutcome = { kind: 'refused', said: `Chat with ${chat.name} produced no reply` }
     for await (const event of engine.chatWithNode({ runId: chat.runId, nodeId: chat.nodeId, message: chat.message })) {
@@ -55,7 +48,7 @@ export async function chatReply(engine: EngineClient, capabilities: Capabilities
     if (!(error instanceof EngineHttpError)) throw error
     // The node comes from the run's own layout, so a 404 from an engine that
     // never claimed the endpoint is the route missing, not the node (#54).
-    if (error.status === 404 && chatsWithNodes(capabilities) === undefined) return { kind: 'unsupported' }
+    if (mayLackRoute(error, capabilities, 'proposerChat')) return { kind: 'unsupported' }
     return { kind: 'refused', said: refusal(error, chat) }
   }
 }

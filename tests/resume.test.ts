@@ -1,14 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { resumeRequest, runResume } from '@/run/resume'
+import { resumeRequest, runResume, UNSUPPORTED_RESUME } from '@/run/resume'
 import type { EngineClient } from '@/engine/client'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
 import type { HoldPick } from '@/run/holdNote'
-import type { RunEvent } from '@/engine/types'
+import type { Capabilities, RunEvent } from '@/engine/types'
 
 /**
  * Resume's call, apart from the vault: what it asks the engine for, what it
  * reads back out of the run stream, and what it says to each refusal.
  */
+
+const RESUMES: Capabilities = { runResume: true }
 
 const DIRECTION = 'KEEP:\nCHANGE: faster combat\nKILL:\nCANON?\n- [x] halo = burden — character-director\n'
 
@@ -104,7 +106,7 @@ describe('runResume', () => {
 
   it('reports the run id the stream names up front', async () => {
     const engine = stubEngine([{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-15-Ab3dE1' }, forked: false })
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-15-Ab3dE1' }, forked: false })
   })
 
   it('takes the run id from the stream, not the run it was posted to, so a fork is followed', async () => {
@@ -112,7 +114,7 @@ describe('runResume', () => {
       { type: 'run_start', runId: '2026-09-20-Forked' },
       { type: 'run_complete', runId: '2026-09-20-Forked' },
     ])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-20-Forked' }, forked: true })
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { runId: '2026-09-20-Forked' }, forked: true })
   })
 
   it('reads the run event set, so a hold the continued run reaches names its run', async () => {
@@ -122,7 +124,7 @@ describe('runResume', () => {
       nodeId: 'decider',
       hold: { nodeId: 'decider', input: '', candidates: [], reachedAt: '' },
     }
-    expect(await runResume(stubEngine([waiting]), '2026-09-15-Ab3dE1', request)).toEqual({
+    expect(await runResume(stubEngine([waiting]), RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'ran',
       outcome: { runId: '2026-09-15-Ab3dE1' },
       forked: false,
@@ -134,7 +136,7 @@ describe('runResume', () => {
       { type: 'run_start', runId: '2026-09-15-Ab3dE1' },
       { type: 'error', error: 'the model refused' },
     ])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'ran',
       outcome: { runId: '2026-09-15-Ab3dE1', error: 'the model refused' },
       forked: false,
@@ -143,12 +145,12 @@ describe('runResume', () => {
 
   it('answers with no run id at all when the stream never named one', async () => {
     const engine = stubEngine([{ type: 'error', error: 'nothing to resume' }])
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { error: 'nothing to resume' }, forked: false })
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'ran', outcome: { error: 'nothing to resume' }, forked: false })
   })
 
   it('says a still-running run cannot be resumed yet, rather than throwing', async () => {
     const engine = refusingEngine(new EngineHttpError(409, '/resume', '{"error":"run is running"}'))
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
       said: 'Run 2026-09-15-Ab3dE1 cannot be resumed yet: run is running',
     })
@@ -156,12 +158,12 @@ describe('runResume', () => {
 
   it('falls back to the status when a 409 carries no reason', async () => {
     const engine = refusingEngine(new EngineHttpError(409, '/resume', ''))
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toMatchObject({ said: expect.stringContaining('engine error 409') })
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toMatchObject({ said: expect.stringContaining('engine error 409') })
   })
 
   it('says the hold is gone on a 404', async () => {
     const engine = refusingEngine(new EngineHttpError(404, '/resume', 'no such hold'))
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
       said: 'Run 2026-09-15-Ab3dE1 no longer has the hold this note answers',
     })
@@ -169,7 +171,7 @@ describe('runResume', () => {
 
   it('passes the engine own reason on for a 400 — a bad pick, both picks, a blank direction', async () => {
     const engine = refusingEngine(new EngineHttpError(400, '/resume', '{"error":"chosen and custom are exclusive"}'))
-    expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
+    expect(await runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
       said: 'The engine would not resume run 2026-09-15-Ab3dE1: chosen and custom are exclusive',
     })
@@ -177,6 +179,24 @@ describe('runResume', () => {
 
   it('leaves an unreachable engine to the guard, which is not the hold business', async () => {
     const engine = refusingEngine(new EngineOfflineError('http://engine', new Error('boom')))
-    await expect(runResume(engine, '2026-09-15-Ab3dE1', request)).rejects.toBeInstanceOf(EngineOfflineError)
+    await expect(runResume(engine, RESUMES, '2026-09-15-Ab3dE1', request)).rejects.toBeInstanceOf(EngineOfflineError)
+  })
+
+  it('asks nothing of an engine that says it cannot resume, and says so', async () => {
+    const engine = refusingEngine(new Error('never called'))
+    expect(await runResume(engine, { runResume: false }, '2026-09-15-Ab3dE1', request)).toEqual({ kind: 'refused', said: UNSUPPORTED_RESUME })
+  })
+
+  it('on a 404 from an engine too old to say, allows that the endpoint may be what is missing', async () => {
+    const engine = refusingEngine(new EngineHttpError(404, '/resume', 'Not Found'))
+    expect(await runResume(engine, {}, '2026-09-15-Ab3dE1', request)).toEqual({
+      kind: 'refused',
+      said: 'Run 2026-09-15-Ab3dE1 no longer has the hold this note answers — or this engine cannot resume a hold. Update maestro-playground if so.',
+    })
+  })
+
+  it('still asks an engine too old to say, which may have the endpoint all the same', async () => {
+    const engine = stubEngine([{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }])
+    expect(await runResume(engine, {}, '2026-09-15-Ab3dE1', request)).toMatchObject({ kind: 'ran' })
   })
 })

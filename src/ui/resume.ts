@@ -75,7 +75,11 @@ export class Resume {
     const canon = await readIfPresent(this.deps.app, canonPath)
     const request = resumeRequest({ direction, holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
 
-    const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request))
+    const { engine } = this.deps
+    const resumed = await this.deps.withEngine(async () => {
+      const { capabilities } = await engine.loadWorkspace()
+      return runResume(engine, capabilities, heading.runId, request)
+    })
     if (!resumed) return undefined
     if (resumed.kind === 'refused') {
       this.deps.notify(resumed.said)

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { ChatWithProposer, NOTHING_TO_SEND, NOT_A_HOLD_NOTE, NOT_A_PROPOSER, NOT_THE_ENGINE_S } from '@/ui/chatWithProposer'
 import { holdNoteContent } from '@/run/holdNote'
 import { RerunWatch } from '@/run/rerunWatch'
+import { UNSUPPORTED_PROMOTE } from '@/run/promote'
 import type { EngineClient } from '@/engine/client'
 import { EngineHttpError } from '@/engine/transport'
 import type {
@@ -162,7 +163,7 @@ beforeEach(() => {
   runFrames = []
   online = true
   requests = []
-  capabilities = { proposerChat: true }
+  capabilities = { proposerChat: true, nodePromote: true }
   chatFrames = []
   chatRefusal = undefined
   chats = []
@@ -381,6 +382,15 @@ describe('start, revising from a reply', () => {
     await makeCommand().start()
     expect(notes[HOLD_PATH]).toBe(before)
     expect(notices).toEqual([notice])
+  })
+
+  it('leaves the note as it was and says so when the engine cannot promote', async () => {
+    notes[HOLD_PATH] = toRevise(2)
+    const before = notes[HOLD_PATH]
+    capabilities = { proposerChat: true, nodePromote: false }
+    await makeCommand().start()
+    expect(notes[HOLD_PATH]).toBe(before)
+    expect(notices).toEqual([UNSUPPORTED_PROMOTE])
   })
 
   it('leaves the note as it was when the run the promotion started failed', async () => {

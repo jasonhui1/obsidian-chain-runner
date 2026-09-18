@@ -187,7 +187,10 @@ export class ChatWithProposer {
       ...(canon !== undefined ? { canon } : {}),
     }
 
-    return streamIntoHold(this.deps, file, heading, onEvent => runPromote(engine, promote, onEvent), {
+    return streamIntoHold(this.deps, file, heading, async onEvent => {
+      const { capabilities } = await engine.loadWorkspace()
+      return runPromote(engine, capabilities, promote, onEvent)
+    }, {
       beforeRefresh: mark,
       onProgress,
       edits: { before: source.layout.panels, sent: {}, revised: panel.node },

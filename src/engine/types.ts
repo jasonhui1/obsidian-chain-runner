@@ -186,6 +186,15 @@ export interface Capabilities {
   runFailureFrame?: boolean
   /** `POST /api/runs/:id/nodes/:nodeId/chat` continues a node's own transcript (#54). */
   proposerChat?: boolean
+  /**
+   * A run can stop `waiting` at a hold node: `holds[]` on its meta, `run_waiting`
+   * on its stream. Nothing gates on it: without them a hold note says the chain ended (#54).
+   */
+  runHolds?: boolean
+  /** `POST /api/runs/:id/resume` answers a hold and carries the run on (#54). */
+  runResume?: boolean
+  /** `POST /api/runs/:id/nodes/:nodeId/promote` makes a chat reply the node's output (#54). */
+  nodePromote?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
