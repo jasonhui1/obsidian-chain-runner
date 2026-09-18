@@ -297,27 +297,24 @@ export class Holds {
     const found = await this.locateOrRefuse(runId)
     if (!found) return undefined
     const revise = kind === 'chat' ? pendingRevise(found.content) : undefined
-    if (revise?.reply !== undefined) return this.revised(found, { ...revise, reply: revise.reply }, markRevised)
+    if (revise?.reply !== undefined) return this.revised(runId, { ...revise, reply: revise.reply }, markRevised)
     const trigger = unanswered(readHold(found.content, [])?.conversation ?? [], kind)
     return trigger ? this.answer(found, trigger) : this.refuse(NOTHING_PENDING[kind])
   }
 
   /** The edited proposals rerun downstream; the hold lands on the run that ran. */
-  async rerun(runId: string): Promise<Landing | undefined> {
-    const found = await this.locateOrRefuse(runId)
-    return found && this.exclusive(found, { kind: 'edits' }, report => this.rerunDownstream(found, report))
+  rerun(runId: string): Promise<Landing | undefined> {
+    return this.exclusive(runId, { kind: 'edits' }, (found, report) => this.rerunDownstream(found, report))
   }
 
   /** A reply made its proposal's revision through the engine's promote; the hold lands where the stream names. */
-  async revise(runId: string, turn: RepliedTurn): Promise<Landing | undefined> {
-    const found = await this.locateOrRefuse(runId)
-    return found && this.revised(found, turn, (content, newRunId) => markTurnRevised(content, turn, newRunId))
+  revise(runId: string, turn: RepliedTurn): Promise<Landing | undefined> {
+    return this.revised(runId, turn, (content, newRunId) => markTurnRevised(content, turn, newRunId))
   }
 
   /** The hold answered and the run carried on: ticks locked, the run linked back, a fork given its own hold. */
-  async resume(runId: string): Promise<Resumed | undefined> {
-    const found = await this.locateOrRefuse(runId)
-    return found && this.exclusive(found, { kind: 'resume' }, report => this.resumed(found, report))
+  resume(runId: string): Promise<Resumed | undefined> {
+    return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report))
   }
 
   private pathOf(runId: string): string {
@@ -524,15 +521,23 @@ export class Holds {
     return { runId: ran, ...(url ? { url } : {}), result: landed.agentOutputs.at(-1)?.output ?? '' }
   }
 
-  /** One rerun, revise or resume at a time per hold, its earlier runs included, held by the watch while it goes. */
-  private async exclusive<T>(found: Located, cause: RerunCause, act: (report: RerunReport) => Promise<T | undefined>): Promise<T | undefined> {
-    const { reruns } = this.deps
-    if (found.runIds.some(runId => reruns.going(runId))) return this.refuse(ALREADY_GOING)
-    const report = reruns.begin(found.runIds, cause)
+  /**
+   * One rerun, revise or resume at a time per hold, its earlier runs included, held by the watch.
+   * A hold called by the run it is under is held from the call on, so a second press already finds it going.
+   */
+  private async exclusive<T>(runId: string, cause: RerunCause, act: (found: Located, report: RerunReport) => Promise<T | undefined>): Promise<T | undefined> {
+    const { reruns, store } = this.deps
+    const underIt = store.at(this.pathOf(runId)) === 'note'
+    let report = underIt ? reruns.begin([runId], cause) : undefined
+    if (underIt && !report) return this.refuse(ALREADY_GOING)
     try {
-      return await act(report)
+      const found = await this.locateOrRefuse(runId)
+      if (!found) return undefined
+      report ??= reruns.begin(found.runIds, cause)
+      if (!report?.widen(found.runIds)) return this.refuse(ALREADY_GOING)
+      return await act(found, report)
     } finally {
-      report.end()
+      report?.end()
     }
   }
 
@@ -553,11 +558,11 @@ export class Holds {
   }
 
   private revised(
-    found: Located,
+    runId: string,
     turn: RepliedTurn,
     mark: (content: string, newRunId: string) => string,
   ): Promise<Landing | undefined> {
-    return this.exclusive(found, { kind: 'reply', turn }, async report => {
+    return this.exclusive(runId, { kind: 'reply', turn }, async (found, report) => {
       const { engine } = this.deps
       const { runId } = found.heading
       const proposer = await this.proposer(runId, turn.name, NOT_A_PROPOSER)

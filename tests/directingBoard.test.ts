@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectingBoard, type MenuItem } from '@/ui/directingBoard'
-import { Holds, type Hold } from '@/ui/holds'
+import { ALREADY_GOING, Holds, type Hold } from '@/ui/holds'
 import type { ProposalEditor } from '@/ui/proposalEditor'
 import { RerunWatch } from '@/run/rerunWatch'
 import type { ChatEvent, RunEvent, RunMeta, RunRequest } from '@/engine/types'
@@ -238,7 +238,6 @@ function board(): DirectingBoard {
     openEditor,
     openMenu: (_event, items) => void menus.push(items),
     clock: {
-      now: () => clock,
       every: (_ms, tick) => {
         timers.add(tick)
         return () => void timers.delete(tick)
@@ -628,7 +627,6 @@ describe('rerunning downstream', () => {
     holdEngine()
     await openNote('world')
     button('⟳ Rerun downstream').click()
-    await settled()
     expect(button('Rerunning…').disabled).toBe(true)
     expect(button('✎ Edit').disabled).toBe(true)
     button('Rerunning…').click()
@@ -941,7 +939,6 @@ describe('a proposal tab, chatting', () => {
     notes[PATH] = talking('@world who watches?\n> [turn 2]\n> \n> The player.')
     await openNote('world')
     button('Use this reply as the revision & rerun').click()
-    await settled()
     expect(button('Rerunning…').disabled).toBe(true)
     button('Rerunning…').click()
     await settled()
@@ -1290,11 +1287,14 @@ describe('resume', () => {
     holdEngine()
     open()
     button(RESUME).click()
-    await settled()
     expect(button('Resuming…').disabled).toBe(true)
     button('Resuming…').click()
     await settled()
     expect(resumed).toEqual([RUN])
+    release()
+    await settled()
+    expect(notices.filter(notice => notice === ALREADY_GOING)).toEqual([])
+    expect(text()).not.toContain('Resume did not run.')
   })
 
   it('says the hold was resumed, and that canon was written', async () => {

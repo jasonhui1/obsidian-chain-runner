@@ -27,7 +27,6 @@ export class DirectingView extends ItemView {
         menu.showAtMouseEvent(event)
       },
       clock: {
-        now: () => Date.now(),
         every: (ms, tick) => {
           const win = this.contentEl.win
           const id = win.setInterval(tick, ms)

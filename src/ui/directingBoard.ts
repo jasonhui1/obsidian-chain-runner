@@ -17,8 +17,8 @@ import type { GoingRerun, RerunWatch } from '../run/rerunWatch'
 
 export interface DirectingBoardDeps {
   holds: Holds
-  /** Every rerun going, wherever it was started; each start is told by the same clock as `clock`. */
-  reruns: Pick<RerunWatch, 'going' | 'onChange'>
+  /** Every rerun going, wherever it was started, and the time its start is told by. */
+  reruns: Pick<RerunWatch, 'going' | 'onChange' | 'now'>
   /** The chains a side quest can go through; none while the engine cannot say. */
   chains: () => Promise<string[]>
   /** Where a run is shown on the engine, as it is set now (ADR-0004). */
@@ -40,7 +40,6 @@ export interface MenuItem {
 }
 
 export interface Clock {
-  now: () => number
   /** Calls `tick` every `ms`; returns what stops it. */
   every: (ms: number, tick: () => void) => () => void
 }
@@ -438,7 +437,7 @@ export class DirectingBoard {
   private progress(el: HTMLElement, going: GoingRerun): void {
     const { el: line, fresh } = this.tree.place(el, 'div', `${CLS}-progress`)
     const doing = rerunDoing(going.progress?.step)
-    const tick = this.tree.latest(line, () => void (line.textContent = `${doing} ${elapsed(this.deps.clock.now() - going.startedAt)}`))
+    const tick = this.tree.latest(line, () => void (line.textContent = `${doing} ${elapsed(this.deps.reruns.now() - going.startedAt)}`))
     tick()
     if (fresh) this.tree.bind(line, this.deps.clock.every(1000, tick))
   }

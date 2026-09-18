@@ -28,6 +28,8 @@ export interface RerunLanding {
 
 /** What a rerun tells the watch as it goes. `end` comes last, whether it landed or not. */
 export interface RerunReport {
+  /** Holds the rerun under `runIds` too, unless another rerun is going under one of them; whether it did. */
+  widen(runIds: readonly string[]): boolean
   hear(progress: RerunProgress): void
   /** Waits for every lander. */
   land(landed: Omit<RerunLanding, 'from'>): Promise<void>
@@ -42,32 +44,51 @@ export class RerunWatch {
   private readonly listeners = new Set<() => void>()
   private readonly landers = new Set<RerunLander>()
 
-  constructor(private readonly now: () => number = Date.now) {}
+  /** The time each rerun's start is told by. */
+  constructor(readonly now: () => number = Date.now) {}
 
-  /** A rerun of the hold under `from`: the run it branches from, then the runs that hold was under before. */
-  begin(from: readonly string[], cause: RerunCause): RerunReport {
+  /**
+   * A rerun of the hold under `from`: the run it branches from, then the runs that
+   * hold was under before. None while another rerun is going under one of them.
+   */
+  begin(from: readonly string[], cause: RerunCause): RerunReport | undefined {
+    if (this.anyGoing(from)) return undefined
+    let runs = from
     let rerun: GoingRerun = { cause, startedAt: this.now() }
     let ended = false
     const record = (): void => {
-      for (const runId of from) this.reruns.set(runId, rerun)
+      for (const runId of runs) this.reruns.set(runId, rerun)
       this.changed()
     }
     record()
     return {
+      widen: runIds => {
+        const more = runIds.filter(runId => !runs.includes(runId))
+        if (ended || this.anyGoing(more)) return false
+        if (more.length === 0) return true
+        runs = [...runIds, ...runs.filter(runId => !runIds.includes(runId))]
+        record()
+        return true
+      },
       hear: progress => {
         if (ended) return
         rerun = { ...rerun, progress }
         record()
       },
       land: async landed => {
-        for (const lander of [...this.landers]) await lander({ from, ...landed })
+        for (const lander of [...this.landers]) await lander({ from: runs, ...landed })
       },
       end: () => {
+        if (ended) return
         ended = true
-        for (const runId of from) if (this.reruns.get(runId) === rerun) this.reruns.delete(runId)
+        for (const runId of runs) this.reruns.delete(runId)
         this.changed()
       },
     }
+  }
+
+  private anyGoing(runIds: readonly string[]): boolean {
+    return runIds.some(runId => this.reruns.has(runId))
   }
 
   /** The rerun going under run `runId`, if one is. */
