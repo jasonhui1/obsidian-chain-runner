@@ -23,8 +23,7 @@ import type {
   RunMeta,
   RunRequest,
 } from '@/engine/types'
-import type { App, TAbstractFile, TFile } from 'obsidian'
-import { TFile as StubFile, TFolder } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /**
  * The hold-actions layer the directing panel talks to: what it reads out of a
@@ -186,11 +185,10 @@ const questRun: RunMeta = {
   agentOutputs: [output('sparring', 'A first pass.'), output('combat-report', 'Rotation lands as a rhythm.\n\nKeep it.')],
 }
 
+let store: MemoryNoteStore
 let notes: Record<string, string>
 let notices: string[]
-let listeners: { name: string; callback: (file: TAbstractFile) => void; removed: boolean }[]
 let written: string[]
-let openedInTab: string[]
 let framesByAgent: Record<string, RunEvent[]>
 let rerunFrames: RunEvent[]
 let chainFrames: RunEvent[]
@@ -206,7 +204,6 @@ let online: boolean
 let layoutsFetched: number
 /** The runs whose layouts were asked for, in order. */
 let layoutsOf: string[]
-let folders: string[]
 let capabilities: Capabilities
 /** What the chat endpoint streams; `undefined` is an engine that has no such route. */
 let chatFrames: ChatEvent[] | undefined
@@ -214,46 +211,7 @@ let chats: { nodeId: string; message: string }[]
 /** The transcript the engine already holds for a node, by node id. */
 let conversations: Record<string, ChatMessage[]>
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  return stub as unknown as TFile
-}
-
 function makeActions(): HoldActions {
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (notes[path] !== undefined) return file(path)
-        return folders.includes(path) ? Object.assign(new TFolder(), { path }) : null
-      },
-      create: (path: string, content: string) => Promise.resolve(void (notes[path] = content)),
-      createFolder: (path: string) => Promise.resolve(void folders.push(path)),
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      process: (target: { path: string }, edit: (data: string) => string) => {
-        if (notes[target.path] === '!refuse') return Promise.reject(new Error('the file is read-only'))
-        notes[target.path] = edit(notes[target.path] ?? '')
-        return Promise.resolve(notes[target.path])
-      },
-      modify: (target: { path: string }, content: string) => Promise.resolve(void (notes[target.path] = content)),
-      on: (name: string, callback: (file: TAbstractFile) => void) => {
-        const listener = { name, callback, removed: false }
-        listeners.push(listener)
-        return listener
-      },
-      offref: (ref: { removed: boolean }) => void (ref.removed = true),
-    },
-    fileManager: {
-      renameFile: (target: { path: string }, path: string) => {
-        notes[path] = notes[target.path]!
-        delete notes[target.path]
-        return Promise.resolve()
-      },
-    },
-    workspace: {
-      getLeaf: () => ({ openFile: (target: { path: string }) => Promise.resolve(void openedInTab.push(target.path)) }),
-    },
-  } as unknown as App
   const engine = {
     getRun: (runId: string) => {
       if (runId === QUEST) return Promise.resolve(questRun)
@@ -294,16 +252,16 @@ function makeActions(): HoldActions {
   const withEngine = async <T>(action: () => Promise<T>): Promise<T | undefined> => (online ? action() : undefined)
   const reruns = new RerunWatch()
   return new HoldActions({
-    app,
+    store,
     notify,
-    notes: new HoldNotes({ app, notify }),
+    notes: new HoldNotes({ store, notify }),
     write: runId => Promise.resolve(void written.push(runId)),
-    chat: new ChatWithProposer({ app, engine, withEngine, notify, reruns }),
-    room: new AskTheRoom({ app, engine, withEngine, notify }),
-    rerun: new RerunDownstream({ app, engine, withEngine, notify, reruns }),
-    quest: new SideQuest({ app, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
+    chat: new ChatWithProposer({ store, engine, withEngine, notify, reruns }),
+    room: new AskTheRoom({ store, engine, withEngine, notify }),
+    rerun: new RerunDownstream({ store, engine, withEngine, notify, reruns }),
+    quest: new SideQuest({ store, engine, withEngine, notify, engineUrl: () => ENGINE_URL }),
     resume: new Resume({
-      app,
+      store,
       engine,
       withEngine,
       notify,
@@ -316,16 +274,11 @@ function makeActions(): HoldActions {
   })
 }
 
-function touch(name: string, path: string): void {
-  for (const listener of listeners.filter(one => one.name === name && !one.removed)) listener.callback(file(path))
-}
-
 beforeEach(() => {
-  notes = { [PATH]: HOLD }
+  store = new MemoryNoteStore({ [PATH]: HOLD })
+  notes = store.notes
   notices = []
-  listeners = []
   written = []
-  openedInTab = []
   framesByAgent = {}
   rerunFrames = []
   chainFrames = []
@@ -337,7 +290,6 @@ beforeEach(() => {
   online = true
   layoutsFetched = 0
   layoutsOf = []
-  folders = []
   capabilities = {}
   chatFrames = undefined
   chats = []
@@ -559,7 +511,7 @@ describe('direct', () => {
   })
 
   it('says why when the vault refuses the write', async () => {
-    notes[PATH] = '!refuse'
+    store.refuse(PATH)
     await makeActions().direct(RUN, 'KEEP', 'world')
     expect(notices).toEqual(['Could not write the hold note: the file is read-only'])
   })
@@ -921,30 +873,31 @@ describe('writeHold', () => {
 describe('openInTab', () => {
   it('opens the run’s hold note in a tab', async () => {
     await makeActions().openInTab(RUN)
-    expect(openedInTab).toEqual([PATH])
+    expect(store.opened).toEqual([PATH])
   })
 
   it('opens nothing for a run with no hold note', async () => {
     await makeActions().openInTab('2026-09-15-none')
-    expect(openedInTab).toEqual([])
+    expect(store.opened).toEqual([])
   })
 })
 
 describe('onChange', () => {
-  it('tells a listener when the run’s hold note is written, and not for any other note', () => {
+  it('tells a listener when the run’s hold note is written, and not for any other note', async () => {
     const heard: string[] = []
     makeActions().onChange(RUN, () => void heard.push('changed'))
-    touch('modify', PATH)
-    touch('create', PATH)
-    touch('modify', 'Maestro/holds/2026-09-15-other.md')
-    expect(heard).toEqual(['changed', 'changed'])
+    await store.modify(PATH, HOLD)
+    await store.trash(PATH)
+    await store.create(PATH, HOLD)
+    await store.create('Maestro/holds/2026-09-15-other.md', HOLD)
+    expect(heard).toEqual(['changed', 'changed', 'changed'])
   })
 
-  it('stops telling it once it stops listening', () => {
+  it('stops telling it once it stops listening', async () => {
     const heard: string[] = []
     const stop = makeActions().onChange(RUN, () => void heard.push('changed'))
     stop()
-    touch('modify', PATH)
+    await store.modify(PATH, HOLD)
     expect(heard).toEqual([])
   })
 })

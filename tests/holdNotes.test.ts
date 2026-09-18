@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { HoldNotes } from '@/ui/holdNotes'
 import type { HoldNoteInput } from '@/run/holdNote'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile, TFolder } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /**
  * The vault half of the hold-note convention: where it writes, and what a
@@ -17,56 +16,18 @@ const input = (over: Partial<HoldNoteInput> = {}): HoldNoteInput => ({
   ...over,
 })
 
+let store: MemoryNoteStore
 let notes: Record<string, string>
-let folders: string[]
 let notices: string[]
-let modified: Record<string, number>
-
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.name = path.slice(path.lastIndexOf('/') + 1)
-  stub.stat = { ctime: 0, mtime: modified[path] ?? 0, size: 0 }
-  return stub as unknown as TFile
-}
 
 function makeHoldNotes(): HoldNotes {
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (notes[path] !== undefined) return file(path)
-        if (folders.includes(path)) {
-          const folder = new TFolder()
-          folder.path = path
-          return folder
-        }
-        return null
-      },
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      getMarkdownFiles: () => Object.keys(notes).map(file),
-      create: (path: string, content: string) => {
-        notes[path] = content
-        return Promise.resolve(file(path))
-      },
-      modify: (target: { path: string }, content: string) => {
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-      createFolder: (path: string) => {
-        folders.push(path)
-        return Promise.resolve(undefined)
-      },
-    },
-  } as unknown as App
-
-  return new HoldNotes({ app, notify: message => void notices.push(message) })
+  return new HoldNotes({ store, notify: message => void notices.push(message) })
 }
 
 beforeEach(() => {
-  notes = {}
-  folders = []
+  store = new MemoryNoteStore()
+  notes = store.notes
   notices = []
-  modified = {}
 })
 
 describe('currentRun', () => {
@@ -95,7 +56,8 @@ describe('currentRun', () => {
   it('is the newest, when more than one hold was rerun from it', async () => {
     notes['Maestro/holds/2026-09-15-WKRDJJ.md'] = hold('2026-09-15-WKRDJJ', [ORIGINAL])
     notes['Maestro/holds/2026-09-15-D_QS9w.md'] = hold('2026-09-15-D_QS9w', [ORIGINAL])
-    modified = { 'Maestro/holds/2026-09-15-WKRDJJ.md': 1, 'Maestro/holds/2026-09-15-D_QS9w.md': 2 }
+    store.touch('Maestro/holds/2026-09-15-WKRDJJ.md', 1)
+    store.touch('Maestro/holds/2026-09-15-D_QS9w.md', 2)
     expect(await makeHoldNotes().currentRun(ORIGINAL)).toBe('2026-09-15-D_QS9w')
   })
 
@@ -109,7 +71,7 @@ describe('currentRun', () => {
 describe('write', () => {
   it('writes the hold under Maestro/holds, making the folders it needs', async () => {
     await makeHoldNotes().write(input())
-    expect(folders).toEqual(['Maestro', 'Maestro/holds'])
+    expect(store.folders).toEqual(['Maestro', 'Maestro/holds'])
     expect(notes['Maestro/holds/2026-09-15-Ab3dE1.md']).toContain('Shrine-maiden silhouette.')
   })
 

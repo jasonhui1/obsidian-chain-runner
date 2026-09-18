@@ -1,4 +1,3 @@
-import type { TFile } from 'obsidian'
 import type { NodeSurface } from './excalidraw'
 import { onDrawing } from './onDrawing'
 import type { OutputNotes } from './outputNotes'
@@ -25,10 +24,10 @@ export class RerunOnDrawing {
   async land(landing: RerunLanding): Promise<void> {
     const { surface, notify } = this.deps
     if (surface.unavailable()) return
-    const filed = new Map<string, Promise<TFile | undefined>>()
-    const noteFor = (output: string): Promise<TFile | undefined> => {
+    const filed = new Map<string, Promise<string | undefined>>()
+    const noteFor = (output: string): Promise<string | undefined> => {
       if (!filed.has(output)) filed.set(output, this.file(landing, output))
-      return filed.get(output) as Promise<TFile | undefined>
+      return filed.get(output) as Promise<string | undefined>
     }
     for (const view of surface.openViews()) {
       await onDrawing(() => surface.followRerun(landing.from, landing.runId, noteFor, view), notify)
@@ -36,7 +35,7 @@ export class RerunOnDrawing {
   }
 
   /** The new run's note for `output`; `undefined` when that run has no such output, or the vault refused it. */
-  private async file(landing: RerunLanding, output: string): Promise<TFile | undefined> {
+  private async file(landing: RerunLanding, output: string): Promise<string | undefined> {
     const panel = landing.panels.find(one => one.name === output)
     return panel && this.deps.notes.write(panel, { runId: landing.runId, chainName: landing.chainName })
   }

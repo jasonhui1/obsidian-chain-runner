@@ -1,5 +1,6 @@
-import { normalizePath, type App, type TFile } from 'obsidian'
-import { guardWrite, readIfPresent } from './vaultWrite'
+import { normalizePath } from 'obsidian'
+import { readFront, type NoteStore } from './noteStore'
+import { guardWrite } from './vaultWrite'
 import { fetchRun, streamIntoHold, type FetchedRun, type RerunWording } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { appendChatReply, chatSeed, latestOutput, markRevised, pendingMessage, pendingRevise, type ChatReply, type RepliedTurn } from '../run/chat'
@@ -37,7 +38,7 @@ function reviseWording(name: string): RerunWording {
 }
 
 export interface ChatWithProposerDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
@@ -48,18 +49,17 @@ export class ChatWithProposer {
   constructor(private readonly deps: ChatWithProposerDeps) {}
 
   async start(): Promise<void> {
-    const { app, notify } = this.deps
-    const file = app.workspace.getActiveFile()
-    const content = file?.extension === 'md' ? await app.vault.cachedRead(file) : ''
+    const { store, notify } = this.deps
+    const { path, content } = (await readFront(store)) ?? { content: '' }
     const heading = holdHeading(content)
-    if (!file || !heading) {
+    if (!path || !heading) {
       notify(NOT_A_HOLD_NOTE)
       return
     }
 
     const revise = pendingRevise(content)
     if (revise?.reply !== undefined) {
-      await this.revise(file, heading, { ...revise, reply: revise.reply })
+      await this.revise(path, heading, { ...revise, reply: revise.reply })
       return
     }
 
@@ -73,8 +73,8 @@ export class ChatWithProposer {
 
     const wrote = await guardWrite(notify, 'the hold note', async () => {
       // Read again: the human may have written in the note while the chat went.
-      const current = await this.deps.app.vault.cachedRead(file)
-      await this.deps.app.vault.modify(file, appendChatReply(current, pending, reply))
+      const current = (await store.read(path)) ?? ''
+      await store.modify(path, appendChatReply(current, pending, reply))
       return true
     })
     if (wrote) notify(`${pending.name} replied`)
@@ -155,7 +155,7 @@ export class ChatWithProposer {
    * lives under.
    */
   async revise(
-    file: TFile,
+    path: string,
     heading: HoldHeading,
     turn: RepliedTurn,
     mark: (content: string, newRunId: string) => string = markRevised,
@@ -178,7 +178,7 @@ export class ChatWithProposer {
       return undefined
     }
 
-    const canon = await readIfPresent(this.deps.app, normalizePath(CANON_PATH))
+    const canon = await this.deps.store.read(normalizePath(CANON_PATH))
     const promote: PromotedReply = {
       runId: heading.runId,
       nodeId: panel.node,
@@ -187,7 +187,7 @@ export class ChatWithProposer {
       ...(canon !== undefined ? { canon } : {}),
     }
 
-    return streamIntoHold(this.deps, file, heading, async onEvent => {
+    return streamIntoHold(this.deps, path, heading, async onEvent => {
       const { capabilities } = await engine.loadWorkspace()
       return runPromote(engine, capabilities, promote, onEvent)
     }, {

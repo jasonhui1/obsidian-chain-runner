@@ -1,4 +1,4 @@
-import { normalizePath, TFile, type App } from 'obsidian'
+import { normalizePath } from 'obsidian'
 import {
   freeOutputPath,
   outputNoteContent,
@@ -7,6 +7,7 @@ import {
   type OutputNoteMeta,
 } from '../run/outputNote'
 import type { RunPanel } from '../run/panels'
+import { folderOf, type NoteStore } from './noteStore'
 import { ensureFolder, guardWrite } from './vaultWrite'
 
 /**
@@ -20,12 +21,12 @@ export type RunProvenance = Omit<OutputNoteMeta, 'folder' | 'engineUrl'>
 
 /** A note a run holds open, to rewrite as its panel fills. */
 export interface OpenOutputNote {
-  file: TFile
+  path: string
   write(panel: RunPanel): Promise<void>
 }
 
 export interface OutputNotesDeps {
-  app: App
+  store: NoteStore
   notify: (message: string) => void
   /** Read per write, so changing the setting takes at once. */
   folder: () => string
@@ -35,8 +36,8 @@ export interface OutputNotesDeps {
 export class OutputNotes {
   constructor(private readonly deps: OutputNotesDeps) {}
 
-  /** A settled panel's note. `undefined` means the vault refused it, and said so. */
-  async write(panel: RunPanel, run: RunProvenance): Promise<TFile | undefined> {
+  /** Where a settled panel's note is. `undefined` means the vault refused it, and said so. */
+  async write(panel: RunPanel, run: RunProvenance): Promise<string | undefined> {
     return this.inFolder(panel, run, (meta, wanted) => this.writeOrReuse(wanted, outputNoteContent(panel, meta)))
   }
 
@@ -44,10 +45,10 @@ export class OutputNotes {
    * A note at a path the caller chose, written by the convention's own rules —
    * for what no run wrote, such as the lines kept off a note.
    */
-  async writeNote(path: string, content: string): Promise<TFile | undefined> {
+  async writeNote(path: string, content: string): Promise<string | undefined> {
     return this.guard(async () => {
       const wanted = normalizePath(path)
-      await ensureFolder(this.deps.app, wanted.slice(0, wanted.lastIndexOf('/')))
+      await ensureFolder(this.deps.store, folderOf(wanted))
       return this.writeOrReuse(wanted, content)
     })
   }
@@ -57,18 +58,15 @@ export class OutputNotes {
    * trash, not gone, so the reader's own deletion setting decides how final it is.
    */
   async remove(path: string): Promise<void> {
-    await this.guard(async () => {
-      const file = this.deps.app.vault.getAbstractFileByPath(path)
-      if (file instanceof TFile) await this.deps.app.fileManager.trashFile(file)
-    })
+    await this.guard(() => this.deps.store.trash(path))
   }
 
   /** The note at `wanted`, written or already there: one saying exactly this is reused. */
-  private async writeOrReuse(wanted: string, content: string): Promise<TFile> {
-    const path = await resolveOutputPath(wanted, content, candidate => this.read(candidate))
-    const existing = this.deps.app.vault.getAbstractFileByPath(path)
-    if (existing instanceof TFile) return existing
-    return this.deps.app.vault.create(path, content)
+  private async writeOrReuse(wanted: string, content: string): Promise<string> {
+    const { store } = this.deps
+    const path = await resolveOutputPath(wanted, content, candidate => store.read(candidate))
+    if (store.at(path) !== 'note') await store.create(path, content)
+    return path
   }
 
   /**
@@ -78,16 +76,17 @@ export class OutputNotes {
    */
   async open(panel: RunPanel, run: RunProvenance): Promise<OpenOutputNote | undefined> {
     return this.inFolder(panel, run, async (meta, wanted) => {
-      const path = await freeOutputPath(wanted, candidate => this.read(candidate))
-      const file = await this.deps.app.vault.create(path, outputNoteContent(panel, meta))
+      const { store } = this.deps
+      const path = await freeOutputPath(wanted, candidate => store.read(candidate))
+      await store.create(path, outputNoteContent(panel, meta))
       let said = ''
       return {
-        file,
+        path,
         write: async next => {
           const content = outputNoteContent(next, meta)
           if (content === said) return
           said = content
-          await this.deps.app.vault.modify(file, content)
+          await store.modify(path, content)
         },
       }
     })
@@ -102,18 +101,12 @@ export class OutputNotes {
     const meta: OutputNoteMeta = { ...run, folder: this.deps.folder(), engineUrl: this.deps.engineUrl() }
     const wanted = normalizePath(outputNotePath(panel, meta))
     return this.guard(async () => {
-      await ensureFolder(this.deps.app, wanted.slice(0, wanted.lastIndexOf('/')))
+      await ensureFolder(this.deps.store, folderOf(wanted))
       return use(meta, wanted)
     })
   }
 
   private guard<T>(use: () => Promise<T>): Promise<T | undefined> {
     return guardWrite(this.deps.notify, 'the note', use)
-  }
-
-  private async read(path: string): Promise<string | undefined> {
-    const file = this.deps.app.vault.getAbstractFileByPath(path)
-    if (!(file instanceof TFile)) return undefined
-    return this.deps.app.vault.cachedRead(file)
   }
 }

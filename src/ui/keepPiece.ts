@@ -1,4 +1,5 @@
-import type { TFile, App } from 'obsidian'
+import type { App } from 'obsidian'
+import { baseName, type NoteStore } from './noteStore'
 import type { DrawingChoice } from './drawingChoices'
 import { DrawingPicker } from './drawingPicker'
 import type { DrawingSurface } from './excalidraw'
@@ -13,7 +14,9 @@ import type { RunResult } from '../run/session'
  */
 
 export interface KeepPieceDeps {
+  /** For the drawing picker. */
   app: App
+  store: NoteStore
   notify: (message: string) => void
   /** The output-note convention, shared with the drawing's own runs. */
   notes: OutputNotes
@@ -28,9 +31,8 @@ export class KeepPiece {
 
   /** Writes the panel as a note and opens it, which is the point of asking. */
   async saveAsNote(panel: RunPanel, run: RunResult): Promise<void> {
-    const note = await this.write(panel, run)
-    if (!note) return
-    await this.deps.app.workspace.getLeaf(true).openFile(note)
+    const path = await this.write(panel, run)
+    if (path) await this.deps.store.open(path)
   }
 
   /**
@@ -60,18 +62,18 @@ export class KeepPiece {
   }
 
   private async place(drawing: DrawingChoice, panel: RunPanel, run: RunResult): Promise<void> {
-    const note = await this.write(panel, run)
-    if (!note) return
+    const path = await this.write(panel, run)
+    if (!path) return
     try {
-      await this.deps.drawing.place(drawing, note)
-      this.deps.notify(`${note.basename} → ${drawing.name}`)
+      await this.deps.drawing.place(drawing, path)
+      this.deps.notify(`${baseName(path)} → ${drawing.name}`)
     } catch (error) {
       this.deps.notify(error instanceof Error ? error.message : 'Could not reach that drawing')
     }
   }
 
   /** The output note on disk, written or already there. */
-  private async write(panel: RunPanel, run: RunResult): Promise<TFile | undefined> {
+  private async write(panel: RunPanel, run: RunResult): Promise<string | undefined> {
     if (!run.runId) {
       this.deps.notify(NOT_SETTLED)
       return undefined

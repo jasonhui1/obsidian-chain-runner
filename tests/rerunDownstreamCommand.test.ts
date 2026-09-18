@@ -5,8 +5,7 @@ import { RerunWatch, type RerunLanding } from '@/run/rerunWatch'
 import type { RerunProgress } from '@/run/rerunProgress'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, HoldRecord, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /** The order "Rerun downstream" happens in; the rule itself is `rerun.test.ts`. */
 
@@ -67,7 +66,7 @@ const written = () =>
 
 const edited = () => written().replace('Stances mapped to segments.', 'Halo is a burden.')
 
-let active: TFile | undefined
+let store: MemoryNoteStore
 let notes: Record<string, string>
 let notices: string[]
 let runFrames: RunEvent[]
@@ -77,34 +76,7 @@ let watch: RerunWatch
 /** The holds the run a rerun lands on reached. */
 let newHolds: HoldRecord[]
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.extension = 'md'
-  return stub as unknown as TFile
-}
-
 function makeRerun(): RerunDownstream {
-  const app = {
-    workspace: { getActiveFile: () => active ?? null },
-    vault: {
-      getAbstractFileByPath: (path: string) => (notes[path] !== undefined ? file(path) : null),
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      modify: (target: { path: string }, content: string) => {
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-    },
-    fileManager: {
-      renameFile: (target: { path: string }, path: string) => {
-        notes[path] = notes[target.path]
-        delete notes[target.path]
-        target.path = path
-        return Promise.resolve()
-      },
-    },
-  } as unknown as App
-
   const engine = {
     getRun: (runId: string) => Promise.resolve(runId === OLD ? oldRun : { ...oldRun, runId: NEW, holds: newHolds }),
     getLayout: (runId: string): Promise<LayoutModel> =>
@@ -116,7 +88,7 @@ function makeRerun(): RerunDownstream {
   } as unknown as EngineClient
 
   return new RerunDownstream({
-    app,
+    store,
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
@@ -138,8 +110,9 @@ const rewritingVerdict: RunEvent = {
 }
 
 beforeEach(() => {
-  notes = { [HOLD_PATH]: edited() }
-  active = file(HOLD_PATH)
+  store = new MemoryNoteStore({ [HOLD_PATH]: edited() })
+  notes = store.notes
+  store.inFront = { path: HOLD_PATH }
   notices = []
   runFrames = [{ type: 'run_start', runId: NEW }, { type: 'run_complete', runId: NEW }]
   online = true

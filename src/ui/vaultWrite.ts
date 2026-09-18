@@ -1,22 +1,16 @@
-import { TFile, TFolder, type App } from 'obsidian'
-
-/** A note's text, or `undefined` when there is no note at that path. */
-export async function readIfPresent(app: App, path: string): Promise<string | undefined> {
-  const existing = app.vault.getAbstractFileByPath(path)
-  return existing instanceof TFile ? await app.vault.cachedRead(existing) : undefined
-}
+import type { NoteStore } from './noteStore'
 
 /** Creates a folder and everything above it, a segment at a time. */
-export async function ensureFolder(app: App, folder: string): Promise<void> {
+export async function ensureFolder(store: NoteStore, folder: string): Promise<void> {
   const segments = folder.split('/').filter(segment => segment !== '')
   let path = ''
   for (const segment of segments) {
     path = path === '' ? segment : `${path}/${segment}`
-    const existing = app.vault.getAbstractFileByPath(path)
-    if (existing instanceof TFolder) continue
+    const existing = store.at(path)
+    if (existing === 'folder') continue
     // A note where the folder should be is the reader's, not ours to move.
     if (existing) throw new Error(`${path} is a note, not a folder`)
-    await app.vault.createFolder(path)
+    await store.createFolder(path)
   }
 }
 

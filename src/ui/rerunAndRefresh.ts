@@ -1,4 +1,5 @@
-import { normalizePath, type App, type TFile } from 'obsidian'
+import { normalizePath } from 'obsidian'
+import type { NoteStore } from './noteStore'
 import { guardWrite } from './vaultWrite'
 import type { ForkedRun } from '../run/fork'
 import { runHeadless } from '../run/headlessRun'
@@ -16,7 +17,7 @@ import type { LayoutModel, RunEvent, RunMeta, RunRequest } from '../engine/types
  */
 
 export interface RerunAndRefreshDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
@@ -69,28 +70,28 @@ export interface RerunAndRefreshOptions {
 /** Runs `request`, then refreshes the hold note with the run it lands on and renames it to that run; answers that run once the note is under it. */
 export function rerunAndRefresh(
   deps: RerunAndRefreshDeps,
-  file: TFile,
+  path: string,
   heading: HoldHeading,
   request: RunRequest,
   options: RerunAndRefreshOptions,
 ): Promise<string | undefined> {
   // A fresh run forks nothing: it carries on no run, so it can name none other than its own.
   const launch: LaunchRun = async onEvent => ({ kind: 'ran', outcome: await runHeadless(deps.engine, request, onEvent), forked: false })
-  return streamIntoHold(deps, file, heading, launch, options)
+  return streamIntoHold(deps, path, heading, launch, options)
 }
 
 /** The same fold, for a call that is not a fresh run: the note takes whichever run the stream names. */
 export async function streamIntoHold(
   deps: RerunAndRefreshDeps,
-  file: TFile,
+  path: string,
   heading: HoldHeading,
   launch: LaunchRun,
   options: RerunAndRefreshOptions,
 ): Promise<string | undefined> {
-  const from = [heading.runId, ...reranFrom(await deps.app.vault.cachedRead(file))]
+  const from = [heading.runId, ...reranFrom((await deps.store.read(path)) ?? '')]
   const report = deps.reruns.begin(from)
   try {
-    return await rerunReported(deps, { file, heading, launch, options, report })
+    return await rerunReported(deps, { path, heading, launch, options, report })
   } finally {
     report.end()
   }
@@ -98,7 +99,8 @@ export async function streamIntoHold(
 
 /** One rerun under way, as `streamIntoHold` reports it. */
 interface ReportedRerun {
-  file: TFile
+  /** The hold note's path. */
+  path: string
   heading: HoldHeading
   launch: LaunchRun
   options: RerunAndRefreshOptions
@@ -106,8 +108,8 @@ interface ReportedRerun {
 }
 
 async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): Promise<string | undefined> {
-  const { file, heading, launch, options, report } = rerun
-  const { app, notify } = deps
+  const { path, heading, launch, options, report } = rerun
+  const { store, notify } = deps
   const beforeRefresh = options.beforeRefresh ?? (content => content)
   const wording = options.wording ?? RERUN_WORDING
   const tracker = new RerunProgressTracker()
@@ -136,7 +138,7 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
 
   const folded = await guardWrite(notify, 'the hold note', async (): Promise<{ notice: string; runId?: string }> => {
     // Read again: the human may have written in the note while the rerun went.
-    const current = await app.vault.cachedRead(file)
+    const current = (await store.read(path)) ?? ''
     const kept = editsToCarry(current, { ...options.edits, landed: landedRun.layout.panels })
     if (!kept) {
       return { notice: `${wording.heldBack(newRunId)}, but proposals changed meanwhile — note left as is` }
@@ -146,16 +148,16 @@ async function rerunReported(deps: RerunAndRefreshDeps, rerun: ReportedRerun): P
       (content, [name, text]) => rewriteProposal(content, name, text),
       refreshHoldNote(beforeRefresh(current, newRunId), holdNoteInput(landedRun.run, landedRun.layout.panels, heading.chainName)),
     )
-    await app.vault.modify(file, refreshed)
+    await store.modify(path, refreshed)
 
     // Named for the run it now shows, so directing that run finds it. A run that
     // carried on in place is already that note, and has nothing to rename.
     const renamed = normalizePath(holdNotePath(newRunId))
-    if (renamed !== file.path) {
-      if (app.vault.getAbstractFileByPath(renamed)) {
+    if (renamed !== path) {
+      if (store.at(renamed)) {
         return { notice: `${said}, but ${renamed} already exists — note not renamed` }
       }
-      await app.fileManager.renameFile(file, renamed)
+      await store.rename(path, renamed)
     }
     const replaced = kept.replaced.length > 0 ? ` — it wrote ${kept.replaced.join(', ')} again, over your edits` : ''
     return { notice: `${said}${replaced}`, runId: newRunId }

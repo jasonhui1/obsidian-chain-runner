@@ -28,6 +28,7 @@ import { HoldNotes } from './ui/holdNotes'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
 import { MarkLinesModal } from './ui/markLines'
+import { createNoteStore, readFront, type NoteStore } from './ui/noteStore'
 import { NodeRun } from './ui/nodeRun'
 import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
@@ -58,6 +59,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.settings = withDefaults(await this.loadData())
     this.engine = new EngineClient(() => this.settings.engineUrl, createNodeTransport())
     this.status = new EngineStatus(() => this.engine.ping())
+    const store = createNoteStore(this.app)
     this.withEngine = createEngineGuard({
       refresh: () => this.status.refresh(),
       notify: message => new Notice(message),
@@ -78,7 +80,7 @@ export default class ChainRunnerPlugin extends Plugin {
 
     // One writer for the output-note convention, so a panel kept twice is one note.
     const notes = new OutputNotes({
-      app: this.app,
+      store,
       notify: message => new Notice(message),
       folder: () => this.settings.outputFolder,
       engineUrl: () => this.settings.engineUrl,
@@ -95,16 +97,18 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(sourceRun.stop)
     // Verb buttons next to each proposal in a hold note, a shortcut for the Direction block.
     this.registerMarkdownPostProcessor(
-      createDirectionButtons({ app: this.app, notify: message => new Notice(message) }),
+      createDirectionButtons({ app: this.app, store, notify: message => new Notice(message) }),
     )
     const keep = new KeepPiece({
       app: this.app,
+      store,
       notify: message => new Notice(message),
       notes,
       drawing: createDrawingSurface(this.app),
     })
     const marks = new KeepMarks({
       app: this.app,
+      store,
       notify: message => new Notice(message),
       notes,
       mark: (text, onDone) => new MarkLinesModal(this.app, text, onDone).open(),
@@ -119,14 +123,14 @@ export default class ChainRunnerPlugin extends Plugin {
           keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
         }),
     )
-    const holdNotes = new HoldNotes({ app: this.app, notify: message => new Notice(message) })
+    const holdNotes = new HoldNotes({ store, notify: message => new Notice(message) })
     const directRun = new DirectRun({
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       holdNotes,
       currentRun: () => this.activeResultView()?.currentResult(),
-      open: note => this.app.workspace.getLeaf('tab').openFile(note),
+      open: path => store.open(path),
     })
     // From the drawing, a hold opens in the directing panel rather than a tab.
     const directInPanel = new DirectRun({
@@ -141,6 +145,7 @@ export default class ChainRunnerPlugin extends Plugin {
     const holdReached = (runId: string, nodeId: string): Promise<void> => directInPanel.holdReached(runId, nodeId)
     this.quickRun = new QuickRunner({
       app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       openResultView: () => this.openResultView(),
@@ -156,7 +161,7 @@ export default class ChainRunnerPlugin extends Plugin {
     const onDrawing = new RerunOnDrawing({ surface, notes, notify: message => new Notice(message) })
     this.register(reruns.onLanding(landing => onDrawing.land(landing)))
     const nodeRun = new NodeRun({
-      app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
@@ -205,6 +210,7 @@ export default class ChainRunnerPlugin extends Plugin {
     }))
     const expand = new Expand({
       app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
@@ -218,34 +224,34 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => expand.stop())
 
     const chat = new ChatWithProposer({
-      app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       reruns,
     })
     const askRoom = new AskTheRoom({
-      app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
     })
     const rerun = new RerunDownstream({
-      app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       reruns,
     })
     const sideQuest = new SideQuest({
-      app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
       engineUrl: () => this.settings.engineUrl,
     })
     const resume = new Resume({
-      app: this.app,
+      store,
       engine: this.engine,
       withEngine: action => this.withEngine(action),
       notify: message => new Notice(message),
@@ -254,7 +260,7 @@ export default class ChainRunnerPlugin extends Plugin {
       openFork: runId => directInPanel.openHold(runId),
     })
     const holds = new HoldActions({
-      app: this.app,
+      store,
       notify: message => new Notice(message),
       notes: holdNotes,
       write: runId => directInPanel.write(runId),
@@ -354,7 +360,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.addCommand({
       id: 'mark-lines-to-keep',
       name: 'Mark lines to keep in this note',
-      callback: () => void this.markLines(marks),
+      callback: () => void this.markLines(store, marks),
     })
 
     this.addCommand({
@@ -431,14 +437,13 @@ export default class ChainRunnerPlugin extends Plugin {
    * Marks lines of the note in front of the reader. Frontmatter comes off first,
    * as it does for a run: it is the vault's bookkeeping, not the note's words.
    */
-  private async markLines(marks: KeepMarks): Promise<void> {
-    const file = this.app.workspace.getActiveFile()
-    if (!file || file.extension !== 'md') {
+  private async markLines(store: NoteStore, marks: KeepMarks): Promise<void> {
+    const note = await readFront(store)
+    if (!note) {
       new Notice('Open a note to mark lines in it')
       return
     }
-    const text = seedFromNote(await this.app.vault.cachedRead(file))
-    marks.start({ kind: 'note', text, file })
+    marks.start({ kind: 'note', text: seedFromNote(note.content), path: note.path })
   }
 
   /**

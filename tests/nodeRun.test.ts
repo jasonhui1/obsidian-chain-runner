@@ -20,8 +20,7 @@ import type { RunFrame } from '@/run/runFrame'
 import type { EngineClient } from '@/engine/client'
 import { EngineOfflineError } from '@/engine/transport'
 import type { Capabilities, ChainSummary, RunEvent } from '@/engine/types'
-import type { App } from 'obsidian'
-import { TFile as StubFile, TFolder } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /** The order a run happens in. The pure pieces are checked in their own files. */
 
@@ -54,8 +53,8 @@ let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
 let notices: string[]
 let labels: string[]
 let framed: { frame: RunFrame; notes: string[] }[]
+let store: MemoryNoteStore
 let vault: Record<string, string>
-let folders: string[]
 let offline: number
 /** Whether this Excalidraw can make a real frame. */
 let canFrame: boolean
@@ -63,14 +62,6 @@ let canFrame: boolean
 let writes: string[]
 /** What the vault held after each event of the stream was handled. */
 let duringRun: Record<string, string>[]
-
-const file = (path: string): StubFile => {
-  const stub = new StubFile()
-  stub.path = path
-  stub.name = path.slice(path.lastIndexOf('/') + 1)
-  stub.basename = stub.name.replace(/\.md$/, '')
-  return stub
-}
 
 /** The engine's own layout frame: `n` panels, the first `done` of them settled. */
 const layout = (names: string[], done: number): RunEvent => ({
@@ -130,41 +121,6 @@ const joinFirst = (done: number): RunEvent => ({
 })
 
 function makeRun(): NodeRun {
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (vault[path] !== undefined) return file(path)
-        if (folders.includes(path)) {
-          const folder = new TFolder()
-          folder.path = path
-          return folder
-        }
-        return null
-      },
-      cachedRead: (target: { path: string }) => Promise.resolve(vault[target.path] ?? ''),
-      create: (path: string, content: string) => {
-        vault[path] = content
-        writes.push(path)
-        return Promise.resolve(file(path))
-      },
-      modify: (target: { path: string }, content: string) => {
-        vault[target.path] = content
-        writes.push(target.path)
-        return Promise.resolve()
-      },
-      createFolder: (path: string) => {
-        folders.push(path)
-        return Promise.resolve(undefined)
-      },
-    },
-    metadataCache: {
-      getFirstLinkpathDest: (linkpath: string) => {
-        const path = linkpath.endsWith('.md') ? linkpath : `${linkpath}.md`
-        return vault[path] === undefined ? null : file(path)
-      },
-    },
-  } as unknown as App
-
   const surface: NodeSurface = {
     selection: () => undefined,
     selectedProposal: () => undefined,
@@ -187,7 +143,7 @@ function makeRun(): NodeRun {
       return Promise.resolve(true)
     },
     placeRun: (frame, outputs) => {
-      framed.push({ frame, notes: outputs.map(output => output.note.path) })
+      framed.push({ frame, notes: outputs.map(output => output.notePath) })
       return Promise.resolve(canFrame)
     },
   }
@@ -207,14 +163,14 @@ function makeRun(): NodeRun {
 
   const notify = (message: string): void => void notices.push(message)
   return new NodeRun({
-    app,
+    store,
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify,
     markOffline: () => void offline++,
     holdReached: (runId, nodeId) => Promise.resolve(void held.push(`${runId} ${nodeId}`)),
     surface,
-    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
+    notes: new OutputNotes({ store, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
   })
 }
 
@@ -248,10 +204,11 @@ beforeEach(() => {
   labels = []
   framed = []
   canFrame = true
-  vault = {}
-  folders = []
+  store = new MemoryNoteStore()
+  vault = store.notes
   offline = 0
   writes = []
+  store.onChange(path => void writes.push(path))
   duringRun = []
 })
 

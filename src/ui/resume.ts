@@ -1,5 +1,6 @@
-import { normalizePath, TFile, type App } from 'obsidian'
-import { ensureFolder, guardWrite, readIfPresent } from './vaultWrite'
+import { normalizePath } from 'obsidian'
+import { folderOf, type NoteStore } from './noteStore'
+import { ensureFolder, guardWrite } from './vaultWrite'
 import { appendCanon, CANON_PATH, tickedCanonLines } from '../run/canon'
 import { appendResumeLink, directionBlock, holdHeading, waitingHoldsIn } from '../run/holdNote'
 import { runViewUrl } from '../run/provenance'
@@ -34,7 +35,7 @@ export interface ResumeResult {
 }
 
 export interface ResumeDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
@@ -49,12 +50,12 @@ export class Resume {
   constructor(private readonly deps: ResumeDeps) {}
 
   async start(): Promise<void> {
-    const file = this.deps.app.workspace.getActiveFile()
-    if (!file || file.extension !== 'md') {
+    const note = this.deps.store.front()
+    if (!note) {
       this.deps.notify(NOT_A_HOLD_NOTE)
       return
     }
-    const result = await this.resumeNote(file)
+    const result = await this.resumeNote(note.path)
     if (result) this.deps.notify(this.resumeNotice(result))
   }
 
@@ -62,8 +63,8 @@ export class Resume {
    * The note's hold answered, its ticks locked and the run linked back.
    * `undefined` only when nothing ran, which says why in a notice of its own.
    */
-  async resumeNote(file: TFile): Promise<ResumeResult | undefined> {
-    const content = await this.deps.app.vault.cachedRead(file)
+  async resumeNote(path: string): Promise<ResumeResult | undefined> {
+    const content = (await this.deps.store.read(path)) ?? ''
     const heading = holdHeading(content)
     const direction = directionBlock(content)
     if (!heading || direction === undefined) {
@@ -72,7 +73,7 @@ export class Resume {
     }
 
     const canonPath = normalizePath(CANON_PATH)
-    const canon = await readIfPresent(this.deps.app, canonPath)
+    const canon = await this.deps.store.read(canonPath)
     const request = resumeRequest({ direction, holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
 
     const { engine } = this.deps
@@ -93,7 +94,7 @@ export class Resume {
 
     const canonOutcome = await this.lockCanon(canonPath, ticked, outcome.error)
     // A note that refuses the link says so on its own; the run still happened, so it is still reported.
-    await this.linkRun(file, content, { runId: outcome.runId, forked })
+    await this.linkRun(path, content, { runId: outcome.runId, forked })
     // A fork has moved the engine on whether it landed or not; a run carried on
     // in place that failed is left as it stands, still showing its own hold.
     if (forked) await this.followFork(heading.runId, outcome.runId)
@@ -134,20 +135,21 @@ export class Resume {
   /** Reads canon again right before writing — not the snapshot sent with the run — so a change made while the run was going is never clobbered. */
   private async writeCanon(path: string, lines: string[]): Promise<boolean> {
     const wrote = await guardWrite(this.deps.notify, 'the canon file', async () => {
-      await ensureFolder(this.deps.app, path.slice(0, path.lastIndexOf('/')))
-      const current = this.deps.app.vault.getAbstractFileByPath(path)
-      const fresh = appendCanon(current instanceof TFile ? await this.deps.app.vault.cachedRead(current) : undefined, lines)
-      if (current instanceof TFile) await this.deps.app.vault.modify(current, fresh)
-      else await this.deps.app.vault.create(path, fresh)
+      const { store } = this.deps
+      await ensureFolder(store, folderOf(path))
+      const current = await store.read(path)
+      const fresh = appendCanon(current, lines)
+      if (current === undefined) await store.create(path, fresh)
+      else await store.modify(path, fresh)
       return true
     })
     return wrote === true
   }
 
-  private async linkRun(file: TFile, content: string, run: { runId: string; forked: boolean }): Promise<void> {
+  private async linkRun(path: string, content: string, run: { runId: string; forked: boolean }): Promise<void> {
     await guardWrite(this.deps.notify, 'the hold note', async () => {
       const url = runViewUrl(this.deps.engineUrl(), run.runId)
-      await this.deps.app.vault.modify(file, appendResumeLink(content, { ...run, ...(url ? { url } : {}) }))
+      await this.deps.store.modify(path, appendResumeLink(content, { ...run, ...(url ? { url } : {}) }))
     })
   }
 }

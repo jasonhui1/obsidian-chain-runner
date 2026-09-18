@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createDirectionButtons, PROPOSAL_BUTTONS_CLASS, PROPOSAL_BUTTON_CLASS } from '@/ui/directionButtons'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile, lastModal, resetModals } from './obsidian'
+import type { App } from 'obsidian'
+import { lastModal, resetModals } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 import type { MarkdownPostProcessorContext } from 'obsidian'
 
 /**
@@ -14,32 +15,13 @@ import type { MarkdownPostProcessorContext } from 'obsidian'
 
 const HOLD_PATH = 'Maestro/holds/2026-09-15-Ab3dE1.md'
 
+let store: MemoryNoteStore
 let notes: Record<string, string>
 let notices: string[]
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.extension = 'md'
-  return stub as unknown as TFile
-}
-
-function makeApp(): App {
-  return {
-    vault: {
-      getAbstractFileByPath: (path: string) => (notes[path] !== undefined ? file(path) : null),
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      modify: (target: { path: string }, content: string) => {
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-    },
-  } as unknown as App
-}
-
 const context = (): MarkdownPostProcessorContext => ({ sourcePath: HOLD_PATH, docId: 'd' }) as MarkdownPostProcessorContext
 
-const buttons = () => createDirectionButtons({ app: makeApp(), notify: message => void notices.push(message) })
+const buttons = () => createDirectionButtons({ app: {} as App, store, notify: message => void notices.push(message) })
 
 /** A rendered hold note: a title, one heading per proposal, each its own section. */
 function rendered(names: string[], title = 'Hold: run 2026-09-15-Ab3dE1 · creative-director'): { container: HTMLElement; sections: HTMLElement[] } {
@@ -74,7 +56,8 @@ function press(row: Element, verb: string): void {
 
 beforeEach(() => {
   document.body.replaceChildren()
-  notes = { [HOLD_PATH]: '## Direction\nKEEP:\n\n## Conversation\n' }
+  store = new MemoryNoteStore({ [HOLD_PATH]: '## Direction\nKEEP:\n\n## Conversation\n' })
+  notes = store.notes
   notices = []
   resetModals()
 })

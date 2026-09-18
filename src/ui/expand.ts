@@ -3,6 +3,7 @@ import { ChainPicker, ParameterPicker } from './chainPicker'
 import type { BlockReading, DrawingView, NodeSurface, PlacedProposal } from './excalidraw'
 import { SELECT_ONE_BLOCK } from './excalidraw'
 import { seedFromInputs } from './inputSeed'
+import type { NoteStore } from './noteStore'
 import type { OutputNotes } from './outputNotes'
 import { onDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { proposalData, type MaybeProposalElement } from './proposal'
@@ -37,7 +38,9 @@ export const SELECT_A_PROPOSAL = 'Select a proposal on the drawing to keep or dr
 export const EXPANDING = (chainName: string): string => `Expanding with ${chainName}…`
 
 export interface ExpandDeps {
+  /** For the chain and parameter pickers. */
   app: App
+  store: NoteStore
   engine: EngineClient
   /** Offline is a notice and nothing else. */
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
@@ -166,7 +169,7 @@ export class Expand {
     parameterValue: string | undefined,
   ): Promise<void> {
     const seed = await seedFromInputs({
-      app: this.deps.app,
+      store: this.deps.store,
       notify: this.deps.notify,
       inputs: [block.input],
       drawing: block.drawing,
@@ -240,12 +243,12 @@ export class Expand {
 
     const proposals: PlacedProposal[] = outputs.map(one => ({
       box: one.place.box,
-      note: one.note.file,
+      notePath: one.note.path,
       identity: {
         proposalId: this.deps.newProposalId(),
         chainName: chain.name,
         runId,
-        notePath: one.note.file.path,
+        notePath: one.note.path,
       },
     }))
     await this.onDrawing(async () => {

@@ -184,8 +184,8 @@ export interface DrawingSurface {
   unavailable(): string | undefined
   /** The drawings to offer, in the order to offer them. */
   choices(): DrawingChoice[]
-  /** Puts `note` on `drawing` as an embeddable at the cursor, and saves. */
-  place(drawing: DrawingChoice, note: TFile): Promise<void>
+  /** Puts the note at `notePath` on `drawing` as an embeddable at the cursor, and saves. */
+  place(drawing: DrawingChoice, notePath: string): Promise<void>
 }
 
 /**
@@ -205,7 +205,7 @@ export interface NodeReading {
 /** One output of a run: where it goes, and the note it shows. */
 export interface PlacedOutput {
   placed: FramedPanel
-  note: TFile
+  notePath: string
 }
 
 /** One block the reader picked out to expand: what it says, and where it sits. */
@@ -221,7 +221,7 @@ export interface BlockReading {
 /** One proposal to draw: the note behind it, where it goes, and what marks it as one. */
 export interface PlacedProposal {
   box: Box
-  note: TFile
+  notePath: string
   identity: ProposalIdentity
 }
 
@@ -270,7 +270,7 @@ export interface NodeSurface {
   followRerun(
     from: readonly string[],
     to: string,
-    noteFor: (output: string) => Promise<TFile | undefined>,
+    noteFor: (output: string) => Promise<string | undefined>,
     on: DrawingView,
   ): Promise<boolean>
   /** Keeps or drops a proposal. `false` means it is no longer on the drawing. */
@@ -298,14 +298,14 @@ export function createDrawingSurface(app: App): DrawingSurface {
         // Newest-first, and may name deleted files; `drawingChoices` drops those.
         recent: app.workspace.getLastOpenFiles(),
       }),
-    place: async (drawing, note) => {
+    place: async (drawing, notePath) => {
       const ea = automate(app)
       if (!ea) throw new Error(NO_EXCALIDRAW)
       const view = await openDrawing(app, drawing.path)
       ea.reset()
       // The binding goes stale when the reader switches tabs, so it is set per call.
       ea.setView(view)
-      embedNote(ea, { x: 0, y: 0, width: EMBEDDABLE_WIDTH, height: EMBEDDABLE_HEIGHT }, note)
+      embedNote(app, ea, { x: 0, y: 0, width: EMBEDDABLE_WIDTH, height: EMBEDDABLE_HEIGHT }, notePath)
       // Reposition to the cursor, and save.
       await ea.addElementsToView(true, true)
     },
@@ -436,12 +436,12 @@ export function createNodeSurface(app: App): NodeSurface {
       }
 
       let ids: string[] = []
-      for (const { box, note, identity } of proposals) {
+      for (const { box, notePath, identity } of proposals) {
         ea.style.strokeColor = PROPOSAL_STROKE
         ea.style.strokeStyle = PROPOSAL_STROKE_STYLE
         ids = []
 
-        const card = embedNote(ea, box, note)
+        const card = embedNote(app, ea, box, notePath)
         mark(card?.id, identity, 'card')
 
         // The connector is what makes a card read as this block's proposal. Drawn
@@ -515,19 +515,19 @@ export function createNodeSurface(app: App): NodeSurface {
       const { ea, view } = bind(on)
       const found = rerunScene(ea.getViewElements(), from, to, noteFrontmatter(app, view))
       if (!found) return false
-      const notes = new Map<SceneElement, TFile>()
+      const notePaths = new Map<SceneElement, string>()
       for (const card of found.cards) {
-        const note = await noteFor(card.output)
-        if (note) notes.set(card.element, note)
+        const notePath = await noteFor(card.output)
+        if (notePath) notePaths.set(card.element, notePath)
       }
 
       // Bound again: filing the notes gave another action the chance to rebind.
       const { ea: editing } = bind(on)
-      editing.copyViewElementsToEAforEditing([...notes.keys(), ...found.labels, ...found.frames.map(frame => frame.element)])
+      editing.copyViewElementsToEAforEditing([...notePaths.keys(), ...found.labels, ...found.frames.map(frame => frame.element)])
       const copy = (element: SceneElement): SceneElement | undefined => editing.getElement(element.id)
-      for (const [element, note] of notes) {
+      for (const [element, notePath] of notePaths) {
         const card = copy(element)
-        if (card) card.link = `[[${note.path}]]`
+        if (card) card.link = `[[${notePath}]]`
       }
       for (const element of found.labels) {
         const label = copy(element)
@@ -547,9 +547,9 @@ export function createNodeSurface(app: App): NodeSurface {
       // First, so the panels can name it as their container.
       const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
 
-      for (const { placed, note } of outputs) {
+      for (const { placed, notePath } of outputs) {
         ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
-        const element = embedNote(ea, placed.box, note)
+        const element = embedNote(app, ea, placed.box, notePath)
         // A scripted element has to claim its frame; only a drop is worked out.
         if (element && frameId) element.frameId = frameId
       }
@@ -577,7 +577,10 @@ export function createNodeSurface(app: App): NodeSurface {
  * back by (`./nodeScene.ts`), so it is set here rather than left to Excalidraw's
  * own bookkeeping — which is how an output becomes the next run's input.
  */
-function embedNote(ea: ExcalidrawAutomate, box: Box, note: TFile): SceneElement | undefined {
+function embedNote(app: App, ea: ExcalidrawAutomate, box: Box, notePath: string): SceneElement | undefined {
+  // Gone since it was written: the rest of the scene still lands.
+  const note = app.vault.getAbstractFileByPath(notePath)
+  if (!(note instanceof TFile)) return undefined
   const id = ea.addEmbeddable(box.x, box.y, box.width, box.height, undefined, note)
   const element = ea.getElement(id)
   if (element && !element.link) element.link = `[[${note.path}]]`

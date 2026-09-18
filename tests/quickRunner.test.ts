@@ -6,7 +6,8 @@ import type { RunResult } from '@/run/session'
 import type { App } from 'obsidian'
 // The test-time `obsidian` stub, imported by path so `tsc` still checks the
 // plugin against the real module's types.
-import { MarkdownView, lastModal, resetModals } from './obsidian'
+import { lastModal, resetModals } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /**
  * The seam between Obsidian and the run: which note the command reads, how much
@@ -18,38 +19,15 @@ const CHAINS = [
   { slug: 'lens', name: 'Through A Lens', parameter: { name: 'lens', options: ['sceptic', 'builder'] } },
 ]
 
-interface Note {
-  name: string
-  path: string
-  extension: string
-}
-
-const note = (name: string): Note => ({ name, path: name, extension: 'md' })
-
 /** What the run was launched with, and every state the view was shown. */
 let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
 let events: RunEvent[]
 let held: string[]
 let shown: RunResult[]
 let notices: string[]
-let files: Record<string, string>
-/** The note the editor pane holds, and what is selected in it. */
-let editing: { file: Note | null; selection: string } | undefined
-/** What `getActiveFile()` answers — the workspace's active leaf, which need not be the editor. */
-let activeFile: Note | null
+let store: MemoryNoteStore
 
 function makeRunner(): QuickRunner {
-  const app = {
-    workspace: {
-      getActiveFile: () => activeFile,
-      getActiveViewOfType: (kind: unknown) =>
-        kind === MarkdownView && editing
-          ? { file: editing.file, editor: { getSelection: () => editing?.selection ?? '' } }
-          : null,
-    },
-    vault: { cachedRead: (file: Note) => Promise.resolve(files[file.path] ?? '') },
-  } as unknown as App
-
   const engine = {
     loadWorkspace: () => Promise.resolve({ chains: CHAINS, capabilities: { runLayoutFrames: true } }),
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
@@ -59,7 +37,8 @@ function makeRunner(): QuickRunner {
   } as unknown as EngineClient
 
   return new QuickRunner({
-    app,
+    app: {} as App,
+    store,
     engine,
     withEngine: action => action(),
     openResultView: () =>
@@ -92,9 +71,8 @@ beforeEach(() => {
   held = []
   shown = []
   notices = []
-  files = { 'premise.md': '---\ntags: [x]\n---\nthe whole note' }
-  editing = { file: note('premise.md'), selection: '' }
-  activeFile = note('premise.md')
+  store = new MemoryNoteStore({ 'premise.md': '---\ntags: [x]\n---\nthe whole note' })
+  store.inFront = { path: 'premise.md', selection: '' }
 })
 
 describe('what the run reads', () => {
@@ -105,30 +83,14 @@ describe('what the run reads', () => {
   })
 
   it('runs the selection when there is one, and the header says the run covered less', async () => {
-    editing = { file: note('premise.md'), selection: 'one paragraph' }
+    store.inFront = { path: 'premise.md', selection: 'one paragraph' }
     await run(0)
     expect(launched[0].seedPrompt).toBe('one paragraph')
     expect(shown[0].seed).toEqual({ note: 'premise.md', from: 'selection' })
   })
 
-  it('takes the note and the selection from one pane, so the header names what was run', async () => {
-    // A selection left in the editor while another leaf holds the active file.
-    files['aside.md'] = 'the other note'
-    editing = { file: note('aside.md'), selection: 'a passage of the aside' }
-    activeFile = note('premise.md')
-    await run(0)
-    expect(launched[0].seedPrompt).toBe('a passage of the aside')
-    expect(shown[0].seed).toEqual({ note: 'aside.md', from: 'selection' })
-  })
-
-  it('falls back to the active file when no editor is open', async () => {
-    editing = undefined
-    await run(0)
-    expect(launched[0].seedPrompt).toBe('the whole note')
-  })
-
   it('says so and runs nothing when the note is empty', async () => {
-    files['premise.md'] = '---\ntags: [x]\n---\n'
+    store.notes['premise.md'] = '---\ntags: [x]\n---\n'
     await run()
     expect(notices).toEqual(['This note is empty'])
     expect(launched).toEqual([])

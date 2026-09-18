@@ -1,4 +1,3 @@
-import type { TFile } from 'obsidian'
 import type { HoldNotes } from './holdNotes'
 import { fetchRun, type FetchedRun } from './rerunAndRefresh'
 import type { EngineClient } from '../engine/client'
@@ -23,7 +22,7 @@ export interface DirectRunDeps {
   /** The run on screen, if any — this command has no run of its own to pick from. */
   currentRun: () => RunResult | undefined
   /** Shows the hold once it is written. */
-  open: (note: TFile, runId: string) => Promise<void>
+  open: (path: string, runId: string) => Promise<void>
 }
 
 export class DirectRun {
@@ -40,15 +39,15 @@ export class DirectRun {
 
   /** Writes and opens the hold note for a run; without a chain name, the one the engine recorded. */
   async direct(runId: string, chainName?: string): Promise<void> {
-    const file = await this.write(runId, chainName)
-    if (file) await this.deps.open(file, runId)
+    const path = await this.write(runId, chainName)
+    if (path) await this.deps.open(path, runId)
   }
 
   /** Writes the hold note for a run, without opening it. */
-  async write(runId: string, chainName?: string): Promise<TFile | undefined> {
-    const file = await this.fetchAndWrite(runId, chainName)
-    if (file) this.deps.notify(`Wrote the hold note for run ${runId}`)
-    return file
+  async write(runId: string, chainName?: string): Promise<string | undefined> {
+    const path = await this.fetchAndWrite(runId, chainName)
+    if (path) this.deps.notify(`Wrote the hold note for run ${runId}`)
+    return path
   }
 
   /** A run being watched reached a hold; its note shows every hold reached so far. */
@@ -83,12 +82,12 @@ export class DirectRun {
     }
   }
 
-  private async fetchAndWrite(runId: string, chainName?: string): Promise<TFile | undefined> {
+  private async fetchAndWrite(runId: string, chainName?: string): Promise<string | undefined> {
     const fetched = await this.deps.withEngine(() => fetchRun(this.deps.engine, runId))
     return fetched && this.writeFetched(fetched, chainName)
   }
 
-  private writeFetched({ run, layout }: FetchedRun, chainName?: string): Promise<TFile | undefined> {
+  private writeFetched({ run, layout }: FetchedRun, chainName?: string): Promise<string | undefined> {
     return this.deps.holdNotes.write(holdNoteInput(run, layout.panels, chainName))
   }
 }

@@ -1,4 +1,4 @@
-import type { App } from 'obsidian'
+import { readFront, type NoteStore } from './noteStore'
 import { guardWrite } from './vaultWrite'
 import { fetchRun } from './rerunAndRefresh'
 import { runHeadless } from '../run/headlessRun'
@@ -14,7 +14,7 @@ export const NOTHING_TO_QUEST = 'Nothing new in the Conversation section to send
 export const NOT_A_PROPOSER = (name: string): string => `@${name} is not a proposer — only a proposal can go on a side quest`
 
 export interface SideQuestDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
@@ -25,10 +25,9 @@ export class SideQuest {
   constructor(private readonly deps: SideQuestDeps) {}
 
   async start(): Promise<void> {
-    const { app, notify } = this.deps
-    const file = app.workspace.getActiveFile()
-    const content = file?.extension === 'md' ? await app.vault.cachedRead(file) : ''
-    if (!file || !holdHeading(content)) {
+    const { store, notify } = this.deps
+    const { path, content } = (await readFront(store)) ?? { content: '' }
+    if (!path || !holdHeading(content)) {
       notify(NOT_A_HOLD_NOTE)
       return
     }
@@ -44,8 +43,8 @@ export class SideQuest {
 
     const wrote = await guardWrite(notify, 'the hold note', async () => {
       // Read again: the human may have written in the note while the side quest went.
-      const current = await this.deps.app.vault.cachedRead(file)
-      await this.deps.app.vault.modify(file, appendSideQuestResult(current, quest, run))
+      const current = (await store.read(path)) ?? ''
+      await store.modify(path, appendSideQuestResult(current, quest, run))
       return true
     })
     if (wrote) notify(`Side quest ran as ${run.runId}`)

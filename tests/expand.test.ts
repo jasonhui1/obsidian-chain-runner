@@ -17,7 +17,8 @@ import type { ProposalData } from '@/ui/proposal'
 import type { EngineClient } from '@/engine/client'
 import type { Capabilities, ChainSummary, RunEvent } from '@/engine/types'
 import type { App } from 'obsidian'
-import { lastModal, resetModals, TFile as StubFile, TFolder } from './obsidian'
+import { lastModal, resetModals } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /** The order an expansion happens in. The pure pieces are checked in their own files. */
 
@@ -41,16 +42,9 @@ let placed: { proposals: readonly PlacedProposal[]; sourceId: string }[]
 let edits: { proposalId: string; action: 'accept' | 'dismiss' }[]
 let selectedProposal: ProposalData | undefined
 let editable: boolean
+let store: MemoryNoteStore
 let vault: Record<string, string>
-let folders: string[]
-let trashed: string[]
 let proposalIds: number
-
-const file = (path: string): StubFile => {
-  const stub = new StubFile()
-  stub.path = path
-  return stub
-}
 
 /** The engine's own layout frame: `n` panels, the first `done` of them settled. */
 const layout = (names: string[], done: number): RunEvent => ({
@@ -77,44 +71,6 @@ const finishes = (): RunEvent[] => [
 ]
 
 function makeExpand(): Expand {
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (vault[path] !== undefined) return file(path)
-        if (!folders.includes(path)) return null
-        const folder = new TFolder()
-        folder.path = path
-        return folder
-      },
-      cachedRead: (target: { path: string }) => Promise.resolve(vault[target.path] ?? ''),
-      create: (path: string, content: string) => {
-        vault[path] = content
-        return Promise.resolve(file(path))
-      },
-      modify: (target: { path: string }, content: string) => {
-        vault[target.path] = content
-        return Promise.resolve()
-      },
-      createFolder: (path: string) => {
-        folders.push(path)
-        return Promise.resolve(undefined)
-      },
-    },
-    fileManager: {
-      trashFile: (target: { path: string }) => {
-        trashed.push(target.path)
-        delete vault[target.path]
-        return Promise.resolve()
-      },
-    },
-    metadataCache: {
-      getFirstLinkpathDest: (linkpath: string) => {
-        const path = linkpath.endsWith('.md') ? linkpath : `${linkpath}.md`
-        return vault[path] === undefined ? null : file(path)
-      },
-    },
-  } as unknown as App
-
   const surface: NodeSurface = {
     unavailable: () => undefined,
     hasActiveDrawing: () => true,
@@ -152,14 +108,15 @@ function makeExpand(): Expand {
 
   const notify = (message: string): void => void notices.push(message)
   return new Expand({
-    app,
+    app: {} as App,
+    store,
     engine,
     withEngine: async action => (online ? action() : void notices.push(OFFLINE_NOTICE)),
     notify,
     markOffline: () => {},
     holdReached: (runId, nodeId) => Promise.resolve(void held.push(`${runId} ${nodeId}`)),
     surface,
-    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
+    notes: new OutputNotes({ store, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
     newProposalId: () => `p-${++proposalIds}`,
   })
 }
@@ -215,9 +172,8 @@ beforeEach(() => {
   edits = []
   selectedProposal = undefined
   editable = true
-  vault = {}
-  folders = []
-  trashed = []
+  store = new MemoryNoteStore()
+  vault = store.notes
   proposalIds = 0
 })
 
@@ -314,7 +270,7 @@ describe('what lands on the drawing', () => {
     await expandWith()
     expect(placed).toHaveLength(1)
     expect(placed[0]!.sourceId).toBe('block-7')
-    expect(placed[0]!.proposals.map(one => one.note.path)).toEqual([OPTIMIST, SKEPTIC])
+    expect(placed[0]!.proposals.map(one => one.notePath)).toEqual([OPTIMIST, SKEPTIC])
   })
 
   it('gives each proposal its own identity and the note behind it', async () => {
@@ -375,7 +331,7 @@ describe('keeping and dropping a proposal', () => {
     makeExpand().handleLinkClick(clicked({ role: 'accept' }))
     await settle()
     expect(edits).toEqual([{ proposalId: 'p-1', action: 'accept' }])
-    expect(trashed).toEqual([])
+    expect(store.trashed).toEqual([])
     expect(vault[OPTIMIST]).toBeDefined()
   })
 
@@ -384,7 +340,7 @@ describe('keeping and dropping a proposal', () => {
     makeExpand().handleLinkClick(clicked({ role: 'dismiss' }))
     await settle()
     expect(edits).toEqual([{ proposalId: 'p-1', action: 'dismiss' }])
-    expect(trashed).toEqual([OPTIMIST])
+    expect(store.trashed).toEqual([OPTIMIST])
   })
 
   it('decides the selected proposal from the palette, with no modifier key', async () => {
@@ -392,7 +348,7 @@ describe('keeping and dropping a proposal', () => {
     vault[OPTIMIST] = 'the optimist said something'
     await makeExpand().decideSelected('dismiss')
     expect(edits).toEqual([{ proposalId: 'p-1', action: 'dismiss' }])
-    expect(trashed).toEqual([OPTIMIST])
+    expect(store.trashed).toEqual([OPTIMIST])
   })
 
   it('keeps the note when the palette keeps the selected proposal', async () => {
@@ -400,7 +356,7 @@ describe('keeping and dropping a proposal', () => {
     vault[OPTIMIST] = 'the optimist said something'
     await makeExpand().decideSelected('accept')
     expect(edits).toEqual([{ proposalId: 'p-1', action: 'accept' }])
-    expect(trashed).toEqual([])
+    expect(store.trashed).toEqual([])
   })
 
   it('asks for a proposal when the palette command finds none selected', async () => {
@@ -415,6 +371,6 @@ describe('keeping and dropping a proposal', () => {
     makeExpand().handleLinkClick(clicked({ role: 'dismiss' }))
     await settle()
     expect(notices).toEqual([PROPOSAL_GONE])
-    expect(trashed).toEqual([])
+    expect(store.trashed).toEqual([])
   })
 })

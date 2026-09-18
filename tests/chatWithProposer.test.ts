@@ -17,8 +17,7 @@ import type {
   RunMeta,
   RunRequest,
 } from '@/engine/types'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /** The "Chat with proposer" command's order of events; the rule itself is `chat.test.ts`. */
 
@@ -72,7 +71,7 @@ const theRun = (): RunMeta => ({
 
 const written = () => holdNoteContent({ runId: RUN, chainName: 'creative-director', panels, thoughts: {} })
 
-let active: TFile | undefined
+let store: MemoryNoteStore
 let notes: Record<string, string>
 let notices: string[]
 let runFrames: RunEvent[]
@@ -94,34 +93,7 @@ let promoteFrames: RunEvent[]
 let promoteRefusal: EngineHttpError | undefined
 let promotes: { runId: string; nodeId: string; request: PromoteRequest }[]
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.extension = 'md'
-  return stub as unknown as TFile
-}
-
 function makeCommand(): ChatWithProposer {
-  const app = {
-    workspace: { getActiveFile: () => active ?? null },
-    vault: {
-      getAbstractFileByPath: (path: string) => (notes[path] !== undefined ? file(path) : null),
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      modify: (target: { path: string }, content: string) => {
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-    },
-    fileManager: {
-      renameFile: (target: { path: string }, path: string) => {
-        notes[path] = notes[target.path]
-        delete notes[target.path]
-        target.path = path
-        return Promise.resolve()
-      },
-    },
-  } as unknown as App
-
   const engine = {
     getRun: (runId: string) => Promise.resolve(runId === RUN ? theRun() : { ...theRun(), runId: NEW }),
     getLayout: (runId: string): Promise<LayoutModel> => Promise.resolve({ kind: 'columns', panels: runId === RUN ? panels : panels }),
@@ -148,7 +120,7 @@ function makeCommand(): ChatWithProposer {
   } as unknown as EngineClient
 
   return new ChatWithProposer({
-    app,
+    store,
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
@@ -157,8 +129,9 @@ function makeCommand(): ChatWithProposer {
 }
 
 beforeEach(() => {
-  notes = { [HOLD_PATH]: written() }
-  active = file(HOLD_PATH)
+  store = new MemoryNoteStore({ [HOLD_PATH]: written() })
+  notes = store.notes
+  store.inFront = { path: HOLD_PATH }
   notices = []
   runFrames = []
   online = true

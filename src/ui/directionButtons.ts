@@ -1,4 +1,5 @@
-import { FuzzySuggestModal, TFile, type App, type MarkdownPostProcessor } from 'obsidian'
+import { FuzzySuggestModal, type App, type MarkdownPostProcessor } from 'obsidian'
+import type { NoteStore } from './noteStore'
 import { guardWrite } from './vaultWrite'
 import { appendDirectionLine, directionLine, DIRECTION_VERBS, type DirectionVerb } from '../run/holdNote'
 
@@ -13,7 +14,9 @@ export const PROPOSAL_BUTTON_CLASS = 'chain-runner-direction-button'
 const HOLD_TITLE = /^Hold: run \S+/
 
 export interface DirectionButtonsDeps {
+  /** For the COMBINE picker. */
   app: App
+  store: NoteStore
   notify: (message: string) => void
 }
 
@@ -69,11 +72,10 @@ function buttonRow(note: NoteContext, name: string, others: string[]): HTMLEleme
 }
 
 async function append(note: NoteContext, verb: DirectionVerb, name: string, secondName?: string): Promise<void> {
-  const file = note.deps.app.vault.getAbstractFileByPath(note.sourcePath)
-  if (!(file instanceof TFile)) return
-  await guardWrite(note.deps.notify, 'the hold note', async () => {
-    const current = await note.deps.app.vault.cachedRead(file)
-    await note.deps.app.vault.modify(file, appendDirectionLine(current, directionLine(verb, name, secondName)))
+  const { store, notify } = note.deps
+  if (store.at(note.sourcePath) !== 'note') return
+  await guardWrite(notify, 'the hold note', async () => {
+    await store.process(note.sourcePath, current => appendDirectionLine(current, directionLine(verb, name, secondName)))
     return true
   })
 }

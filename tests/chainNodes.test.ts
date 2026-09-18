@@ -97,7 +97,7 @@ function makeSurface(): NodeSurface {
 
 function makeNodes(): ChainNodes {
   return new ChainNodes({
-    app: {} as unknown as App,
+    app: {} as App,
     engine: { listChains: () => Promise.resolve(chains) } as unknown as EngineClient,
     withEngine: async action => (online ? action() : undefined),
     notify: message => notices.push(message),
@@ -517,7 +517,7 @@ describe('what a selection has to be before anything opens', () => {
   it('waits for the press to settle before opening anything', async () => {
     let settle: ((at: { x: number; y: number } | undefined) => void) | undefined
     const nodes = new ChainNodes({
-      app: {} as unknown as App,
+      app: {} as App,
       engine: { listChains: () => Promise.resolve(chains) } as unknown as EngineClient,
       withEngine: async action => action(),
       notify: message => notices.push(message),

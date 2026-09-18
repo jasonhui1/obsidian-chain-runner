@@ -1,4 +1,4 @@
-import type { App } from 'obsidian'
+import { readFront, type NoteStore } from './noteStore'
 import { guardWrite } from './vaultWrite'
 import { fetchRun } from './rerunAndRefresh'
 import { appendRoomAnswers, pendingRoomQuestion, type RoomAnswer } from '../run/askRoom'
@@ -14,7 +14,7 @@ export const NOTHING_TO_ASK = 'Nothing new in the Conversation section to ask th
 export const NOBODY_ANSWERED = 'Nobody in the room answered'
 
 export interface AskTheRoomDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
@@ -24,11 +24,10 @@ export class AskTheRoom {
   constructor(private readonly deps: AskTheRoomDeps) {}
 
   async start(): Promise<void> {
-    const { app, notify } = this.deps
-    const file = app.workspace.getActiveFile()
-    const content = file?.extension === 'md' ? await app.vault.cachedRead(file) : ''
+    const { store, notify } = this.deps
+    const { path, content } = (await readFront(store)) ?? { content: '' }
     const heading = holdHeading(content)
-    if (!file || !heading) {
+    if (!path || !heading) {
       notify(NOT_A_HOLD_NOTE)
       return
     }
@@ -44,8 +43,8 @@ export class AskTheRoom {
 
     const wrote = await guardWrite(notify, 'the hold note', async () => {
       // Read again: the human may have written in the note while the room went.
-      const current = await this.deps.app.vault.cachedRead(file)
-      await this.deps.app.vault.modify(file, appendRoomAnswers(current, question, answers))
+      const current = (await store.read(path)) ?? ''
+      await store.modify(path, appendRoomAnswers(current, question, answers))
       return true
     })
     if (wrote) notify(`The room answered (${answers.length})`)

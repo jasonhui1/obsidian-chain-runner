@@ -1,7 +1,7 @@
-import type { App, TAbstractFile, TFile } from 'obsidian'
 import type { AskTheRoom } from './askTheRoom'
 import type { ChatWithProposer } from './chatWithProposer'
 import type { HoldNotes } from './holdNotes'
+import type { NoteStore } from './noteStore'
 import type { RerunDownstream } from './rerunDownstream'
 import type { Resume, ResumeResult } from './resume'
 import type { RunPanels } from './runPanels'
@@ -41,7 +41,7 @@ export { rerunDoing, type OnRerunProgress, type RerunProgress, type RerunStep } 
 export const PROPOSAL_HEADING = 'A proposal cannot hold a “### ” heading: the hold note starts the next proposal there'
 
 export interface HoldActionsDeps {
-  app: App
+  store: NoteStore
   notify: (message: string) => void
   notes: HoldNotes
   /** Writes a run's hold from what the engine recorded. */
@@ -61,9 +61,8 @@ export class HoldActions {
 
   /** The run's hold, or `undefined` when none has been written. */
   async read(runId: string): Promise<HoldReading | undefined> {
-    const file = this.deps.notes.find(runId)
-    if (!file) return undefined
-    const content = await this.deps.app.vault.cachedRead(file)
+    const content = (await this.holdNote(runId))?.content
+    if (content === undefined) return undefined
     // The run the note names: a landing rewrites the note before it is renamed.
     const panels = await this.deps.panels.of(holdHeading(content)?.runId ?? runId)
     return readHold(content, panels ?? [])
@@ -102,14 +101,14 @@ export class HoldActions {
       this.deps.notify(PROPOSAL_HEADING)
       return false
     }
-    const found = await this.holdFile(runId)
+    const found = await this.hold(runId)
     return found !== undefined && hasProposal(found.content, proposal) && this.edit(runId, content => rewriteProposal(content, proposal, text))
   }
 
   /** The edited proposals rerun downstream; answers the run the hold now lives under. */
   async rerun(runId: string, onProgress?: OnRerunProgress): Promise<string | undefined> {
-    const found = await this.holdFile(runId)
-    return found && this.deps.rerun.rerun(found.file, found.content, onProgress)
+    const found = await this.hold(runId)
+    return found && this.deps.rerun.rerun(found.path, found.content, onProgress)
   }
 
   /** A free-text CHANGE line in the Direction; whether it was written. */
@@ -137,7 +136,7 @@ export class HoldActions {
   /** A proposal, as the hold has it, sent through another chain; the result kept with it. Whether both were written. */
   async sideQuest(runId: string, proposal: string, chain: string): Promise<boolean> {
     const quest = { name: proposal, chainName: oneLine(chain) }
-    const found = await this.holdFile(runId)
+    const found = await this.hold(runId)
     if (quest.chainName === '' || !found || !hasProposal(found.content, proposal)) return false
     const run = await this.deps.quest.send(found.content, quest)
     return run !== undefined && this.edit(runId, content => appendSideQuest(content, quest, run))
@@ -148,8 +147,8 @@ export class HoldActions {
    * carried on as linked back; `undefined` when nothing ran.
    */
   async resume(runId: string): Promise<ResumeResult | undefined> {
-    const file = this.deps.notes.find(runId)
-    return file ? this.deps.resume.resumeNote(file) : undefined
+    const path = this.deps.notes.find(runId)
+    return path ? this.deps.resume.resumeNote(path) : undefined
   }
 
   /** The chains a side quest can go through; none while the engine cannot say. */
@@ -164,9 +163,9 @@ export class HoldActions {
 
   /** A reply made its proposal's revision and rerun downstream; answers the run the hold now lives under. */
   async revise(runId: string, turn: RepliedTurn, onProgress?: OnRerunProgress): Promise<string | undefined> {
-    const found = await this.holdFile(runId)
+    const found = await this.hold(runId)
     const mark = (content: string, newRunId: string): string => markTurnRevised(content, turn, newRunId)
-    return found && this.deps.chat.revise(found.file, found.heading, turn, mark, onProgress)
+    return found && this.deps.chat.revise(found.path, found.heading, turn, mark, onProgress)
   }
 
   /** Writes the hold for a run that has none. */
@@ -175,36 +174,38 @@ export class HoldActions {
   }
 
   async openInTab(runId: string): Promise<void> {
-    const file = this.deps.notes.find(runId)
-    if (file) await this.deps.app.workspace.getLeaf('tab').openFile(file)
+    const path = this.deps.notes.find(runId)
+    if (path) await this.deps.store.open(path)
   }
 
   /** Calls `listener` whenever the run's hold changes, by any hand; returns what stops it. */
   onChange(runId: string, listener: () => void): () => void {
-    const vault = this.deps.app.vault
     const path = this.deps.notes.pathOf(runId)
-    const heard = (file: TAbstractFile): void => {
-      if (file.path === path) listener()
-    }
-    const refs = [vault.on('modify', heard), vault.on('create', heard), vault.on('delete', heard)]
-    return () => refs.forEach(ref => vault.offref(ref))
+    return this.deps.store.onChange(changed => {
+      if (changed === path) listener()
+    })
   }
 
-  /** The run's hold note, when it has one. */
-  private async holdFile(runId: string): Promise<{ file: TFile; heading: HoldHeading; content: string } | undefined> {
-    const file = this.deps.notes.find(runId)
-    if (!file) return undefined
-    const content = await this.deps.app.vault.cachedRead(file)
-    const heading = holdHeading(content)
-    return heading && { file, heading, content }
+  /** The run's hold note, read, when it has one and it names its run. */
+  private async hold(runId: string): Promise<{ path: string; heading: HoldHeading; content: string } | undefined> {
+    const found = await this.holdNote(runId)
+    const heading = found && holdHeading(found.content)
+    return heading && { ...found, heading }
+  }
+
+  /** The run's hold note and what it says, when it has one. */
+  private async holdNote(runId: string): Promise<{ path: string; content: string } | undefined> {
+    const path = this.deps.notes.find(runId)
+    const content = path === undefined ? undefined : await this.deps.store.read(path)
+    return path === undefined || content === undefined ? undefined : { path, content }
   }
 
   /** Whether the edit reached the note. */
   private async edit(runId: string, change: (content: string) => string): Promise<boolean> {
-    const file = this.deps.notes.find(runId)
-    if (!file) return false
+    const path = this.deps.notes.find(runId)
+    if (!path) return false
     const wrote = await guardWrite(this.deps.notify, 'the hold note', async () => {
-      await this.deps.app.vault.process(file, change)
+      await this.deps.store.process(path, change)
       return true
     })
     return wrote === true

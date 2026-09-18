@@ -4,8 +4,7 @@ import { UNSUPPORTED_RESUME } from '@/run/resume'
 import type { EngineClient } from '@/engine/client'
 import { EngineHttpError } from '@/engine/transport'
 import type { Capabilities, RunEvent } from '@/engine/types'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile, TFolder } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /**
  * The order "Resume" happens in: what it refuses to run on, what it sends the
@@ -33,9 +32,8 @@ const holdNote = (
   waiting = WAITING,
 ) => `# Hold: run 2026-09-15-Ab3dE1 · creative-director\n\n${waiting}\n## Direction\n${direction}\n## Conversation\n`
 
-let active: TFile | undefined
+let store: MemoryNoteStore
 let notes: Record<string, string>
-let folders: string[]
 let notices: string[]
 let runFrames: RunEvent[]
 let online: boolean
@@ -43,49 +41,9 @@ let requests: unknown[]
 let refusal: unknown
 let refreshed: string[]
 let openedForks: string[]
-let refuseWrites: boolean
 let capabilities: Capabilities
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.name = path.slice(path.lastIndexOf('/') + 1)
-  stub.extension = 'md'
-  return stub as unknown as TFile
-}
-
 function makeResume(): Resume {
-  const app = {
-    workspace: {
-      getActiveFile: () => active ?? null,
-    },
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (notes[path] !== undefined) return file(path)
-        if (folders.includes(path)) {
-          const folder = new TFolder()
-          folder.path = path
-          return folder
-        }
-        return null
-      },
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      create: (path: string, content: string) => {
-        notes[path] = content
-        return Promise.resolve(file(path))
-      },
-      modify: (target: { path: string }, content: string) => {
-        if (refuseWrites) return Promise.reject(new Error('the file is read-only'))
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-      createFolder: (path: string) => {
-        folders.push(path)
-        return Promise.resolve(undefined)
-      },
-    },
-  } as unknown as App
-
   const engine = {
     loadWorkspace: () => Promise.resolve({ chains: [], capabilities }),
     resumeRun: function* (runId: string, request: unknown) {
@@ -96,7 +54,7 @@ function makeResume(): Resume {
   } as unknown as EngineClient
 
   return new Resume({
-    app,
+    store,
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
@@ -107,9 +65,9 @@ function makeResume(): Resume {
 }
 
 beforeEach(() => {
-  notes = { [HOLD_PATH]: holdNote() }
-  active = file(HOLD_PATH)
-  folders = []
+  store = new MemoryNoteStore({ [HOLD_PATH]: holdNote() })
+  notes = store.notes
+  store.inFront = { path: HOLD_PATH }
   notices = []
   runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }]
   online = true
@@ -117,7 +75,6 @@ beforeEach(() => {
   refusal = undefined
   refreshed = []
   openedForks = []
-  refuseWrites = false
   capabilities = { runResume: true }
 })
 
@@ -132,7 +89,7 @@ describe('start', () => {
   })
 
   it('says there is nothing to resume when no note is open', async () => {
-    active = undefined
+    store.inFront = undefined
     await makeResume().start()
     expect(notices).toEqual([NOT_A_HOLD_NOTE])
   })
@@ -305,45 +262,45 @@ describe('a resume the engine forked', () => {
 
 describe('resumeNote', () => {
   it('reports the run the resume carried on as', async () => {
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, canon: 'written' })
+    expect(await makeResume().resumeNote(HOLD_PATH)).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, canon: 'written' })
   })
 
   it('reports a forked run under the id the stream named, not the one it posted to', async () => {
     runFrames = [{ type: 'run_start', runId: '2026-09-21-Forked' }]
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toMatchObject({ runId: '2026-09-21-Forked', forked: true })
+    expect(await makeResume().resumeNote(HOLD_PATH)).toMatchObject({ runId: '2026-09-21-Forked', forked: true })
   })
 
   it('says the ticks were held back when the run failed', async () => {
     runFrames = [{ type: 'run_start', runId: '2026-09-15-Ab3dE1' }, { type: 'error', error: 'the model refused' }]
-    const result = await makeResume().resumeNote(file(HOLD_PATH))
+    const result = await makeResume().resumeNote(HOLD_PATH)
     expect(result).toEqual({ runId: '2026-09-15-Ab3dE1', forked: false, error: 'the model refused', canon: 'held-back' })
   })
 
   it('carries the failure with no run when the stream never named one', async () => {
     runFrames = [{ type: 'error', error: 'nothing to resume' }]
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toEqual({ error: 'nothing to resume', forked: false, canon: 'held-back' })
+    expect(await makeResume().resumeNote(HOLD_PATH)).toEqual({ error: 'nothing to resume', forked: false, canon: 'held-back' })
   })
 
   it('has nothing to report when the engine is offline', async () => {
     online = false
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+    expect(await makeResume().resumeNote(HOLD_PATH)).toBeUndefined()
   })
 
   it('has nothing to report when the engine refused, which says why on its own', async () => {
     refusal = new EngineHttpError(404, '/resume', 'no such hold')
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+    expect(await makeResume().resumeNote(HOLD_PATH)).toBeUndefined()
     expect(notices).toEqual(['Run 2026-09-15-Ab3dE1 no longer has the hold this note answers'])
   })
 
   it('says there is nothing to resume for a note that is not a hold', async () => {
     notes[HOLD_PATH] = 'just some words'
-    expect(await makeResume().resumeNote(file(HOLD_PATH))).toBeUndefined()
+    expect(await makeResume().resumeNote(HOLD_PATH)).toBeUndefined()
     expect(notices).toEqual([NOT_A_HOLD_NOTE])
   })
 
   it('still reports the run when the hold note refuses the link', async () => {
-    refuseWrites = true
-    const result = await makeResume().resumeNote(file(HOLD_PATH))
+    store.refuse(HOLD_PATH)
+    const result = await makeResume().resumeNote(HOLD_PATH)
     expect(result).toMatchObject({ runId: '2026-09-15-Ab3dE1' })
     expect(notices).toContain('Could not write the hold note: the file is read-only')
   })

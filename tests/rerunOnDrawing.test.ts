@@ -4,7 +4,6 @@ import type { RerunLanding } from '@/run/rerunWatch'
 import type { RunProvenance } from '@/ui/outputNotes'
 import type { RunPanel } from '@/run/panels'
 import type { LayoutPanel } from '@/engine/types'
-import type { TFile } from 'obsidian'
 
 /** A landed rerun, followed on every drawing open: which notes are filed, and what each drawing is asked to do. */
 
@@ -37,7 +36,7 @@ function makeFollower(): RerunOnDrawing {
       if (shown === 'unreachable') throw new Error('That drawing went away')
       if (!shown) return false
       const notes: Record<string, string | undefined> = {}
-      for (const output of shown) notes[output] = (await noteFor(output))?.path
+      for (const output of shown) notes[output] = await noteFor(output)
       followed.push({ view: on as string, from, to, notes })
       return true
     },
@@ -48,7 +47,7 @@ function makeFollower(): RerunOnDrawing {
       write: async (panel, run) => {
         written.push({ panel, run })
         if (refused.includes(panel.name)) return undefined
-        return { path: `runs/${run.runId}/${panel.name}.md` } as TFile
+        return `runs/${run.runId}/${panel.name}.md`
       },
     },
     notify: message => void notices.push(message),

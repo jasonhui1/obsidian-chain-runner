@@ -1,7 +1,7 @@
-import type { App } from 'obsidian'
 import { chainIsUnset, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
 import type { DrawingView, NodeReading, NodeSurface, PlacedOutput } from './excalidraw'
 import type { Box } from './nodeScene'
+import type { NoteStore } from './noteStore'
 import type { OutputNotes } from './outputNotes'
 import { CHAIN_GONE, NODE_GONE } from './chainNodes'
 import { runIntoNotes, type ChainRunOutcome } from './chainRun'
@@ -41,7 +41,7 @@ export const NO_FRAME =
   'This Excalidraw cannot make frames, so the outputs were placed loose beside the node. Update it to group them.'
 
 export interface NodeRunDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   /** Offline is a notice and nothing else. */
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
@@ -123,7 +123,7 @@ export class NodeRun {
     }
 
     const seed = await seedFromInputs({
-      app: this.deps.app,
+      store: this.deps.store,
       notify: this.deps.notify,
       inputs: reading.inputs.inputs,
       drawing: reading.drawing,
@@ -214,7 +214,7 @@ export class NodeRun {
       run: { runId, chainName: plan.chain.name },
     })
 
-    const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, note: one.note.file }))
+    const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, notePath: one.note.path }))
     await this.place(frame, placed, plan.view)
     return outputs
   }

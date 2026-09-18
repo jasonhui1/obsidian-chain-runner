@@ -1,4 +1,5 @@
-import { FuzzySuggestModal, type App, type TFile } from 'obsidian'
+import { FuzzySuggestModal, type App } from 'obsidian'
+import { baseName, fileName, type NoteStore } from './noteStore'
 import { NOT_SETTLED } from './keepPiece'
 import type { OutputNotes } from './outputNotes'
 import { keptNoteContent, keptNotePath, trimToMarks, type MarkRange } from '../run/keepMarks'
@@ -17,13 +18,15 @@ export type MarkSource =
   /** A panel of a run: what it keeps is an output note, cut down. */
   | { kind: 'panel'; text: string; panel: RunPanel; run: RunResult }
   /** A note in the vault: what it keeps goes beside it. */
-  | { kind: 'note'; text: string; file: TFile }
+  | { kind: 'note'; text: string; path: string }
 
 /** Opens the marking surface over `text`, and answers with the ranges marked. */
 export type Marker = (text: string, onDone: (marked: MarkRange[]) => void) => void
 
 export interface KeepMarksDeps {
+  /** For the destination picker. */
   app: App
+  store: NoteStore
   notify: (message: string) => void
   /** The output-note convention, shared with every other way of keeping a piece. */
   notes: OutputNotes
@@ -62,13 +65,12 @@ export class KeepMarks {
   }
 
   private async writeNote(source: MarkSource, kept: string): Promise<void> {
-    const note = source.kind === 'panel' ? await this.keptPanel(source, kept) : await this.keptNote(source, kept)
-    if (!note) return
-    await this.deps.app.workspace.getLeaf(true).openFile(note)
+    const path = source.kind === 'panel' ? await this.keptPanel(source, kept) : await this.keptNote(source, kept)
+    if (path) await this.deps.store.open(path)
   }
 
   /** A trimmed panel is still that run's output, so it keeps the run's provenance. */
-  private async keptPanel(source: Extract<MarkSource, { kind: 'panel' }>, kept: string): Promise<TFile | undefined> {
+  private async keptPanel(source: Extract<MarkSource, { kind: 'panel' }>, kept: string): Promise<string | undefined> {
     const { panel, run } = source
     if (!run.runId) {
       this.deps.notify(NOT_SETTLED)
@@ -85,18 +87,18 @@ export class KeepMarks {
   }
 
   /** A note trimmed from a note: beside it, naming it. */
-  private async keptNote(source: Extract<MarkSource, { kind: 'note' }>, kept: string): Promise<TFile | undefined> {
-    const { file } = source
+  private async keptNote(source: Extract<MarkSource, { kind: 'note' }>, kept: string): Promise<string | undefined> {
+    const { path } = source
     return this.deps.notes.writeNote(
-      keptNotePath(file.path, file.basename),
-      keptNoteContent(kept, { note: file.basename }),
+      keptNotePath(path, baseName(path)),
+      keptNoteContent(kept, { note: baseName(path) }),
     )
   }
 }
 
 /** What the run header names as the seed, when the kept text is run as one. */
 function seedSource(source: MarkSource): SeedSource {
-  if (source.kind === 'note') return { name: source.file.name, path: source.file.path }
+  if (source.kind === 'note') return { name: fileName(source.path), path: source.path }
   // A panel has no note behind it; links in it resolve against the vault root.
   return { name: `${source.run.chainName} · ${source.panel.name}`, path: '' }
 }

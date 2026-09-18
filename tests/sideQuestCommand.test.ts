@@ -3,8 +3,7 @@ import { NOT_A_HOLD_NOTE, NOTHING_TO_QUEST, NOT_A_PROPOSER, SideQuest } from '@/
 import { holdNoteContent } from '@/run/holdNote'
 import type { EngineClient } from '@/engine/client'
 import type { AgentOutput, LayoutModel, LayoutPanel, RunEvent, RunMeta, RunRequest } from '@/engine/types'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /** The "Side quest" command's order of events; the rule itself is `sideQuest.test.ts`. */
 
@@ -50,32 +49,14 @@ const questRun: RunMeta = {
 
 const written = () => holdNoteContent({ runId: RUN, chainName: 'creative-director', panels, thoughts: {} })
 
-let active: TFile | undefined
+let store: MemoryNoteStore
 let notes: Record<string, string>
 let notices: string[]
 let runFrames: RunEvent[]
 let online: boolean
 let requests: RunRequest[]
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.extension = 'md'
-  return stub as unknown as TFile
-}
-
 function makeCommand(): SideQuest {
-  const app = {
-    workspace: { getActiveFile: () => active ?? null },
-    vault: {
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      modify: (target: { path: string }, content: string) => {
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-    },
-  } as unknown as App
-
   const engine = {
     getRun: (runId: string) => Promise.resolve(runId === RUN ? theRun : questRun),
     getLayout: (): Promise<LayoutModel> => Promise.resolve({ kind: 'columns', panels }),
@@ -86,7 +67,7 @@ function makeCommand(): SideQuest {
   } as unknown as EngineClient
 
   return new SideQuest({
-    app,
+    store,
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
@@ -95,8 +76,9 @@ function makeCommand(): SideQuest {
 }
 
 beforeEach(() => {
-  notes = { [HOLD_PATH]: written() }
-  active = file(HOLD_PATH)
+  store = new MemoryNoteStore({ [HOLD_PATH]: written() })
+  notes = store.notes
+  store.inFront = { path: HOLD_PATH }
   notices = []
   runFrames = []
   online = true

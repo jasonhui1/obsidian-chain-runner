@@ -1,4 +1,5 @@
-import { MarkdownView, type App } from 'obsidian'
+import type { App } from 'obsidian'
+import { fileName, type NoteStore } from './noteStore'
 import { ChainPicker, ParameterPicker } from './chainPicker'
 import type { RunResultView } from './resultView'
 import { buildRunResult, emptyRunState, settleRun } from '../run/session'
@@ -8,7 +9,9 @@ import type { EngineClient } from '../engine/client'
 import { parameterToAsk, type ChainSummary } from '../engine/types'
 
 export interface QuickRunDeps {
+  /** For the chain and parameter pickers. */
   app: App
+  store: NoteStore
   engine: EngineClient
   /** Every call that needs the engine goes through this; offline is a notice and nothing else. */
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
@@ -45,16 +48,14 @@ export class QuickRunner {
 
   /** The command. Everything after this is the reader picking, then the stream. */
   async start(): Promise<void> {
-    const editing = this.deps.app.workspace.getActiveViewOfType(MarkdownView)
-    // The note and the selection come from one view, never two.
-    const note = editing?.file ?? this.deps.app.workspace.getActiveFile()
-    if (!note || note.extension !== 'md') {
+    const note = this.deps.store.front()
+    if (!note) {
       this.deps.notify('Open a note to run a chain on it')
       return
     }
     const seed = chooseSeed({
-      selection: editing?.editor.getSelection(),
-      noteText: await this.deps.app.vault.cachedRead(note),
+      selection: note.selection,
+      noteText: (await this.deps.store.read(note.path)) ?? '',
     })
     if (seed.text === '') {
       // A whitespace-only selection is no selection, so this is always an empty note.
@@ -62,7 +63,7 @@ export class QuickRunner {
       return
     }
 
-    await this.runOn(seed, { name: note.name, path: note.path })
+    await this.runOn(seed, { name: fileName(note.path), path: note.path })
   }
 
   /**

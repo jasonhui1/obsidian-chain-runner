@@ -5,8 +5,7 @@ import type { EngineClient } from '@/engine/client'
 import { EngineOfflineError } from '@/engine/transport'
 import type { AgentOutput, HoldRecord, LayoutModel, RunMeta } from '@/engine/types'
 import type { RunResult } from '@/run/session'
-import type { App, TFile } from 'obsidian'
-import { TFile as StubFile, TFolder } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /**
  * The order "Direct this run" happens in: what it refuses to run on, what it
@@ -26,8 +25,8 @@ const result = (over: Partial<RunResult> = {}): RunResult => ({
 
 let current: RunResult | undefined
 let notices: string[]
+let store: MemoryNoteStore
 let notes: Record<string, string>
-let folders: string[]
 let layout: LayoutModel
 let agentOutputs: AgentOutput[]
 let online: boolean
@@ -55,42 +54,7 @@ const pick = (over: Partial<HoldRecord> = {}): HoldRecord => ({
   ...over,
 })
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.name = path.slice(path.lastIndexOf('/') + 1)
-  return stub as unknown as TFile
-}
-
 function makeDirectRun(): DirectRun {
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (notes[path] !== undefined) return file(path)
-        if (folders.includes(path)) {
-          const folder = new TFolder()
-          folder.path = path
-          return folder
-        }
-        return null
-      },
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      getMarkdownFiles: () => Object.keys(notes).map(file),
-      create: (path: string, content: string) => {
-        notes[path] = content
-        return Promise.resolve(file(path))
-      },
-      modify: (target: { path: string }, content: string) => {
-        notes[target.path] = content
-        return Promise.resolve()
-      },
-      createFolder: (path: string) => {
-        folders.push(path)
-        return Promise.resolve(undefined)
-      },
-    },
-  } as unknown as App
-
   const engine = {
     getLayout: (runId: string) => {
       requestedRunIds.push(runId)
@@ -111,10 +75,10 @@ function makeDirectRun(): DirectRun {
     engine,
     withEngine: async action => (online ? action() : undefined),
     notify: message => void notices.push(message),
-    holdNotes: new HoldNotes({ app, notify: message => void notices.push(message) }),
+    holdNotes: new HoldNotes({ store, notify: message => void notices.push(message) }),
     currentRun: () => current,
-    open: (note, runId) => {
-      opened.push(note.path)
+    open: (path, runId) => {
+      opened.push(path)
       openedRuns.push(runId)
       return Promise.resolve()
     },
@@ -124,8 +88,8 @@ function makeDirectRun(): DirectRun {
 beforeEach(() => {
   current = result()
   notices = []
-  notes = {}
-  folders = []
+  store = new MemoryNoteStore()
+  notes = store.notes
   layout = {
     kind: 'columns',
     panels: [
@@ -201,8 +165,8 @@ describe('direct', () => {
 
 describe('write', () => {
   it('writes the hold without opening it', async () => {
-    const note = await makeDirectRun().write('2026-09-15-ubqPU2')
-    expect(note?.path).toBe('Maestro/holds/2026-09-15-ubqPU2.md')
+    const path = await makeDirectRun().write('2026-09-15-ubqPU2')
+    expect(path).toBe('Maestro/holds/2026-09-15-ubqPU2.md')
     expect(notes['Maestro/holds/2026-09-15-ubqPU2.md']).toContain('# Hold: run 2026-09-15-ubqPU2')
     expect(opened).toEqual([])
   })

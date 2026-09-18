@@ -5,10 +5,11 @@ import type { DrawingChoice } from '@/ui/drawingChoices'
 import type { DrawingSurface } from '@/ui/excalidraw'
 import type { RunPanel } from '@/run/panels'
 import type { RunResult } from '@/run/session'
-import type { App, TFile } from 'obsidian'
+import type { App } from 'obsidian'
 // The test-time `obsidian` stub, imported by path so `tsc` still checks the
 // plugin against the real module's types.
-import { TFile as StubFile, TFolder, lastModal, resetModals } from './obsidian'
+import { lastModal, resetModals } from './obsidian'
+import { MemoryNoteStore } from './memoryNoteStore'
 
 /**
  * The seam between the output-note convention and the vault: what gets written,
@@ -39,9 +40,8 @@ const result = (over: Partial<RunResult> = {}): RunResult => ({
 })
 
 /** The vault, as the actions see it: notes by path, and folders by path. */
+let store: MemoryNoteStore
 let notes: Record<string, string>
-let folders: string[]
-let opened: string[]
 let notices: string[]
 let placed: { drawing: string; note: string }[]
 let drawings: DrawingChoice[]
@@ -57,63 +57,29 @@ const drawing = (path: string): DrawingChoice => ({
   reason: 'open',
 })
 
-function file(path: string): TFile {
-  const stub = new StubFile()
-  stub.path = path
-  stub.name = path.slice(path.lastIndexOf('/') + 1)
-  stub.basename = stub.name.replace(/\.md$/, '')
-  return stub as unknown as TFile
-}
-
 function makeKeep(): KeepPiece {
-  const app = {
-    vault: {
-      getAbstractFileByPath: (path: string) => {
-        if (notes[path] !== undefined) return file(path)
-        if (folders.includes(path)) {
-          const folder = new TFolder()
-          folder.path = path
-          return folder
-        }
-        return null
-      },
-      cachedRead: (target: { path: string }) => Promise.resolve(notes[target.path] ?? ''),
-      create: (path: string, content: string) => {
-        notes[path] = content
-        return Promise.resolve(file(path))
-      },
-      createFolder: (path: string) => {
-        folders.push(path)
-        return Promise.resolve(undefined)
-      },
-    },
-    workspace: {
-      getLeaf: () => ({ openFile: (target: { path: string }) => Promise.resolve(opened.push(target.path)) }),
-    },
-  } as unknown as App
-
   const surface: DrawingSurface = {
     unavailable: () => unavailable,
     choices: () => drawings,
     place: (target, note) => {
-      placed.push({ drawing: target.path, note: note.path })
+      placed.push({ drawing: target.path, note })
       return Promise.resolve()
     },
   }
 
   const notify = (message: string): void => void notices.push(message)
   return new KeepPiece({
-    app,
+    app: {} as App,
+    store,
     notify,
-    notes: new OutputNotes({ app, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
+    notes: new OutputNotes({ store, notify, folder: () => 'chains/runs', engineUrl: () => ENGINE_URL }),
     drawing: surface,
   })
 }
 
 beforeEach(() => {
-  notes = {}
-  folders = []
-  opened = []
+  store = new MemoryNoteStore()
+  notes = store.notes
   notices = []
   placed = []
   drawings = [drawing('boards/wall.excalidraw.md')]
@@ -128,12 +94,12 @@ describe('save as note', () => {
     const path = 'chains/runs/2026-09-02-ab12c/Optimist.md'
     expect(notes[path]).toContain('run: "2026-09-02-ab12c"')
     expect(notes[path]).toContain('It could work.')
-    expect(opened).toEqual([path])
+    expect(store.opened).toEqual([path])
   })
 
   it('makes the folders the note needs, top down', async () => {
     await makeKeep().saveAsNote(panel(), result())
-    expect(folders).toEqual(['chains', 'chains/runs', 'chains/runs/2026-09-02-ab12c'])
+    expect(store.folders).toEqual(['chains', 'chains/runs', 'chains/runs/2026-09-02-ab12c'])
   })
 
   it('leaves one note when the same panel is saved twice', async () => {
@@ -172,7 +138,7 @@ describe('send to drawing', () => {
     await makeKeep().sendToDrawing(panel(), result())
     await flush()
     expect(notes).toEqual({})
-    expect(folders).toEqual([])
+    expect(store.folders).toEqual([])
   })
 
   it('reuses the note a save already wrote rather than making a second', async () => {

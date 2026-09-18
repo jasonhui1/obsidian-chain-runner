@@ -1,5 +1,5 @@
-import { normalizePath, type App, type TFile } from 'obsidian'
-import { readIfPresent } from './vaultWrite'
+import { normalizePath } from 'obsidian'
+import { readFront, type NoteStore } from './noteStore'
 import { fetchRun, rerunAndRefresh } from './rerunAndRefresh'
 import { CANON_PATH } from '../run/canon'
 import { holdHeading, proposalEdits } from '../run/holdNote'
@@ -14,7 +14,7 @@ export const NOT_A_HOLD_NOTE = 'Open a hold note to rerun downstream of it'
 export const NO_EDITED_PROPOSAL = 'Edit a proposal in this hold note first'
 
 export interface RerunDownstreamDeps {
-  app: App
+  store: NoteStore
   engine: EngineClient
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   notify: (message: string) => void
@@ -25,14 +25,14 @@ export class RerunDownstream {
   constructor(private readonly deps: RerunDownstreamDeps) {}
 
   async start(): Promise<void> {
-    const file = this.deps.app.workspace.getActiveFile()
-    if (file?.extension === 'md') await this.rerun(file, await this.deps.app.vault.cachedRead(file))
+    const note = await readFront(this.deps.store)
+    if (note) await this.rerun(note.path, note.content)
     else this.deps.notify(NOT_A_HOLD_NOTE)
   }
 
   /** Reruns downstream of the edited proposals in `content`, the hold note's as read; answers the run the note now lives under. */
-  async rerun(file: TFile, content: string, onProgress?: OnRerunProgress): Promise<string | undefined> {
-    const { app, engine, notify } = this.deps
+  async rerun(path: string, content: string, onProgress?: OnRerunProgress): Promise<string | undefined> {
+    const { store, engine, notify } = this.deps
     const heading = holdHeading(content)
     if (!heading) {
       notify(NOT_A_HOLD_NOTE)
@@ -47,14 +47,14 @@ export class RerunDownstream {
       notify(NO_EDITED_PROPOSAL)
       return undefined
     }
-    const canon = await readIfPresent(app, normalizePath(CANON_PATH))
+    const canon = await store.read(normalizePath(CANON_PATH))
     const request = rerunRequest(source.run, panels, edits, canon)
     if (!request) {
       notify(`Run ${heading.runId} carries no graph to rerun from`)
       return undefined
     }
 
-    return rerunAndRefresh(this.deps, file, heading, request, {
+    return rerunAndRefresh(this.deps, path, heading, request, {
       edits: { before: panels, sent: edits },
       onProgress,
     })
