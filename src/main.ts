@@ -1,4 +1,4 @@
-import { Notice, Plugin, type WorkspaceLeaf } from 'obsidian'
+import { Notice, Plugin, type ItemView, type WorkspaceLeaf } from 'obsidian'
 import { EngineClient } from './engine/client'
 import { createEngineGuard } from './engine/guard'
 import { createNodeTransport } from './engine/nodeTransport'
@@ -55,11 +55,19 @@ export default class ChainRunnerPlugin extends Plugin {
     this.engine = new EngineClient(() => this.settings.engineUrl, createNodeTransport())
     this.status = new EngineStatus(() => this.engine.ping())
     const store = createNoteStore(this.app)
+    const notify = (message: string): void => void new Notice(message)
+    const markOffline = (): void => this.status.markOffline()
     this.withEngine = createEngineGuard({
       refresh: () => this.status.refresh(),
-      notify: message => new Notice(message),
-      markOffline: () => this.status.markOffline(),
+      notify,
+      markOffline,
     })
+    const sharedDeps = {
+      notify,
+      withEngine: this.withEngine,
+      engineUrl: (): string => this.settings.engineUrl,
+      markOffline,
+    }
 
     this.pill = this.addStatusBarItem()
     this.renderPill()
@@ -79,28 +87,25 @@ export default class ChainRunnerPlugin extends Plugin {
     // One writer for the output-note convention, so a panel kept twice is one note.
     const notes = new OutputNotes({
       store,
-      notify: message => new Notice(message),
+      ...sharedDeps,
       folder: () => this.settings.outputFolder,
-      engineUrl: () => this.settings.engineUrl,
     })
     // Every rerun reports here, wherever it was started.
     const reruns = new RerunWatch()
     // Every rendering of an output note says which run wrote it (ADR-0004), and what a rerun is doing to it.
     const sourceRun = createSourceRunHeader({
-      engineUrl: () => this.settings.engineUrl,
+      ...sharedDeps,
       exists: runId => this.engine.runExists(runId),
       reruns,
     })
     this.registerMarkdownPostProcessor(sourceRun.processor)
     this.register(sourceRun.stop)
     // The one owner of every hold note: the panel, the palette and the buttons all go through it.
-    const notify = (message: string): void => void new Notice(message)
-    const runUrl = (runId: string): string | undefined => runViewUrl(this.settings.engineUrl, runId)
+    const runUrl = (runId: string): string | undefined => runViewUrl(sharedDeps.engineUrl(), runId)
     const holds = new Holds({
       store,
       engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify,
+      ...sharedDeps,
       reruns,
       runUrl,
     })
@@ -109,14 +114,14 @@ export default class ChainRunnerPlugin extends Plugin {
     const keep = new KeepPiece({
       app: this.app,
       store,
-      notify: message => new Notice(message),
+      ...sharedDeps,
       notes,
       drawing: createDrawingSurface(this.app),
     })
     const marks = new KeepMarks({
       app: this.app,
       store,
-      notify: message => new Notice(message),
+      ...sharedDeps,
       notes,
       mark: (text, onDone) => new MarkLinesModal(this.app, text, onDone).open(),
       runChain: ({ text, source }) => void this.quickRun.runOn({ text, from: 'marks' }, source),
@@ -124,7 +129,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.registerView(
       RESULT_VIEW_TYPE,
       leaf =>
-        new RunResultView(leaf, () => ({ state: this.status.state, url: this.settings.engineUrl }), {
+        new RunResultView(leaf, () => ({ state: this.status.state, url: sharedDeps.engineUrl() }), {
           saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
           sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
           keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
@@ -132,16 +137,15 @@ export default class ChainRunnerPlugin extends Plugin {
     )
     // A run watched live writes its hold note as it reaches each hold.
     const holdReached = async (runId: string, nodeId: string): Promise<void> => {
-      if (await holds.write(runId)) new Notice(`Run ${runId} is waiting at ${nodeId}: its hold note is written`)
+      if (await holds.write(runId)) notify(`Run ${runId} is waiting at ${nodeId}: its hold note is written`)
     }
     this.quickRun = new QuickRunner({
       app: this.app,
       store,
       engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      openResultView: () => this.openResultView(),
-      notify: message => new Notice(message),
-      markOffline: () => this.status.markOffline(),
+      ...sharedDeps,
+      openResultView: () =>
+        this.openSidebarView(RESULT_VIEW_TYPE, (view): view is RunResultView => view instanceof RunResultView),
       holdReached,
     })
     // A run outlives the command that started it; unloading the plugin ends it.
@@ -149,14 +153,12 @@ export default class ChainRunnerPlugin extends Plugin {
 
     const surface = createExcalidrawSurface(this.app)
     // A rerun that lands moves the cards on every open drawing on to the run it landed as.
-    const onDrawing = new RerunOnDrawing({ surface, notes, notify: message => new Notice(message) })
+    const onDrawing = new RerunOnDrawing({ surface, notes, ...sharedDeps })
     this.register(reruns.onLanding(landing => onDrawing.land(landing)))
     const nodeRun = new NodeRun({
       store,
       engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      markOffline: () => this.status.markOffline(),
+      ...sharedDeps,
       holdReached,
       surface,
       notes,
@@ -189,8 +191,7 @@ export default class ChainRunnerPlugin extends Plugin {
     const nodes = (this.nodes = new ChainNodes({
       app: this.app,
       engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
+      ...sharedDeps,
       surface,
       newNodeId,
       run: (data, element, view) => void nodeRun.run(data, element, view),
@@ -203,9 +204,7 @@ export default class ChainRunnerPlugin extends Plugin {
       app: this.app,
       store,
       engine: this.engine,
-      withEngine: action => this.withEngine(action),
-      notify: message => new Notice(message),
-      markOffline: () => this.status.markOffline(),
+      ...sharedDeps,
       holdReached,
       surface,
       notes,
@@ -230,13 +229,17 @@ export default class ChainRunnerPlugin extends Plugin {
     // From the drawing, a hold opens in the directing panel, brought up to date or written first.
     const showOnPanel = async (runId: string, proposal?: string): Promise<void> => {
       const hold = (await holds.refresh(runId)) ?? (await holds.write(runId))
-      ;(await this.openDirectingPanel())?.show(runId, hold, proposal)
+      const panel = await this.openSidebarView(
+        DIRECTING_VIEW_TYPE,
+        (view): view is DirectingView => view instanceof DirectingView,
+      )
+      panel?.show(runId, hold, proposal)
     }
     const directFromDrawing = new DirectFromDrawing({
       surface,
       direct: runId => showOnPanel(runId),
       showProposal: (runId, proposal) => showOnPanel(runId, proposal),
-      notify: message => new Notice(message),
+      ...sharedDeps,
       clickSpot: settled => clicks.onSettled(settled),
     })
 
@@ -270,7 +273,7 @@ export default class ChainRunnerPlugin extends Plugin {
       const folder = scriptFolder(this.app)
       if (folder) {
         void installScript(createScriptVault(this.app), folder).catch(() => {
-          new Notice('Chain Runner could not write its Excalidraw toolbar script.')
+          notify('Chain Runner could not write its Excalidraw toolbar script.')
         })
       }
     })
@@ -312,7 +315,7 @@ export default class ChainRunnerPlugin extends Plugin {
     this.addCommand({
       id: 'mark-lines-to-keep',
       name: 'Mark lines to keep in this note',
-      callback: () => void this.markLines(store, marks),
+      callback: () => void this.markLines(store, marks, notify),
     })
 
     this.addCommand({
@@ -324,7 +327,11 @@ export default class ChainRunnerPlugin extends Plugin {
     this.addCommand({
       id: 'open-directing-panel',
       name: 'Open the directing panel',
-      callback: () => void this.openDirectingPanel(),
+      callback: () =>
+        void this.openSidebarView(
+          DIRECTING_VIEW_TYPE,
+          (view): view is DirectingView => view instanceof DirectingView,
+        ),
     })
 
     this.addCommand({
@@ -369,9 +376,9 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'list-chains',
       name: 'List chains on the engine',
       callback: () => {
-        void this.withEngine(async () => {
+        void sharedDeps.withEngine(async () => {
           const chains = await this.engine.listChains()
-          new Notice(chains.length === 0 ? 'No chains in the workspace' : `${chains.length} chains: ${names(chains)}`)
+          notify(chains.length === 0 ? 'No chains in the workspace' : `${chains.length} chains: ${names(chains)}`)
         })
       },
     })
@@ -389,36 +396,30 @@ export default class ChainRunnerPlugin extends Plugin {
    * Marks lines of the note in front of the reader. Frontmatter comes off first,
    * as it does for a run: it is the vault's bookkeeping, not the note's words.
    */
-  private async markLines(store: NoteStore, marks: KeepMarks): Promise<void> {
+  private async markLines(
+    store: NoteStore,
+    marks: KeepMarks,
+    notify: (message: string) => void,
+  ): Promise<void> {
     const note = await readFront(store)
     if (!note) {
-      new Notice('Open a note to mark lines in it')
+      notify('Open a note to mark lines in it')
       return
     }
     marks.start({ kind: 'note', text: seedFromNote(note.content), path: note.path })
   }
 
-  /**
-   * The result view, opened in the right sidebar or brought to the front. One
-   * view, reused: a second run replaces what the first showed.
-   */
-  private async openResultView(): Promise<RunResultView | undefined> {
-    const open = this.app.workspace.getLeavesOfType(RESULT_VIEW_TYPE)
+  /** Opens the sidebar view in the right leaf or brings its existing leaf forward. */
+  private async openSidebarView<TView extends ItemView>(
+    type: string,
+    isView: (view: unknown) => view is TView,
+  ): Promise<TView | undefined> {
+    const open = this.app.workspace.getLeavesOfType(type)
     const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
     if (!leaf) return undefined
-    if (open.length === 0) await leaf.setViewState({ type: RESULT_VIEW_TYPE, active: false })
+    if (open.length === 0) await leaf.setViewState({ type, active: false })
     await this.app.workspace.revealLeaf(leaf)
-    return leaf.view instanceof RunResultView ? leaf.view : undefined
-  }
-
-  /** The directing panel in the right sidebar, opened or brought to the front. */
-  private async openDirectingPanel(): Promise<DirectingView | undefined> {
-    const open = this.app.workspace.getLeavesOfType(DIRECTING_VIEW_TYPE)
-    const leaf: WorkspaceLeaf | null = open[0] ?? this.app.workspace.getRightLeaf(false)
-    if (!leaf) return undefined
-    if (open.length === 0) await leaf.setViewState({ type: DIRECTING_VIEW_TYPE, active: false })
-    await this.app.workspace.revealLeaf(leaf)
-    return leaf.view instanceof DirectingView ? leaf.view : undefined
+    return isView(leaf.view) ? leaf.view : undefined
   }
 
   /** The result view already open, if any — this never opens one of its own. */
