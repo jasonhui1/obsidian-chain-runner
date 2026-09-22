@@ -10,7 +10,7 @@ export function seedFromNote(text: string): string {
 }
 
 /** Where a run's seed came from — the whole note, the passage in front of you, or the lines kept off one. */
-export type SeedOrigin = 'selection' | 'note' | 'marks'
+export type SeedOrigin = 'selection' | 'note' | 'marks' | 'none'
 
 /** The note a run was launched from: how the header names it, and what its links resolve against. */
 export interface SeedSource {

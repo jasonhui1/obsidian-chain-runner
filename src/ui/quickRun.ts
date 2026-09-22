@@ -1,6 +1,6 @@
 import type { App } from 'obsidian'
 import { fileName, type NoteStore } from './noteStore'
-import { ChainPicker, ParameterPicker, RunCountPicker } from './chainPicker'
+import { ChainPicker, ParameterPicker, RunCountPicker, SeedPicker } from './chainPicker'
 import type { RunResultView } from './resultView'
 import { applyRunEvent, buildRunResult, emptyRunState, settleRun, type RunState } from '../run/session'
 import { streamRun, streamsLayout, UNSUPPORTED_ENGINE } from '../run/stream'
@@ -33,9 +33,9 @@ export interface QuickRunDeps {
 /** One run, as the reader assembled it: what to run, on what, with what set. */
 interface QuickRun {
   chain: ChainSummary
-  /** The words the engine is given, and how much of the note they are. */
+  /** The words the engine is given, and their origin. */
   seed: Seed
-  /** The note behind those words, which the header names and links resolve against. */
+  /** The note the command started from, named in the result and used to resolve panel links. */
   source: SeedSource
   /** The chain's dropdown, when it declares one. */
   paramValue?: string
@@ -59,15 +59,11 @@ export class QuickRunner {
       this.deps.notify('Open a note to run a chain on it')
       return
     }
-    const seed = chooseSeed({
+    const hint = chooseSeed({
       selection: note.selection,
       noteText: (await this.deps.store.read(note.path)) ?? '',
     })
-    if (seed.text === '') {
-      // A whitespace-only selection is no selection, so this is always an empty note.
-      this.deps.notify('This note is empty')
-      return
-    }
+    const seed: Seed = hint.text === '' ? { text: '', from: 'none' } : hint
 
     await this.runOn(seed, { name: fileName(note.path), path: note.path })
   }
@@ -107,11 +103,25 @@ export class QuickRunner {
   private pickParameter(run: QuickRun, canRunVariance: boolean): void {
     const parameter = parameterToAsk(run.chain)
     if (!parameter) {
-      this.pickRunCount(run, canRunVariance)
+      this.pickSeed(run, canRunVariance)
       return
     }
     new ParameterPicker(this.deps.app, parameter.name, parameter.options, paramValue => {
-      this.pickRunCount({ ...run, paramValue }, canRunVariance)
+      this.pickSeed({ ...run, paramValue }, canRunVariance)
+    }).open()
+  }
+
+  /** Lets the reader keep their rough hint, or start empty without inventing one. */
+  private pickSeed(run: QuickRun, canRunVariance: boolean): void {
+    if (run.seed.text === '' || run.chain.seeded === false) {
+      this.pickRunCount(run, canRunVariance)
+      return
+    }
+    let hintLabel = 'Use the note as a rough hint'
+    if (run.seed.from === 'selection') hintLabel = 'Use the selection as a rough hint'
+    if (run.seed.from === 'marks') hintLabel = 'Use the marked lines as a rough hint'
+    new SeedPicker(this.deps.app, hintLabel, useHint => {
+      this.pickRunCount(useHint ? run : { ...run, seed: { text: '', from: 'none' } }, canRunVariance)
     }).open()
   }
 

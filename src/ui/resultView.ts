@@ -15,7 +15,7 @@ export const RESULT_VIEW_TYPE = 'chain-runner-result'
  */
 export class RunResultView extends ItemView {
   private result: RunResult | undefined
-  /** The note the run was seeded from; markdown links resolve relative to it. */
+  /** The note the run was invoked from; markdown links resolve relative to it. */
   private sourcePath = ''
   private readonly throttle = createThrottle()
   /** The round clicked in a sidebar layout; unset means the detail follows the run. */

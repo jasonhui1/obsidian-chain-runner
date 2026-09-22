@@ -17,6 +17,7 @@ import { MemoryNoteStore } from './memoryNoteStore'
 const CHAINS = [
   { slug: 'relay', name: 'Telephone Relay' },
   { slug: 'lens', name: 'Through A Lens', parameter: { name: 'lens', options: ['sceptic', 'builder'] } },
+  { slug: 'creative-director', name: 'creative-director', parameter: { name: 'experimental', options: ['3 - fresh'] } },
 ]
 
 /** What the run was launched with, and every state the view was shown. */
@@ -30,6 +31,7 @@ let groupsShown: VarianceGroup[]
 let events: RunEvent[]
 let held: string[]
 let shown: RunResult[]
+let sourcePaths: string[]
 let notices: string[]
 let store: MemoryNoteStore
 
@@ -58,7 +60,10 @@ function makeRunner(): QuickRunner {
     withEngine: action => action(),
     openResultView: () =>
       Promise.resolve({
-        show: (result: RunResult) => shown.push(result),
+        show: (result: RunResult, sourcePath: string) => {
+          shown.push(result)
+          sourcePaths.push(sourcePath)
+        },
       } as unknown as Awaited<ReturnType<() => Promise<never>>>),
     openVarianceView: () => Promise.resolve({
       showProgress: (progress: unknown) => progressShown.push(progress),
@@ -105,6 +110,7 @@ beforeEach(() => {
   events = []
   held = []
   shown = []
+  sourcePaths = []
   notices = []
   store = new MemoryNoteStore({ 'premise.md': '---\ntags: [x]\n---\nthe whole note' })
   store.inFront = { path: 'premise.md', selection: '' }
@@ -112,29 +118,73 @@ beforeEach(() => {
 
 describe('what the run reads', () => {
   it('runs the whole note, minus its frontmatter, when nothing is selected', async () => {
-    await run(0)
+    await run(0, 0)
     expect(launched[0].seedPrompt).toBe('the whole note')
     expect(shown[0].seed).toEqual({ note: 'premise.md', from: 'note' })
   })
 
   it('runs the selection when there is one, and the header says the run covered less', async () => {
     store.inFront = { path: 'premise.md', selection: 'one paragraph' }
-    await run(0)
+    await run(0, 0)
     expect(launched[0].seedPrompt).toBe('one paragraph')
     expect(shown[0].seed).toEqual({ note: 'premise.md', from: 'selection' })
   })
 
-  it('says so and runs nothing when the note is empty', async () => {
+  it('opens the picker for an empty note and launches creative-director without a hint', async () => {
     store.notes['premise.md'] = '---\ntags: [x]\n---\n'
-    await run()
-    expect(notices).toEqual(['This note is empty'])
-    expect(launched).toEqual([])
+
+    await run(2, 0)
+
+    expect(launched).toEqual([{ chainName: 'creative-director', seedPrompt: '', paramValue: '3 - fresh' }])
+    expect(shown[0]?.seed).toEqual({ note: 'premise.md', from: 'none' })
+    expect(sourcePaths).toEqual(['premise.md'])
+    expect(notices).toEqual([])
+  })
+
+  it('offers the note as a rough hint or no hint for creative-director', async () => {
+    await run(2, 0, 0)
+
+    expect(launched[0]).toMatchObject({ chainName: 'creative-director', seedPrompt: 'the whole note', paramValue: '3 - fresh' })
+    expect(shown[0]?.seed).toEqual({ note: 'premise.md', from: 'note' })
+  })
+
+  it('can start creative-director without using a nonempty note as a hint', async () => {
+    await run(2, 0, 1)
+
+    expect(launched[0]).toMatchObject({ chainName: 'creative-director', seedPrompt: '', paramValue: '3 - fresh' })
+    expect(shown[0]?.seed).toEqual({ note: 'premise.md', from: 'none' })
+    expect(sourcePaths).toEqual(['premise.md'])
+  })
+
+  it('offers the current selection as the rough hint', async () => {
+    store.inFront = { path: 'premise.md', selection: 'one paragraph' }
+
+    await run(2, 0, 0)
+
+    expect(launched[0]).toMatchObject({ chainName: 'creative-director', seedPrompt: 'one paragraph' })
+    expect(shown[0]?.seed).toEqual({ note: 'premise.md', from: 'selection' })
+  })
+
+  it('names both seed choices in the picker', async () => {
+    const runner = makeRunner()
+    await runner.start()
+    lastModal()?.choose(2)
+    await Promise.resolve()
+    lastModal()?.choose(0)
+    await Promise.resolve()
+
+    const picker = lastModal() as unknown as { placeholder: string; getItems(): boolean[]; getItemText(useHint: boolean): string }
+    expect(picker.placeholder).toBe('Choose how to start')
+    expect(picker.getItems().map(item => picker.getItemText(item))).toEqual([
+      'Use the note as a rough hint',
+      'Start with no hint',
+    ])
   })
 })
 
 describe('the dropdown a chain declares', () => {
   it('launches on the pick when the chain declares none', async () => {
-    await run(0)
+    await run(0, 0)
     expect(launched[0]).toMatchObject({ chainName: 'Telephone Relay' })
     expect(launched[0].paramValue).toBeUndefined()
   })
@@ -149,12 +199,12 @@ describe('the dropdown a chain declares', () => {
   })
 
   it('sends the value with the run, so the chain reads the parameter it declared', async () => {
-    await run(1, 0)
+    await run(1, 0, 0)
     expect(launched[0]).toMatchObject({ chainName: 'Through A Lens', paramValue: 'sceptic' })
   })
 
   it('shows the name and the value in the header', async () => {
-    await run(1, 1)
+    await run(1, 1, 0)
     expect(shown[0].parameter).toEqual({ name: 'lens', value: 'builder' })
   })
 })
@@ -163,7 +213,7 @@ describe('variance runs', () => {
   it.each([false, undefined])('keeps the single-run launch when varianceGroups is %s', async capability => {
     varianceCapability = capability
 
-    await run(0)
+    await run(0, 0)
 
     expect(launched).toHaveLength(1)
     expect(varianceRequests).toEqual([])
@@ -173,6 +223,8 @@ describe('variance runs', () => {
     varianceCapability = true
     const runner = makeRunner()
     await runner.start()
+    lastModal()?.choose(0)
+    await Promise.resolve()
     lastModal()?.choose(0)
     await Promise.resolve()
 
@@ -185,7 +237,7 @@ describe('variance runs', () => {
   it('keeps the single-run choice on the ordinary run endpoint', async () => {
     varianceCapability = true
 
-    await run(0, 0)
+    await run(0, 0, 0)
 
     expect(launched).toHaveLength(1)
     expect(varianceRequests).toEqual([])
@@ -203,7 +255,7 @@ describe('variance runs', () => {
       { type: 'variance_complete', groupId: 'group-1', runIds: ['r0', 'r1'] },
     ]
 
-    await run(0, 1)
+    await run(0, 0, 1)
     await vi.waitFor(() => expect(groupsShown).toEqual([varianceGroup]))
 
     expect(launched).toEqual([])
@@ -225,14 +277,14 @@ describe('a run that reaches a hold', () => {
       { type: 'run_waiting', runId: 'r1', nodeId: 'pick', hold },
       { type: 'run_waiting', runId: 'r1', nodeId: 'pick-2', hold: { ...hold, nodeId: 'pick-2' } },
     ]
-    await run(0)
+    await run(0, 0)
     await vi.waitFor(() => expect(held).toEqual(['r1 pick', 'r1 pick-2']))
     expect(shown.at(-1)?.runId).toBe('r1')
   })
 
   it('hands on nothing for a run that completed', async () => {
     events = [{ type: 'run_start', runId: 'r1' }, { type: 'run_complete', runId: 'r1' }]
-    await run(0)
+    await run(0, 0)
     await vi.waitFor(() => expect(shown.at(-1)?.status).toBe('done'))
     expect(held).toEqual([])
   })

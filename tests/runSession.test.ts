@@ -202,4 +202,8 @@ describe('seedLine', () => {
   it('says a run was seeded on kept lines, which is less again', () => {
     expect(seedLine({ note: 'premise.md', from: 'marks' })).toBe('seed: premise.md (kept lines)')
   })
+
+  it('says no hint without attributing text to the source note', () => {
+    expect(seedLine({ note: 'empty.md', from: 'none' })).toBe('seed: no hint')
+  })
 })

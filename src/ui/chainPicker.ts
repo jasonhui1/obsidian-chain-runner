@@ -108,6 +108,30 @@ export class ParameterPicker extends FuzzySuggestModal<string> {
   }
 }
 
+/** Whether the quick run should use the note or selection as a rough hint. */
+export class SeedPicker extends FuzzySuggestModal<boolean> {
+  constructor(
+    app: App,
+    private readonly hintLabel: string,
+    private readonly onPick: (useHint: boolean) => void,
+  ) {
+    super(app)
+    this.setPlaceholder('Choose how to start')
+  }
+
+  getItems(): boolean[] {
+    return [true, false]
+  }
+
+  getItemText(useHint: boolean): string {
+    return useHint ? this.hintLabel : 'Start with no hint'
+  }
+
+  onChooseItem(useHint: boolean): void {
+    this.onPick(useHint)
+  }
+}
+
 /** The count choice shown only when the engine advertises variance groups. */
 export class RunCountPicker extends FuzzySuggestModal<number> {
   constructor(app: App, private readonly onPick: (count: number) => void) {

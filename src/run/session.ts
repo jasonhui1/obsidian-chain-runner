@@ -102,7 +102,7 @@ export function settleRun(state: RunState, error?: string): RunState {
  * `Seed` in `./seed` is the engine's half — the words, not the note.
  */
 export interface RunSeed {
-  /** The name of the note the run was invoked on. */
+  /** The name of the note the run was invoked from, whether or not it seeded the chain. */
   note: string
   from: SeedOrigin
 }
@@ -115,6 +115,7 @@ const HOW_MUCH: Partial<Record<SeedOrigin, string>> = {
 
 /** The header's one line about the seed. */
 export function seedLine(seed: RunSeed): string {
+  if (seed.from === 'none') return 'seed: no hint'
   return `seed: ${seed.note}${HOW_MUCH[seed.from] ?? ''}`
 }
 

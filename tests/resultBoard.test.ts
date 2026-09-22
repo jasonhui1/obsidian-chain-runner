@@ -205,6 +205,15 @@ describe('what the board says around the panels', () => {
     expect(noticeText(panelEls()[0]!)).toBe('never ran')
   })
 
+  it('identifies a no-hint launch without presenting the source note as its seed', () => {
+    const view = board()
+    view.draw({ result: run([], { seed: { note: 'empty.md', from: 'none' } }) })
+
+    const meta = root.querySelector('.chain-runner-run-meta')?.textContent ?? ''
+    expect(meta).toContain('seed: no hint')
+    expect(meta).not.toContain('empty.md')
+  })
+
   it('drops the notice from a panel that landed, and the error line from a run that did not fail', () => {
     const view = board()
     view.draw({ result: run([panel()], { status: 'failed', error: 'the engine went away' }) })
