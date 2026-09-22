@@ -1,0 +1,9 @@
+{
+  "runLayoutFrames": true,
+  "runStartEvent": true,
+  "runFailureFrame": true,
+  "runFork": true,
+  "varianceGroups": true,
+  "holdFeedback": true,
+  "holdReroll": true
+}

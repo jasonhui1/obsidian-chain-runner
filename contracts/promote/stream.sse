@@ -1,0 +1,18 @@
+data: {"type":"run_start","runId":"contract-run-promote"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Revised proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"pending"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_done","agentName":"Proposer","nodeId":"proposer","step":2,"output":{"nodeId":"proposer","agentName":"Proposer","systemPrompt":"propose on Setup promote","input":"Follow your instructions.","model":"openai/gpt-4o-mini","status":"success","output":"Revised proposal with more detail\n\n## Summary\nRevised proposal summary","priorTranscript":[{"role":"assistant","content":"Draft proposal ready\n\n## Summary\nDraft proposal summary"},{"role":"user","content":"revise draft with more detail"}],"tokensIn":0,"tokensOut":0,"costUsd":0,"latencyMs":0,"timestamp":"2026-09-21T10:02:00.000Z","versionNumber":1},"kind":"agent"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Revised proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"pending"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_start","agentName":"Decider","nodeId":"decider","step":3,"kind":"decider"}
+
+data: {"type":"token","agentName":"Decider","nodeId":"decider","token":"Evaluating options","tokenType":"output","step":3,"kind":"decider","turn":1}
+
+data: {"type":"agent_done","agentName":"Decider","nodeId":"decider","step":3,"output":{"agentName":"Decider","input":"Follow your instructions.","systemPrompt":"decide on Revised proposal with more detail\n\n## Summary\nRevised proposal summary","model":"openai/gpt-4o-mini","modelSource":"file","timestamp":"2026-09-21T10:02:00.000Z","output":"## Candidate 1\nRevised Alpha Option\n\n## Candidate 2\nRevised Beta Option","thought":"","tokensIn":25,"tokensOut":30,"costUsd":0.00002175,"latencyMs":0,"status":"success","toolCalls":[],"toolTurns":0,"nodeId":"decider","versionNumber":1},"kind":"decider"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Revised proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"empty"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"run_waiting","runId":"contract-run-promote","nodeId":"hold","hold":{"nodeId":"hold","input":"## Candidate 1\nRevised Alpha Option\n\n## Candidate 2\nRevised Beta Option","candidates":[{"heading":"Candidate 1","body":"Revised Alpha Option"},{"heading":"Candidate 2","body":"Revised Beta Option"}],"reachedAt":"2026-09-21T10:02:00.000Z","revision":2}}
+

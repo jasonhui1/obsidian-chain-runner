@@ -1,0 +1,19 @@
+{
+  "hold": {
+    "nodeId": "hold",
+    "input": "## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option",
+    "candidates": [
+      {
+        "heading": "Candidate 1",
+        "body": "Alpha Option"
+      },
+      {
+        "heading": "Candidate 2",
+        "body": "Beta Option"
+      }
+    ],
+    "reachedAt": "2026-09-21T10:00:00.000Z",
+    "revision": 1,
+    "feedback": "Less tragic, but keep a real consequence"
+  }
+}

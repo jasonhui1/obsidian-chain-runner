@@ -1,0 +1,20 @@
+data: {"type":"run_start","runId":"contract-run-resume"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Draft proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"empty"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_done","agentName":"hold","nodeId":"hold","step":2,"output":{"nodeId":"hold","agentName":"hold","systemPrompt":"","input":"## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option","output":"PICK: Candidate 1\nAlpha Option\n\nKEEP: Alpha Option\nKILL: Beta Option","tokensIn":0,"tokensOut":0,"costUsd":0,"latencyMs":0,"model":"","timestamp":"2026-09-21T10:01:00.000Z","status":"success","chosen":"Candidate 1","versionNumber":1},"kind":"hold"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Draft proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"empty"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_start","agentName":"After","nodeId":"after","step":3,"kind":"agent"}
+
+data: {"type":"token","agentName":"After","nodeId":"after","token":"Acted on ","tokenType":"output","step":3,"kind":"agent","turn":1}
+
+data: {"type":"token","agentName":"After","nodeId":"after","token":"direction","tokenType":"output","step":3,"kind":"agent","turn":1}
+
+data: {"type":"agent_done","agentName":"After","nodeId":"after","step":3,"output":{"agentName":"After","input":"Follow your instructions.","systemPrompt":"build on PICK: Candidate 1\nAlpha Option\n\nKEEP: Alpha Option\nKILL: Beta Option","model":"openai/gpt-4o-mini","modelSource":"file","timestamp":"2026-09-21T10:01:00.000Z","output":"Acted on direction\n\n## Summary\nPolished final result","thought":"","tokensIn":22,"tokensOut":28,"costUsd":0.000020099999999999997,"latencyMs":0,"status":"success","toolCalls":[],"toolTurns":0,"nodeId":"after","versionNumber":1},"kind":"agent"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Draft proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"empty"},{"name":"after","node":"after","text":"Polished final result","lines":1,"state":"filled","emphasis":"last"}]}}
+
+data: {"type":"run_complete","runId":"contract-run-resume"}
+

@@ -1,0 +1,20 @@
+data: {"type":"run_start","runId":"contract-run-fork"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"hop 1","node":"first","text":"Hop 1 summary with café","lines":1,"state":"filled"},{"name":"hop 2","node":"second","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_done","agentName":"First","nodeId":"first","step":0,"output":{"agentName":"First","input":"Follow your instructions.","systemPrompt":"first step Setup source run","model":"openai/gpt-4o-mini","modelSource":"file","timestamp":"2026-09-21T10:00:00.000Z","output":"Hop 1 processing\nwith café finish\n\n## Summary\nHop 1 summary with café","thought":"","tokensIn":12,"tokensOut":18,"costUsd":0.0000126,"latencyMs":0,"status":"success","toolCalls":[],"toolTurns":0,"nodeId":"first","versionNumber":1},"kind":"agent"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"hop 1","node":"first","text":"Hop 1 summary with café","lines":1,"state":"filled"},{"name":"hop 2","node":"second","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_start","agentName":"Second","nodeId":"second","step":1,"kind":"agent"}
+
+data: {"type":"token","agentName":"Second","nodeId":"second","token":"Hop 2 processing ","tokenType":"output","step":1,"kind":"agent","turn":1}
+
+data: {"type":"token","agentName":"Second","nodeId":"second","token":"fork recomputed","tokenType":"output","step":1,"kind":"agent","turn":1}
+
+data: {"type":"agent_done","agentName":"Second","nodeId":"second","step":1,"output":{"agentName":"Second","input":"Follow your instructions.","systemPrompt":"second step Hop 1 processing\nwith café finish\n\n## Summary\nHop 1 summary with café","model":"openai/gpt-4o-mini","modelSource":"file","timestamp":"2026-09-21T10:01:00.000Z","output":"Hop 2 fork recomputed\n\n## Summary\nHop 2 summary","thought":"","tokensIn":14,"tokensOut":16,"costUsd":0.0000117,"latencyMs":0,"status":"success","toolCalls":[],"toolTurns":0,"nodeId":"second","versionNumber":1},"kind":"agent"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"hop 1","node":"first","text":"Hop 1 summary with café","lines":1,"state":"filled"},{"name":"hop 2","node":"second","text":"Hop 2 summary","lines":1,"state":"filled","emphasis":"last"}]}}
+
+data: {"type":"run_complete","runId":"contract-run-fork"}
+

@@ -1,0 +1,291 @@
+{
+  "version": 1,
+  "description": "Engine <-> plugin integration contract fixtures",
+  "capabilities": "capabilities.json",
+  "scenarios": {
+    "fresh": {
+      "description": "Fresh run over a linear chain completing with a timeline layout",
+      "setup": "Linear chain seed -> first -> second with declared timeline view",
+      "request": {
+        "method": "POST",
+        "path": "/api/run",
+        "file": "fresh/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "fresh/response.json",
+        "streamFile": "fresh/stream.sse"
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "fresh/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "fresh/layout.json"
+        }
+      ]
+    },
+    "hold": {
+      "description": "Run reaching a human-in-the-loop hold node with candidate options",
+      "setup": "Held chain seed -> proposer -> decider -> hold -> after",
+      "request": {
+        "method": "POST",
+        "path": "/api/run",
+        "file": "hold/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "hold/response.json",
+        "streamFile": "hold/stream.sse"
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "hold/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "hold/layout.json"
+        }
+      ]
+    },
+    "resume": {
+      "description": "Resuming a held run with a chosen candidate and user direction",
+      "setup": "Execute held chain until paused at hold node",
+      "request": {
+        "method": "POST",
+        "path": "/api/runs/:id/resume",
+        "file": "resume/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "resume/response.json",
+        "streamFile": "resume/stream.sse"
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "resume/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "resume/layout.json"
+        }
+      ]
+    },
+    "promote": {
+      "description": "Promoting a node chat reply to replace node output and rerun to the hold",
+      "setup": "Execute held chain to hold, append node chat reply to proposer, promote turn 1",
+      "request": {
+        "method": "POST",
+        "path": "/api/runs/:id/nodes/:nodeId/promote",
+        "file": "promote/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "promote/response.json",
+        "streamFile": "promote/stream.sse"
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "promote/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "promote/layout.json"
+        }
+      ]
+    },
+    "fork": {
+      "description": "Forking an existing completed run from an upstream node",
+      "setup": "Execute fresh chain to completion, then fork from second node",
+      "request": {
+        "method": "POST",
+        "path": "/api/runs/:id/fork",
+        "file": "fork/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "fork/response.json",
+        "streamFile": "fork/stream.sse"
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "fork/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "fork/layout.json"
+        }
+      ]
+    },
+    "reroll": {
+      "description": "Rerolling an open hold twice with saved feedback, plus a stale-revision refusal",
+      "setup": "Held chain paused at hold; feedback saved by PATCH; one reroll at revision 1; recorded reroll at revision 2",
+      "feedback": {
+        "request": {
+          "method": "PATCH",
+          "path": "/api/runs/:id/holds/:holdId",
+          "file": "reroll/feedback-request.json"
+        },
+        "response": {
+          "status": 200,
+          "contentType": "application/json",
+          "file": "reroll/feedback-response.json"
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "/api/runs/:id/holds/:holdId/reroll",
+        "file": "reroll/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "reroll/response.json",
+        "streamFile": "reroll/stream.sse"
+      },
+      "refusal": {
+        "request": {
+          "method": "POST",
+          "path": "/api/runs/:id/resume",
+          "file": "reroll/refusal-request.json"
+        },
+        "response": {
+          "status": 409,
+          "contentType": "application/json",
+          "file": "reroll/refusal-response.json"
+        }
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "reroll/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "reroll/layout.json"
+        }
+      ]
+    },
+    "reroll-failed": {
+      "description": "A reroll answered without candidates: reroll_failed, then run_waiting with the kept set and the new feedback",
+      "setup": "Held chain paused at hold with saved feedback; the reroll replaces the feedback and the decider answers without candidates",
+      "request": {
+        "method": "POST",
+        "path": "/api/runs/:id/holds/:holdId/reroll",
+        "file": "reroll-failed/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "reroll-failed/response.json",
+        "streamFile": "reroll-failed/stream.sse"
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "reroll-failed/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "reroll-failed/layout.json"
+        }
+      ]
+    },
+    "error": {
+      "description": "Terminal stream failure after persistence fault, plus HTTP refusal",
+      "setup": "Held chain executed with one-shot fault on runs.update persisting status: waiting",
+      "request": {
+        "method": "POST",
+        "path": "/api/run",
+        "file": "error/request.json"
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream",
+        "descriptorFile": "error/response.json",
+        "streamFile": "error/stream.sse"
+      },
+      "refusal": {
+        "request": {
+          "method": "POST",
+          "path": "/api/runs/:id/resume",
+          "file": "error/refusal-request.json"
+        },
+        "response": {
+          "status": 400,
+          "contentType": "application/json",
+          "file": "error/refusal-response.json"
+        }
+      },
+      "observations": [
+        {
+          "method": "GET",
+          "path": "/api/runs/:id",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "error/run.json"
+        },
+        {
+          "method": "GET",
+          "path": "/api/runs/:id/layout",
+          "status": 200,
+          "contentType": "application/json",
+          "file": "error/layout.json"
+        }
+      ]
+    }
+  }
+}

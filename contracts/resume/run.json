@@ -1,0 +1,169 @@
+{
+  "runId": "contract-run-resume",
+  "chainName": "held-chain",
+  "seedPrompt": "Setup hold",
+  "startedAt": "2026-09-21T10:00:00.000Z",
+  "status": "complete",
+  "agentOutputs": [
+    {
+      "agentName": "Proposer",
+      "input": "Follow your instructions.",
+      "systemPrompt": "propose on Setup hold",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "Draft proposal ready\n\n## Summary\nDraft proposal summary",
+      "thought": "",
+      "tokensIn": 10,
+      "tokensOut": 15,
+      "costUsd": 0.000010500000000000001,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "proposer",
+      "versionNumber": 1
+    },
+    {
+      "agentName": "Decider",
+      "input": "Follow your instructions.",
+      "systemPrompt": "decide on Draft proposal ready\n\n## Summary\nDraft proposal summary",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option",
+      "thought": "",
+      "tokensIn": 20,
+      "tokensOut": 25,
+      "costUsd": 0.000017999999999999997,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "decider",
+      "versionNumber": 1
+    },
+    {
+      "nodeId": "hold",
+      "agentName": "hold",
+      "systemPrompt": "",
+      "input": "## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option",
+      "output": "PICK: Candidate 1\nAlpha Option\n\nKEEP: Alpha Option\nKILL: Beta Option",
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "costUsd": 0,
+      "latencyMs": 0,
+      "model": "",
+      "timestamp": "2026-09-21T10:01:00.000Z",
+      "status": "success",
+      "chosen": "Candidate 1",
+      "versionNumber": 1
+    },
+    {
+      "agentName": "After",
+      "input": "Follow your instructions.",
+      "systemPrompt": "build on PICK: Candidate 1\nAlpha Option\n\nKEEP: Alpha Option\nKILL: Beta Option",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:01:00.000Z",
+      "output": "Acted on direction\n\n## Summary\nPolished final result",
+      "thought": "",
+      "tokensIn": 22,
+      "tokensOut": 28,
+      "costUsd": 0.000020099999999999997,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "after",
+      "versionNumber": 1
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "seed",
+        "kind": "seed"
+      },
+      {
+        "id": "proposer",
+        "kind": "agent",
+        "agent": "proposer"
+      },
+      {
+        "id": "decider",
+        "kind": "decider",
+        "agent": "decider"
+      },
+      {
+        "id": "hold",
+        "kind": "hold"
+      },
+      {
+        "id": "after",
+        "kind": "agent",
+        "agent": "after"
+      }
+    ],
+    "edges": [
+      {
+        "fromNode": "seed",
+        "fromSocket": "output",
+        "toNode": "proposer",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "proposer",
+        "fromSocket": "output",
+        "toNode": "decider",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "decider",
+        "fromSocket": "output",
+        "toNode": "hold",
+        "toSocket": "in"
+      },
+      {
+        "fromNode": "hold",
+        "fromSocket": "output",
+        "toNode": "after",
+        "toSocket": "direction"
+      }
+    ]
+  },
+  "versionNumber": 1,
+  "versions": {
+    "chain/held-chain": 1,
+    "agent/proposer": 1,
+    "agent/decider": 1,
+    "agent/after": 1
+  },
+  "chainSlug": "held-chain",
+  "entrypoint": {
+    "kind": "chain",
+    "slug": "held-chain"
+  },
+  "holds": [
+    {
+      "nodeId": "hold",
+      "input": "## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option",
+      "candidates": [
+        {
+          "heading": "Candidate 1",
+          "body": "Alpha Option"
+        },
+        {
+          "heading": "Candidate 2",
+          "body": "Beta Option"
+        }
+      ],
+      "reachedAt": "2026-09-21T10:00:00.000Z",
+      "revision": 1,
+      "chosen": "Candidate 1",
+      "direction": "KEEP: Alpha Option\nKILL: Beta Option",
+      "resolvedAt": "2026-09-21T10:01:00.000Z"
+    }
+  ],
+  "completedAt": "2026-09-21T10:01:00.000Z"
+}

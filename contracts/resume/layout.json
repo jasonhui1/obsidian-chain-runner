@@ -1,0 +1,27 @@
+{
+  "kind": "timeline",
+  "panels": [
+    {
+      "name": "proposal",
+      "node": "proposer",
+      "text": "Draft proposal summary",
+      "lines": 1,
+      "state": "filled"
+    },
+    {
+      "name": "verdict",
+      "node": "decider",
+      "text": "",
+      "lines": 0,
+      "state": "empty"
+    },
+    {
+      "name": "after",
+      "node": "after",
+      "text": "Polished final result",
+      "lines": 1,
+      "state": "filled",
+      "emphasis": "last"
+    }
+  ]
+}

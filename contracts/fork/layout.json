@@ -1,0 +1,20 @@
+{
+  "kind": "timeline",
+  "panels": [
+    {
+      "name": "hop 1",
+      "node": "first",
+      "text": "Hop 1 summary with café",
+      "lines": 1,
+      "state": "filled"
+    },
+    {
+      "name": "hop 2",
+      "node": "second",
+      "text": "Hop 2 summary",
+      "lines": 1,
+      "state": "filled",
+      "emphasis": "last"
+    }
+  ]
+}

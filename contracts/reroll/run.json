@@ -1,0 +1,178 @@
+{
+  "runId": "contract-run-reroll",
+  "chainName": "held-chain",
+  "seedPrompt": "Setup reroll",
+  "startedAt": "2026-09-21T10:00:00.000Z",
+  "status": "waiting",
+  "agentOutputs": [
+    {
+      "agentName": "Proposer",
+      "input": "Follow your instructions.",
+      "systemPrompt": "propose on Setup reroll",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "Draft proposal ready\n\n## Summary\nDraft proposal summary",
+      "thought": "",
+      "tokensIn": 10,
+      "tokensOut": 15,
+      "costUsd": 0.000010500000000000001,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "proposer",
+      "versionNumber": 1
+    },
+    {
+      "agentName": "Decider",
+      "input": "Follow your instructions.",
+      "systemPrompt": "decide on Draft proposal ready\n\n## Summary\nDraft proposal summary",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option",
+      "thought": "",
+      "tokensIn": 20,
+      "tokensOut": 25,
+      "costUsd": 0.000017999999999999997,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "decider",
+      "versionNumber": 1
+    },
+    {
+      "agentName": "Decider",
+      "input": "Follow your instructions.",
+      "systemPrompt": "decide on Draft proposal ready\n\n## Summary\nDraft proposal summary\n\n---\nThe human asked for a fresh set of candidates. Their feedback:\nLess tragic, but keep a real consequence",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:01:00.000Z",
+      "output": "## Candidate 1\nGentle Alpha Option\n\n## Candidate 2\nGentle Beta Option",
+      "thought": "",
+      "tokensIn": 21,
+      "tokensOut": 26,
+      "costUsd": 0.00001875,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "decider",
+      "reroll": {
+        "holdId": "hold",
+        "feedback": "Less tragic, but keep a real consequence"
+      },
+      "versionNumber": 1
+    },
+    {
+      "agentName": "Decider",
+      "input": "Follow your instructions.",
+      "systemPrompt": "decide on Draft proposal ready\n\n## Summary\nDraft proposal summary\n\n---\nThe human asked for a fresh set of candidates. Their feedback:\nLess tragic, but keep a real consequence",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:02:00.000Z",
+      "output": "## Candidate 1\nGentle Alpha Option\n\n## Candidate 2\nGentle Beta Option",
+      "thought": "",
+      "tokensIn": 21,
+      "tokensOut": 26,
+      "costUsd": 0.00001875,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "decider",
+      "reroll": {
+        "holdId": "hold",
+        "feedback": "Less tragic, but keep a real consequence"
+      },
+      "versionNumber": 1
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "seed",
+        "kind": "seed"
+      },
+      {
+        "id": "proposer",
+        "kind": "agent",
+        "agent": "proposer"
+      },
+      {
+        "id": "decider",
+        "kind": "decider",
+        "agent": "decider"
+      },
+      {
+        "id": "hold",
+        "kind": "hold"
+      },
+      {
+        "id": "after",
+        "kind": "agent",
+        "agent": "after"
+      }
+    ],
+    "edges": [
+      {
+        "fromNode": "seed",
+        "fromSocket": "output",
+        "toNode": "proposer",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "proposer",
+        "fromSocket": "output",
+        "toNode": "decider",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "decider",
+        "fromSocket": "output",
+        "toNode": "hold",
+        "toSocket": "in"
+      },
+      {
+        "fromNode": "hold",
+        "fromSocket": "output",
+        "toNode": "after",
+        "toSocket": "direction"
+      }
+    ]
+  },
+  "versionNumber": 1,
+  "versions": {
+    "chain/held-chain": 1,
+    "agent/proposer": 1,
+    "agent/decider": 1,
+    "agent/after": 1
+  },
+  "chainSlug": "held-chain",
+  "entrypoint": {
+    "kind": "chain",
+    "slug": "held-chain"
+  },
+  "holds": [
+    {
+      "nodeId": "hold",
+      "input": "## Candidate 1\nGentle Alpha Option\n\n## Candidate 2\nGentle Beta Option",
+      "candidates": [
+        {
+          "heading": "Candidate 1",
+          "body": "Gentle Alpha Option"
+        },
+        {
+          "heading": "Candidate 2",
+          "body": "Gentle Beta Option"
+        }
+      ],
+      "reachedAt": "2026-09-21T10:00:00.000Z",
+      "revision": 3,
+      "feedback": "Less tragic, but keep a real consequence",
+      "rerolledAt": "2026-09-21T10:02:00.000Z"
+    }
+  ]
+}

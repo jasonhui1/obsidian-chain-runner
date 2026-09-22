@@ -1,0 +1,16 @@
+data: {"type":"run_start","runId":"contract-run-reroll-failed"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Draft proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"empty"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"agent_start","agentName":"Decider","nodeId":"decider","step":2,"kind":"decider"}
+
+data: {"type":"token","agentName":"Decider","nodeId":"decider","token":"Rerolling options","tokenType":"output","step":2,"kind":"decider","turn":1}
+
+data: {"type":"agent_done","agentName":"Decider","nodeId":"decider","step":2,"output":{"agentName":"Decider","input":"Follow your instructions.","systemPrompt":"decide on Draft proposal ready\n\n## Summary\nDraft proposal summary\n\n---\nThe human asked for a fresh set of candidates. Their feedback:\nKinder still","model":"openai/gpt-4o-mini","modelSource":"file","timestamp":"2026-09-21T10:01:00.000Z","output":"No options this time","thought":"","tokensIn":8,"tokensOut":4,"costUsd":0.0000036,"latencyMs":0,"status":"error","toolCalls":[],"toolTurns":0,"nodeId":"decider","reroll":{"holdId":"hold","feedback":"Kinder still"},"versionNumber":1,"error":"Reroll produced no `## Candidate N` sections; the earlier candidates stay"},"kind":"decider"}
+
+data: {"type":"layout","model":{"kind":"timeline","panels":[{"name":"proposal","node":"proposer","text":"Draft proposal summary","lines":1,"state":"filled"},{"name":"verdict","node":"decider","text":"","lines":0,"state":"empty"},{"name":"after","node":"after","text":"","lines":0,"state":"pending","emphasis":"last"}]}}
+
+data: {"type":"reroll_failed","runId":"contract-run-reroll-failed","nodeId":"hold","error":"Reroll produced no `## Candidate N` sections; the earlier candidates stay"}
+
+data: {"type":"run_waiting","runId":"contract-run-reroll-failed","nodeId":"hold","hold":{"nodeId":"hold","input":"## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option","candidates":[{"heading":"Candidate 1","body":"Alpha Option"},{"heading":"Candidate 2","body":"Beta Option"}],"reachedAt":"2026-09-21T10:00:00.000Z","revision":1,"feedback":"Kinder still"}}
+

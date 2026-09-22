@@ -1,0 +1,73 @@
+{
+  "runId": "contract-run-error",
+  "chainName": "held-chain",
+  "seedPrompt": "Trigger error run",
+  "startedAt": "2026-09-21T10:00:00.000Z",
+  "status": "error",
+  "agentOutputs": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "seed",
+        "kind": "seed"
+      },
+      {
+        "id": "proposer",
+        "kind": "agent",
+        "agent": "proposer"
+      },
+      {
+        "id": "decider",
+        "kind": "decider",
+        "agent": "decider"
+      },
+      {
+        "id": "hold",
+        "kind": "hold"
+      },
+      {
+        "id": "after",
+        "kind": "agent",
+        "agent": "after"
+      }
+    ],
+    "edges": [
+      {
+        "fromNode": "seed",
+        "fromSocket": "output",
+        "toNode": "proposer",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "proposer",
+        "fromSocket": "output",
+        "toNode": "decider",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "decider",
+        "fromSocket": "output",
+        "toNode": "hold",
+        "toSocket": "in"
+      },
+      {
+        "fromNode": "hold",
+        "fromSocket": "output",
+        "toNode": "after",
+        "toSocket": "direction"
+      }
+    ]
+  },
+  "versionNumber": 1,
+  "versions": {
+    "chain/held-chain": 1,
+    "agent/proposer": 1,
+    "agent/decider": 1,
+    "agent/after": 1
+  },
+  "chainSlug": "held-chain",
+  "entrypoint": {
+    "kind": "chain",
+    "slug": "held-chain"
+  }
+}

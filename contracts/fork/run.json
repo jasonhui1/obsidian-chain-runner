@@ -1,0 +1,143 @@
+{
+  "runId": "contract-run-fork",
+  "chainName": "fresh-chain",
+  "seedPrompt": "Setup source run",
+  "startedAt": "2026-09-21T10:01:00.000Z",
+  "status": "complete",
+  "agentOutputs": [
+    {
+      "agentName": "First",
+      "input": "Follow your instructions.",
+      "systemPrompt": "first step Setup source run",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "Hop 1 processing\nwith café finish\n\n## Summary\nHop 1 summary with café",
+      "thought": "",
+      "tokensIn": 12,
+      "tokensOut": 18,
+      "costUsd": 0.0000126,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "first",
+      "versionNumber": 1
+    },
+    {
+      "agentName": "Second",
+      "input": "Follow your instructions.",
+      "systemPrompt": "second step Hop 1 processing\nwith café finish\n\n## Summary\nHop 1 summary with café",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:01:00.000Z",
+      "output": "Hop 2 fork recomputed\n\n## Summary\nHop 2 summary",
+      "thought": "",
+      "tokensIn": 14,
+      "tokensOut": 16,
+      "costUsd": 0.0000117,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "second",
+      "versionNumber": 1
+    }
+  ],
+  "holds": [],
+  "graph": {
+    "nodes": [
+      {
+        "id": "seed",
+        "kind": "seed"
+      },
+      {
+        "id": "first",
+        "kind": "agent",
+        "agent": "first"
+      },
+      {
+        "id": "second",
+        "kind": "agent",
+        "agent": "second"
+      }
+    ],
+    "edges": [
+      {
+        "fromNode": "seed",
+        "fromSocket": "output",
+        "toNode": "first",
+        "toSocket": "input"
+      },
+      {
+        "fromNode": "first",
+        "fromSocket": "output",
+        "toNode": "second",
+        "toSocket": "input"
+      }
+    ]
+  },
+  "branchedFromRunId": "contract-run-source",
+  "branchedFromNode": "second",
+  "forkAnchors": [
+    "second"
+  ],
+  "replayedNodeIds": [
+    "first"
+  ],
+  "replayedSlots": [
+    "first|"
+  ],
+  "sourceOutputs": [
+    {
+      "agentName": "First",
+      "input": "Follow your instructions.",
+      "systemPrompt": "first step Setup source run",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "Hop 1 processing\nwith café finish\n\n## Summary\nHop 1 summary with café",
+      "thought": "",
+      "tokensIn": 12,
+      "tokensOut": 18,
+      "costUsd": 0.0000126,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "first",
+      "versionNumber": 1
+    },
+    {
+      "agentName": "Second",
+      "input": "Follow your instructions.",
+      "systemPrompt": "second step Hop 1 processing\nwith café finish\n\n## Summary\nHop 1 summary with café",
+      "model": "openai/gpt-4o-mini",
+      "modelSource": "file",
+      "timestamp": "2026-09-21T10:00:00.000Z",
+      "output": "Hop 2 normal complete\n\n## Summary\nHop 2 summary",
+      "thought": "",
+      "tokensIn": 14,
+      "tokensOut": 16,
+      "costUsd": 0.0000117,
+      "latencyMs": 0,
+      "status": "success",
+      "toolCalls": [],
+      "toolTurns": 0,
+      "nodeId": "second",
+      "versionNumber": 1
+    }
+  ],
+  "versionNumber": 1,
+  "versions": {
+    "chain/fresh-chain": 1,
+    "agent/first": 1,
+    "agent/second": 1
+  },
+  "chainSlug": "fresh-chain",
+  "entrypoint": {
+    "kind": "chain",
+    "slug": "fresh-chain"
+  },
+  "completedAt": "2026-09-21T10:01:00.000Z"
+}

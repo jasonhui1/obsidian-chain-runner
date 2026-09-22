@@ -1,0 +1,27 @@
+{
+  "kind": "timeline",
+  "panels": [
+    {
+      "name": "proposal",
+      "node": "proposer",
+      "text": "",
+      "lines": 0,
+      "state": "pending"
+    },
+    {
+      "name": "verdict",
+      "node": "decider",
+      "text": "",
+      "lines": 0,
+      "state": "pending"
+    },
+    {
+      "name": "after",
+      "node": "after",
+      "text": "",
+      "lines": 0,
+      "state": "pending",
+      "emphasis": "last"
+    }
+  ]
+}
