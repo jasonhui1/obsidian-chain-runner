@@ -15,7 +15,7 @@ type BoardState =
 /** The variance view's content, including the two full sample outputs. */
 export class VarianceBoard {
   private state: BoardState = { kind: 'idle' }
-  private nodeId: string | undefined
+  private selectedNodeKey: string | undefined
   private firstRunId: string | undefined
   private secondRunId: string | undefined
 
@@ -36,7 +36,7 @@ export class VarianceBoard {
 
   showGroup(group: VarianceGroup): void {
     if (this.state.kind !== 'group' || this.state.group.groupId !== group.groupId) {
-      this.nodeId = group.nodes[0]?.nodeId
+      this.selectedNodeKey = group.nodes[0] ? varianceNodeKey(group.nodes[0]) : undefined
       this.firstRunId = undefined
       this.secondRunId = undefined
     }
@@ -78,9 +78,11 @@ export class VarianceBoard {
       const button = this.add('button', 'chain-runner-variance-node', nodeLabel(node), nodes) as HTMLButtonElement
       button.type = 'button'
       button.dataset['nodeId'] = node.nodeId
-      button.setAttribute('aria-pressed', String(node.nodeId === this.nodeId))
+      if (node.round !== undefined) button.dataset['round'] = String(node.round)
+      const key = varianceNodeKey(node)
+      button.setAttribute('aria-pressed', String(key === this.selectedNodeKey))
       button.addEventListener('click', () => {
-        this.nodeId = node.nodeId
+        this.selectedNodeKey = key
         this.firstRunId = undefined
         this.secondRunId = undefined
         this.state = { kind: 'group', group }
@@ -88,14 +90,14 @@ export class VarianceBoard {
       })
     }
 
-    const active = group.nodes.find(node => node.nodeId === this.nodeId) ?? group.nodes[0]
+    const active = group.nodes.find(node => varianceNodeKey(node) === this.selectedNodeKey) ?? group.nodes[0]
     if (active) this.drawComparison(active)
     this.drawMembers(group)
   }
 
   private drawComparison(node: VarianceNode): void {
     const successful = node.samples.filter(sample => sample.status === 'success')
-    this.add('h3', 'chain-runner-variance-section-title', `Compare ${node.nodeName}`)
+    this.add('h3', 'chain-runner-variance-section-title', `Compare ${nodeDisplayName(node)}`)
     if (successful.length < 2) {
       this.add('p', 'chain-runner-variance-unavailable', `Two successful samples are not available (${node.successfulSampleCount}/${node.expectedSampleCount}).`)
       return
@@ -211,7 +213,15 @@ function nodeLabel(node: VarianceNode): string {
   const spread = node.spread === undefined
     ? `Spread unavailable · ${node.successfulSampleCount}/${node.expectedSampleCount} successful`
     : `Spread ${node.spread}`
-  return `${node.nodeName} · ${spread}`
+  return `${nodeDisplayName(node)} · ${spread}`
+}
+
+function nodeDisplayName(node: VarianceNode): string {
+  return node.round === undefined ? node.nodeName : `${node.nodeName} · Round ${node.round + 1}`
+}
+
+function varianceNodeKey(node: VarianceNode): string {
+  return JSON.stringify([node.nodeId, node.round ?? null])
 }
 
 function usd(amount: number): string {

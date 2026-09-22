@@ -98,6 +98,35 @@ describe('variance summary', () => {
     expect(root.querySelector('[data-node-id="writer"]')?.textContent).toBe('Writer · Spread 0.004')
   })
 
+  it('distinguishes variance entries for separate rounds of the same loop node', () => {
+    board.showGroup(group({
+      nodes: [{
+        nodeId: 'loop-writer',
+        nodeName: 'Loop writer',
+        round: 0,
+        spread: 0.1,
+        successfulSampleCount: 2,
+        expectedSampleCount: 2,
+        samples: [sample('r0', 0, 'round one, first'), sample('r1', 1, 'round one, second')],
+      }, {
+        nodeId: 'loop-writer',
+        nodeName: 'Loop writer',
+        round: 1,
+        spread: 0.2,
+        successfulSampleCount: 2,
+        expectedSampleCount: 2,
+        samples: [sample('r0', 0, 'round two, first'), sample('r1', 1, 'round two, second')],
+      }],
+    }))
+
+    root.querySelector<HTMLButtonElement>('[data-node-id="loop-writer"][data-round="1"]')!.click()
+
+    expect(root.querySelector('[data-node-id="loop-writer"][data-round="1"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(root.querySelectorAll('.chain-runner-variance-section-title')[1]?.textContent).toBe('Compare Loop writer · Round 2')
+    expect(root.querySelector('.chain-runner-variance-output--left')?.textContent).toBe('round two, first')
+    expect(root.querySelector('.chain-runner-variance-output--right')?.textContent).toBe('round two, second')
+  })
+
   it('lets a reader choose two successful samples and shows each full output side by side', () => {
     board.showGroup(group({
       expectedRunCount: 4,
