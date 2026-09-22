@@ -1,4 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import dns from 'node:dns'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createNodeTransport } from '@/engine/nodeTransport'
@@ -67,10 +68,21 @@ describe('nodeTransport.send', () => {
     await expect(transport.send({ url: `${base}/api/workspace` })).rejects.toBeInstanceOf(EngineOfflineError)
   })
 
-  it('throws EngineOfflineError for a host that does not resolve', async () => {
-    await expect(
-      transport.send({ url: 'http://engine.invalid.localdomain:3000/api/workspace' }),
-    ).rejects.toBeInstanceOf(EngineOfflineError)
+  it('translates a DNS lookup failure to EngineOfflineError', async () => {
+    const mockLookup = ((_hostname: string, options: unknown, callback?: unknown) => {
+      const done = (typeof options === 'function' ? options : callback) as (
+        error: NodeJS.ErrnoException | null,
+        address: string,
+        family: number,
+      ) => void
+      queueMicrotask(() => done(Object.assign(new Error('mocked lookup failure'), { code: 'ENOTFOUND' }), '', 4))
+    }) as typeof dns.lookup
+    const lookup = vi.spyOn(dns, 'lookup').mockImplementation(mockLookup)
+    try {
+      await expect(transport.send({ url: 'http://engine.invalid:3000/api/workspace' })).rejects.toBeInstanceOf(EngineOfflineError)
+    } finally {
+      lookup.mockRestore()
+    }
   })
 
   it('throws RequestAbortedError when the caller aborts', async () => {
