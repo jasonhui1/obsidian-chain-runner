@@ -312,8 +312,11 @@ describe('recorded request builders', () => {
       { text: expected.seedPrompt, from: 'note' },
       { name: 'fixture.md', path: 'fixture.md' },
     )
+    expect(lastModal()?.placeholder).toBe('Run which chain on this note?')
     choose(0)
-    await vi.waitFor(() => expect(lastModal()).toBeDefined())
+    expect(lastModal()?.placeholder).toBe('Choose how to start')
+    choose(0)
+    expect(lastModal()?.placeholder).toBe('Run how many times?')
     choose(0)
     await vi.waitFor(() => expect(capturedRequests.some(request => request.path === scenario.request.path)).toBe(true))
 
