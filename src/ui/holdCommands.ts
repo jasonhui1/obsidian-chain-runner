@@ -8,6 +8,12 @@ export const NO_RUN_TO_DIRECT = 'No finished run to direct'
 
 type Notify = (message: string) => void
 
+export interface ConditionalHoldCommand {
+  id: string
+  name: string
+  checkCallback: (checking: boolean) => boolean
+}
+
 /** "Direct this run": the run on screen written into its hold note, and opened. */
 export async function directRun(holds: Holds, notify: Notify, result: RunResult | undefined): Promise<void> {
   if (!result?.runId || result.status === 'running') return notify(NO_RUN_TO_DIRECT)
@@ -37,6 +43,23 @@ export async function rerollCandidatesFront(holds: Holds, notify: Notify): Promi
   const hold = await holds.front()
   if (!hold) return notify(NOT_A_HOLD_NOTE)
   await holds.reroll(hold.runId, hold.holds.at(-1)?.nodeId)
+}
+
+/** Offers the palette command only when the engine's advertised capability is current. */
+export function rerollCandidatesCommand(
+  holds: Holds,
+  notify: Notify,
+  advertised: () => boolean,
+): ConditionalHoldCommand {
+  return {
+    id: 'reroll-hold-candidates',
+    name: 'Reroll hold candidates',
+    checkCallback: checking => {
+      if (!advertised()) return false
+      if (!checking) void rerollCandidatesFront(holds, notify)
+      return true
+    },
+  }
 }
 
 /** "Chat with proposer", "Ask the room" and "Side quest": the trigger line typed in the note in front, answered. */

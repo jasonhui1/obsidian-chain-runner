@@ -801,12 +801,16 @@ async function fetchRun(engine: EngineClient, runId: string): Promise<FetchedRun
   return { run, layout }
 }
 
+function candidateSnapshot(candidates: readonly { heading: string; body: string }[]): { heading: string; body: string }[] {
+  return candidates.map(({ heading, body }) => ({ heading, body }))
+}
+
 function sameWaitingHolds(open: HoldRecord[], shown: ReturnType<typeof waitingHoldsIn>): boolean {
   const facts = (holds: readonly { nodeId: string; prompt?: string; candidates: readonly { heading: string; body: string }[]; revision?: number; feedback?: string; rerolledAt?: string }[]) =>
     holds.map(hold => ({
       nodeId: hold.nodeId,
       prompt: hold.prompt ?? null,
-      candidates: hold.candidates.map(({ heading, body }) => ({ heading, body })),
+      candidates: candidateSnapshot(hold.candidates),
       revision: hold.revision ?? null,
       feedback: hold.feedback || null,
       rerolledAt: hold.rerolledAt ?? null,
@@ -819,8 +823,7 @@ function waitingChoicesChanged(open: HoldRecord[], shown: ReturnType<typeof wait
   return open.some((hold, index) => {
     const previous = shown[index]
     return previous === undefined || hold.nodeId !== previous.nodeId || hold.revision !== previous.revision ||
-      JSON.stringify(hold.candidates.map(({ heading, body }) => ({ heading, body }))) !==
-        JSON.stringify(previous.candidates.map(({ heading, body }) => ({ heading, body })))
+      JSON.stringify(candidateSnapshot(hold.candidates)) !== JSON.stringify(candidateSnapshot(previous.candidates))
   })
 }
 

@@ -11,7 +11,7 @@ import {
   type Hold,
   type Landing,
 } from '@/ui/holds'
-import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerollCandidatesFront, rerunDownstreamFront, resumeFront, sendFront } from '@/ui/holdCommands'
+import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerollCandidatesCommand, rerollCandidatesFront, rerunDownstreamFront, resumeFront, sendFront } from '@/ui/holdCommands'
 import { runViewUrl } from '@/run/provenance'
 import { holdNoteContent, holdNoteInput } from '@/run/holdNote'
 import { RerunWatch, type GoingRerun } from '@/run/rerunWatch'
@@ -1192,6 +1192,17 @@ describe('the palette', () => {
     await rerollCandidatesFront(makeHolds(), notify)
     expect(rerolls).toEqual([{ runId: RUN, holdId: 'pick', revision: 1 }])
     expect(notices).toEqual(['Rerolled candidates at pick'])
+  })
+
+  it('offers the reroll palette command only when the engine advertises it', () => {
+    const command = rerollCandidatesCommand(makeHolds(), notify, () => capabilities.holdReroll === true)
+    expect(command.id).toBe('reroll-hold-candidates')
+    expect(command.checkCallback(true)).toBe(false)
+    expect(command.checkCallback(false)).toBe(false)
+    expect(rerolls).toEqual([])
+
+    capabilities = { holdReroll: true }
+    expect(command.checkCallback(true)).toBe(true)
   })
 
   it('directs the run on screen: writes its hold note and opens it', async () => {

@@ -22,7 +22,7 @@ import {
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
-import { directRun, rerollCandidatesFront, rerunDownstreamFront, resumeFront, sendFront } from './ui/holdCommands'
+import { directRun, rerollCandidatesCommand, rerunDownstreamFront, resumeFront, sendFront } from './ui/holdCommands'
 import { Holds } from './ui/holds'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
@@ -50,6 +50,7 @@ export default class ChainRunnerPlugin extends Plugin {
   private pill: HTMLElement | undefined
   private quickRun!: QuickRunner
   private nodes!: ChainNodes
+  private holdRerollAdvertised = false
 
   override async onload(): Promise<void> {
     this.settings = withDefaults(await this.loadData())
@@ -75,8 +76,8 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(
       this.status.onChange(state => {
         // An engine that came back may be another version: what it can do is asked again.
-        // A refresh that fails keeps what was known; the action that needs it will say so.
-        if (state === 'online') this.engine.loadWorkspace().catch(() => {})
+        if (state === 'online') void this.refreshHoldRerollAvailability()
+        else this.holdRerollAdvertised = false
         this.renderPill()
         // The empty result view says whether there is an engine, so it moves with the pill.
         this.refreshResultViews()
@@ -359,11 +360,7 @@ export default class ChainRunnerPlugin extends Plugin {
       callback: () => void rerunDownstreamFront(holds, notify),
     })
 
-    this.addCommand({
-      id: 'reroll-hold-candidates',
-      name: 'Reroll hold candidates',
-      callback: () => void rerollCandidatesFront(holds, notify),
-    })
+    this.addCommand(rerollCandidatesCommand(holds, notify, () => this.holdRerollAdvertised))
 
     this.addCommand({
       id: 'chat-with-proposer',
@@ -470,6 +467,8 @@ export default class ChainRunnerPlugin extends Plugin {
   /** Persists only; re-checking the engine is the settings tab's call. */
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings)
+    this.holdRerollAdvertised = false
+    void this.refreshHoldRerollAvailability()
     this.renderPill()
     // The engine URL is named in the offline empty state.
     this.refreshResultViews()
@@ -477,6 +476,18 @@ export default class ChainRunnerPlugin extends Plugin {
 
   private renderPill(): void {
     if (this.pill) renderStatusPill(this.pill, this.status.state, this.settings.engineUrl)
+  }
+
+  private async refreshHoldRerollAvailability(): Promise<void> {
+    const engineUrl = this.settings.engineUrl
+    try {
+      const workspace = await this.engine.loadWorkspace()
+      if (this.settings.engineUrl === engineUrl) {
+        this.holdRerollAdvertised = workspace.capabilities.holdReroll === true
+      }
+    } catch {
+      if (this.settings.engineUrl === engineUrl) this.holdRerollAdvertised = false
+    }
   }
 }
 
