@@ -148,20 +148,7 @@ export class EngineClient {
 
   /** Starts a repeated chain run; each frame remains tagged with its member index. */
   async *launchVariance(request: VarianceRequest, signal?: AbortSignal): AsyncGenerator<VarianceRunEvent> {
-    const url = this.resolve('/api/variance')
-    const stream = await this.transport.open({
-      url,
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify(request),
-      signal,
-    })
-    if (!ok(stream.status)) {
-      throw new EngineHttpError(stream.status, url, await collect(stream.body))
-    }
-    for await (const payload of parseSse(stream.body)) {
-      if (isVarianceRunEvent(payload)) yield payload
-    }
+    yield* this.postEvents('/api/variance', request, signal, isVarianceRunEvent)
   }
 
   async *forkRun(runId: string, request: ForkRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
@@ -198,20 +185,8 @@ export class EngineClient {
    * its agent file is gone — throws `EngineHttpError` for the caller to name.
    */
   async *chatWithNode(chat: { runId: string; nodeId: string; message: string }, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
-    const url = this.resolve(`/api/runs/${encodeURIComponent(chat.runId)}/nodes/${encodeURIComponent(chat.nodeId)}/chat`)
-    const stream = await this.transport.open({
-      url,
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ message: chat.message }),
-      signal,
-    })
-    if (!ok(stream.status)) {
-      throw new EngineHttpError(stream.status, url, await collect(stream.body))
-    }
-    for await (const payload of parseSse(stream.body)) {
-      if (isChatEvent(payload)) yield payload
-    }
+    const path = `/api/runs/${encodeURIComponent(chat.runId)}/nodes/${encodeURIComponent(chat.nodeId)}/chat`
+    yield* this.postEvents(path, { message: chat.message }, signal, isChatEvent)
   }
 
   /** Whether the engine is there. One that answers with an error is still up. */
@@ -234,6 +209,16 @@ export class EngineClient {
 
   /** A POST whose answer is the run event stream. */
   private async *streamRun(path: string, request: unknown, signal?: AbortSignal): AsyncGenerator<RunEvent> {
+    yield* this.postEvents(path, request, signal, isRunEvent)
+  }
+
+  /** Opens a JSON POST event stream and yields only events the caller understands. */
+  private async *postEvents<T>(
+    path: string,
+    request: unknown,
+    signal: AbortSignal | undefined,
+    isEvent: (payload: unknown) => payload is T,
+  ): AsyncGenerator<T> {
     const url = this.resolve(path)
     const stream = await this.transport.open({
       url,
@@ -246,7 +231,7 @@ export class EngineClient {
       throw new EngineHttpError(stream.status, url, await collect(stream.body))
     }
     for await (const payload of parseSse(stream.body)) {
-      if (isRunEvent(payload)) yield payload
+      if (isEvent(payload)) yield payload
     }
   }
 
