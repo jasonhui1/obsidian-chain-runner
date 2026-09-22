@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { QuickRunner } from '@/ui/quickRun'
 import type { EngineClient } from '@/engine/client'
-import type { RunEvent } from '@/engine/types'
+import type { RunEvent, VarianceGroup, VarianceRequest, VarianceRunEvent } from '@/engine/types'
 import type { RunResult } from '@/run/session'
 import type { App } from 'obsidian'
 // The test-time `obsidian` stub, imported by path so `tsc` still checks the
@@ -21,6 +21,12 @@ const CHAINS = [
 
 /** What the run was launched with, and every state the view was shown. */
 let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
+let varianceCapability: boolean | undefined
+let varianceRequests: VarianceRequest[]
+let varianceEvents: VarianceRunEvent[]
+let varianceGroup: VarianceGroup
+let progressShown: unknown[]
+let groupsShown: VarianceGroup[]
 let events: RunEvent[]
 let held: string[]
 let shown: RunResult[]
@@ -29,11 +35,19 @@ let store: MemoryNoteStore
 
 function makeRunner(): QuickRunner {
   const engine = {
-    capabilities: () => Promise.resolve({ runLayoutFrames: true }),
+    capabilities: () => Promise.resolve({ runLayoutFrames: true, ...(varianceCapability === undefined ? {} : { varianceGroups: varianceCapability }) }),
     listChains: () => Promise.resolve(CHAINS),
     launchRun: async function* (request: { chainName: string; seedPrompt: string; paramValue?: string }) {
       launched.push(request)
       for (const event of events) yield event
+    },
+    launchVariance: async function* (request: VarianceRequest) {
+      varianceRequests.push(request)
+      for (const event of varianceEvents) yield event
+    },
+    getVarianceGroup: (groupId: string) => {
+      expect(groupId).toBe(varianceGroup.groupId)
+      return Promise.resolve(varianceGroup)
     },
   } as unknown as EngineClient
 
@@ -46,6 +60,11 @@ function makeRunner(): QuickRunner {
       Promise.resolve({
         show: (result: RunResult) => shown.push(result),
       } as unknown as Awaited<ReturnType<() => Promise<never>>>),
+    openVarianceView: () => Promise.resolve({
+      showProgress: (progress: unknown) => progressShown.push(progress),
+      showGroup: (group: VarianceGroup) => groupsShown.push(group),
+      showFailure: (message: string) => notices.push(message),
+    } as never),
     notify: message => notices.push(message),
     markOffline: () => {},
     holdReached: (runId, nodeId) => Promise.resolve(void held.push(`${runId} ${nodeId}`)),
@@ -62,12 +81,27 @@ async function run(...picks: number[]): Promise<void> {
     modal.choose(pick)
     await Promise.resolve()
   }
-  await vi.waitFor(() => expect(launched.length + notices.length).toBeGreaterThan(0))
+  await vi.waitFor(() => expect(launched.length + varianceRequests.length + notices.length).toBeGreaterThan(0))
 }
 
 beforeEach(() => {
   resetModals()
   launched = []
+  varianceCapability = undefined
+  varianceRequests = []
+  varianceEvents = []
+  varianceGroup = {
+    groupId: 'group-1',
+    chainName: 'Telephone Relay',
+    seedPrompt: 'the whole note',
+    expectedRunCount: 2,
+    completedRunCount: 2,
+    costUsd: 0,
+    runs: [],
+    nodes: [],
+  }
+  progressShown = []
+  groupsShown = []
   events = []
   held = []
   shown = []
@@ -122,6 +156,64 @@ describe('the dropdown a chain declares', () => {
   it('shows the name and the value in the header', async () => {
     await run(1, 1)
     expect(shown[0].parameter).toEqual({ name: 'lens', value: 'builder' })
+  })
+})
+
+describe('variance runs', () => {
+  it.each([false, undefined])('keeps the single-run launch when varianceGroups is %s', async capability => {
+    varianceCapability = capability
+
+    await run(0)
+
+    expect(launched).toHaveLength(1)
+    expect(varianceRequests).toEqual([])
+  })
+
+  it('offers a single run or 2–10 runs when the engine supports variance groups', async () => {
+    varianceCapability = true
+    const runner = makeRunner()
+    await runner.start()
+    lastModal()?.choose(0)
+    await Promise.resolve()
+
+    const picker = lastModal() as unknown as { getItems(): number[]; getItemText(count: number): string }
+    expect(picker.getItems()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(picker.getItemText(1)).toBe('Run once')
+    expect(picker.getItemText(5)).toBe('Run 5 times')
+  })
+
+  it('keeps the single-run choice on the ordinary run endpoint', async () => {
+    varianceCapability = true
+
+    await run(0, 0)
+
+    expect(launched).toHaveLength(1)
+    expect(varianceRequests).toEqual([])
+  })
+
+  it('sends the chosen count, keeps interleaved members separate, and opens the engine-named group', async () => {
+    varianceCapability = true
+    varianceEvents = [
+      { type: 'run_start', runId: 'r0', instance: 0 },
+      { type: 'run_start', runId: 'r1', instance: 1 },
+      { type: 'agent_start', agentName: 'Draft A', nodeId: 'writer', step: 0, instance: 0 },
+      { type: 'token', nodeId: 'writer', token: 'A', instance: 0 },
+      { type: 'agent_start', agentName: 'Draft B', nodeId: 'writer', step: 0, instance: 1 },
+      { type: 'token', nodeId: 'writer', token: 'B', instance: 1 },
+      { type: 'variance_complete', groupId: 'group-1', runIds: ['r0', 'r1'] },
+    ]
+
+    await run(0, 1)
+    await vi.waitFor(() => expect(groupsShown).toEqual([varianceGroup]))
+
+    expect(launched).toEqual([])
+    expect(varianceRequests).toEqual([{ chainName: 'Telephone Relay', seedPrompt: 'the whole note', count: 2 }])
+    expect(progressShown.at(-1)).toMatchObject({
+      members: [
+        { instance: 0, runId: 'r0', currentNode: 'Draft A' },
+        { instance: 1, runId: 'r1', currentNode: 'Draft B' },
+      ],
+    })
   })
 })
 

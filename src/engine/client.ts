@@ -20,6 +20,9 @@ import type {
   RunMeta,
   RunRequest,
   ResumeRequest,
+  VarianceGroup,
+  VarianceRequest,
+  VarianceRunEvent,
 } from './types'
 
 /** Shapes the engine returns that the client narrows before handing on. */
@@ -131,12 +134,34 @@ export class EngineClient {
     return this.getJson<LayoutModel>(`/api/runs/${encodeURIComponent(runId)}/layout`)
   }
 
+  async getVarianceGroup(groupId: string): Promise<VarianceGroup> {
+    return this.getJson<VarianceGroup>(`/api/variance/${encodeURIComponent(groupId)}`)
+  }
+
   /**
    * Starts a run and yields its events. An engine `error` event is yielded, not
    * thrown; only an unreachable engine or a rejected request throws.
    */
   async *launchRun(request: RunRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
     yield* this.streamRun('/api/run', request, signal)
+  }
+
+  /** Starts a repeated chain run; each frame remains tagged with its member index. */
+  async *launchVariance(request: VarianceRequest, signal?: AbortSignal): AsyncGenerator<VarianceRunEvent> {
+    const url = this.resolve('/api/variance')
+    const stream = await this.transport.open({
+      url,
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(request),
+      signal,
+    })
+    if (!ok(stream.status)) {
+      throw new EngineHttpError(stream.status, url, await collect(stream.body))
+    }
+    for await (const payload of parseSse(stream.body)) {
+      if (isVarianceRunEvent(payload)) yield payload
+    }
   }
 
   async *forkRun(runId: string, request: ForkRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
@@ -284,6 +309,16 @@ function summarisePort(raw: ChainPort): ChainPort {
 /** The engine sends only tagged objects; anything else on the wire is not ours. */
 function isRunEvent(payload: unknown): payload is RunEvent {
   return typeof payload === 'object' && payload !== null && typeof (payload as RunEvent).type === 'string'
+}
+
+/** Member frames carry an index; the one group frame names the completed group. */
+function isVarianceRunEvent(payload: unknown): payload is VarianceRunEvent {
+  if (typeof payload !== 'object' || payload === null) return false
+  const event = payload as Record<string, unknown>
+  if (event.type === 'variance_complete') {
+    return typeof event.groupId === 'string' && Array.isArray(event.runIds)
+  }
+  return isRunEvent(payload) && Number.isInteger(event.instance) && (event.instance as number) >= 0
 }
 
 async function collect(chunks: AsyncIterable<string>): Promise<string> {

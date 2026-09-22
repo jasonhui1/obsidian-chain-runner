@@ -1055,3 +1055,121 @@ body:not(.is-mobile) .chain-runner-directing-footer {
 .chain-runner-directing-failed {
   color: var(--text-error);
 }
+
+/* ── Variance group ─────────────────────────────────────────────────────────
+   The engine owns spread and sample text; the plugin only presents them and
+   keeps two complete outputs readable beside one another. */
+
+.chain-runner-variance {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--size-4-3);
+  line-height: 1.5;
+}
+
+.chain-runner-variance-title {
+  margin: 0 0 var(--size-4-2);
+  font-size: var(--h2-size);
+}
+
+.chain-runner-variance-completion,
+.chain-runner-variance-cost,
+.chain-runner-variance-unavailable,
+.chain-runner-variance-failure {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-variance-cost--warning,
+.chain-runner-variance-failure {
+  color: var(--text-error);
+}
+
+.chain-runner-variance-section-title {
+  margin: var(--size-4-5) 0 var(--size-2-2);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-variance-nodes,
+.chain-runner-variance-choices,
+.chain-runner-variance-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2);
+}
+
+.chain-runner-variance-node,
+.chain-runner-variance-member-open,
+.chain-runner-variance-open-group,
+.chain-runner-variance-back {
+  height: auto;
+  padding: var(--size-2-2) var(--size-4-2);
+  font-size: var(--font-ui-small);
+}
+
+.chain-runner-variance-node[aria-pressed='true'] {
+  border-color: var(--interactive-accent);
+  color: var(--text-accent);
+}
+
+.chain-runner-variance-choice {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--size-2-1);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chain-runner-variance-choice select {
+  max-width: 100%;
+}
+
+.chain-runner-variance-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+}
+
+.chain-runner-variance-sample {
+  min-width: 0;
+}
+
+.chain-runner-variance-sample-title {
+  overflow-wrap: anywhere;
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+}
+
+.chain-runner-variance-output {
+  max-height: 48vh;
+  overflow: auto;
+  margin: var(--size-2-2) 0;
+  padding: var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chain-runner-variance-members {
+  flex-direction: column;
+  margin: 0;
+  padding-left: var(--size-4-5);
+}
+
+.chain-runner-variance-member-output {
+  min-width: 0;
+}
+
+@media (max-width: 520px) {
+  .chain-runner-variance-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

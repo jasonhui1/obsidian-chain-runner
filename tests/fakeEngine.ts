@@ -24,6 +24,8 @@ export class FakeEngine {
   runFrames: (string | null)[] = []
   /** Frames the node chat route writes, in order. `null` closes the stream. */
   chatFrames: (string | null)[] = []
+  /** Frames a variance run writes, in order. `null` closes the stream. */
+  varianceFrames: (string | null)[] = []
   chains: unknown[] = []
   /** What the engine says it can do; a version too old to say reports nothing. */
   capabilities: unknown = { runLayoutFrames: true }
@@ -31,6 +33,7 @@ export class FakeEngine {
   /** What `GET /api/runs` lists, whatever it was filtered by. */
   runs: unknown = []
   layout: unknown = { kind: 'undeclared', panels: [] }
+  varianceGroup: unknown = {}
   /** When set, every route answers with this status and body instead. */
   failWith?: { status: number; body: string }
 
@@ -63,6 +66,8 @@ export class FakeEngine {
       if (this.failWith) {
         res.writeHead(this.failWith.status)
         res.end(this.failWith.body)
+      } else if (req.method === 'POST' && path === '/api/variance') {
+        this.stream(res, this.varianceFrames)
       } else if (req.method === 'POST' && (path === '/api/run' || RESUME_ROUTE.test(path) || FORK_ROUTE.test(path) || PROMOTE_ROUTE.test(path))) {
         this.stream(res, this.runFrames)
       } else if (req.method === 'POST' && CHAT_ROUTE.test(path)) {
@@ -71,6 +76,8 @@ export class FakeEngine {
         this.json(res, { chains: this.chains, agents: [], capabilities: this.capabilities })
       } else if (path.endsWith('/layout')) {
         this.json(res, this.layout)
+      } else if (path.startsWith('/api/variance/')) {
+        this.json(res, this.varianceGroup)
       } else if (path.startsWith('/api/runs/')) {
         this.json(res, this.runMeta)
       } else if (path.startsWith('/api/runs?')) {

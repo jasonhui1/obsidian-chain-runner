@@ -149,7 +149,40 @@ export interface RunMeta {
   holds?: HoldRecord[]
   graph?: RunGraph
   branchedFromRunId?: string
+  /** Membership in a repeated run of one chain with the same resolved inputs. */
+  variance?: { groupId: string; index: number; size: number }
   [key: string]: unknown
+}
+
+export interface VarianceSample {
+  runId: string
+  runIndex: number
+  output: string
+  status: AgentOutput['status']
+  error?: string
+}
+
+export interface VarianceNode {
+  nodeId: string
+  nodeName: string
+  round?: number
+  /** The engine omits spread when the successful sample set is incomplete. */
+  spread?: number
+  successfulSampleCount: number
+  expectedSampleCount: number
+  samples: VarianceSample[]
+}
+
+export interface VarianceGroup {
+  groupId: string
+  chainName: string
+  seedPrompt: string
+  expectedRunCount: number
+  completedRunCount: number
+  costUsd?: number
+  costWarning?: string
+  runs: RunMeta[]
+  nodes: VarianceNode[]
 }
 
 export type LayoutKind = 'timeline' | 'columns' | 'sidebar' | 'undeclared'
@@ -197,6 +230,8 @@ export interface Capabilities {
   nodePromote?: boolean
   /** `POST /api/runs/:id/fork` reruns descendants of revised outputs (#67). */
   runFork?: boolean
+  /** `POST /api/variance` repeats one resolved chain request and groups its runs. */
+  varianceGroups?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
@@ -210,6 +245,11 @@ export interface RunRequest {
   paramValue?: string
   /** Overrides a `context` node's file, keyed by the node's declared `file`. */
   context?: Record<string, string>
+}
+
+/** What `POST /api/variance` is asked for: one ordinary run request, repeated 2–10 times. */
+export interface VarianceRequest extends RunRequest {
+  count: number
 }
 
 /** What `POST /api/runs/:id/fork` is asked for. */
@@ -310,6 +350,17 @@ export interface RunErrorEvent {
   type: 'error'
   error: string
 }
+
+/** All frames from a variance stream belong to one member until the group frame arrives. */
+export type VarianceMemberEvent = RunEvent & { instance: number }
+
+export interface VarianceCompleteEvent {
+  type: 'variance_complete'
+  groupId: string
+  runIds: string[]
+}
+
+export type VarianceRunEvent = VarianceMemberEvent | VarianceCompleteEvent
 
 /** Events not modelled here — tool turns, `section_missing` — still reach the consumer (#3). */
 export interface UnknownRunEvent {

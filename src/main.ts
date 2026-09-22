@@ -33,6 +33,7 @@ import { OutputNotes } from './ui/outputNotes'
 import { QuickRunner } from './ui/quickRun'
 import { RerunOnDrawing } from './ui/rerunOnDrawing'
 import { RESULT_VIEW_TYPE, RunResultView } from './ui/resultView'
+import { VARIANCE_VIEW_TYPE, VarianceView } from './ui/varianceView'
 import { ChainRunnerSettingTab } from './ui/settingsTab'
 import { createSourceRunHeader } from './ui/sourceRunHeader'
 import { renderStatusPill } from './ui/statusPill'
@@ -133,7 +134,11 @@ export default class ChainRunnerPlugin extends Plugin {
           saveAsNote: (panel, run) => void keep.saveAsNote(panel, run),
           sendToDrawing: (panel, run) => void keep.sendToDrawing(panel, run),
           keepLines: (panel, run) => marks.start({ kind: 'panel', text: panel.text, panel, run }),
-        }),
+      }),
+    )
+    this.registerView(
+      VARIANCE_VIEW_TYPE,
+      leaf => new VarianceView(leaf, groupId => void this.openVarianceGroup(groupId)),
     )
     // A run watched live writes its hold note as it reaches each hold.
     const holdReached = async (runId: string, nodeId: string): Promise<void> => {
@@ -146,6 +151,8 @@ export default class ChainRunnerPlugin extends Plugin {
       ...sharedDeps,
       openResultView: () =>
         this.openSidebarView(RESULT_VIEW_TYPE, (view): view is RunResultView => view instanceof RunResultView),
+      openVarianceView: () =>
+        this.openSidebarView(VARIANCE_VIEW_TYPE, (view): view is VarianceView => view instanceof VarianceView),
       holdReached,
     })
     // A run outlives the command that started it; unloading the plugin ends it.
@@ -420,6 +427,26 @@ export default class ChainRunnerPlugin extends Plugin {
     if (open.length === 0) await leaf.setViewState({ type, active: false })
     await this.app.workspace.revealLeaf(leaf)
     return isView(leaf.view) ? leaf.view : undefined
+  }
+
+  /** Opens a member's variance group from its run detail and refreshes it from the engine. */
+  private async openVarianceGroup(groupId: string): Promise<void> {
+    const capabilities = await this.withEngine(() => this.engine.capabilities())
+    if (!capabilities) return
+    if (capabilities.varianceGroups !== true) {
+      new Notice('This engine no longer supports variance groups')
+      return
+    }
+    const view = await this.openSidebarView(
+      VARIANCE_VIEW_TYPE,
+      (candidate): candidate is VarianceView => candidate instanceof VarianceView,
+    )
+    if (!view) {
+      new Notice('No room in the sidebar for the variance group')
+      return
+    }
+    const group = await this.withEngine(() => this.engine.getVarianceGroup(groupId))
+    if (group) view.showGroup(group)
   }
 
   /** The result view already open, if any — this never opens one of its own. */

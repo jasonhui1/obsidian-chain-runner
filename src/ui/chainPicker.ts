@@ -107,3 +107,23 @@ export class ParameterPicker extends FuzzySuggestModal<string> {
     this.onPick(option)
   }
 }
+
+/** The count choice shown only when the engine advertises variance groups. */
+export class RunCountPicker extends FuzzySuggestModal<number> {
+  constructor(app: App, private readonly onPick: (count: number) => void) {
+    super(app)
+    this.setPlaceholder('Run how many times?')
+  }
+
+  getItems(): number[] {
+    return Array.from({ length: 10 }, (_, index) => index + 1)
+  }
+
+  getItemText(count: number): string {
+    return count === 1 ? 'Run once' : `Run ${count} times`
+  }
+
+  onChooseItem(count: number): void {
+    this.onPick(count)
+  }
+}

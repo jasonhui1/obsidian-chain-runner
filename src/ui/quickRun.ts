@@ -1,12 +1,16 @@
 import type { App } from 'obsidian'
 import { fileName, type NoteStore } from './noteStore'
-import { ChainPicker, ParameterPicker } from './chainPicker'
+import { ChainPicker, ParameterPicker, RunCountPicker } from './chainPicker'
 import type { RunResultView } from './resultView'
-import { buildRunResult, emptyRunState, settleRun } from '../run/session'
+import { applyRunEvent, buildRunResult, emptyRunState, settleRun, type RunState } from '../run/session'
 import { streamRun, streamsLayout, UNSUPPORTED_ENGINE } from '../run/stream'
 import { chooseSeed, type Seed, type SeedSource } from '../run/seed'
 import type { EngineClient } from '../engine/client'
-import { parameterToAsk, type ChainSummary } from '../engine/types'
+import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
+import { engineFailureMessage } from '../engine/guard'
+import { isEvent, parameterToAsk, type ChainSummary, type VarianceGroup, type VarianceMemberEvent } from '../engine/types'
+import type { VarianceMemberProgress, VarianceProgress } from '../run/varianceProgress'
+import type { VarianceView } from './varianceView'
 
 export interface QuickRunDeps {
   /** For the chain and parameter pickers. */
@@ -17,6 +21,8 @@ export interface QuickRunDeps {
   withEngine: <T>(action: () => Promise<T>) => Promise<T | undefined>
   /** Opens or reveals the result view; `undefined` when the workspace has no room. */
   openResultView: () => Promise<RunResultView | undefined>
+  /** Opens the variance summary surface; `undefined` when the workspace has no room. */
+  openVarianceView: () => Promise<VarianceView | undefined>
   notify: (message: string) => void
   /** Moves the status pill offline on first-hand evidence, rather than at the next poll. */
   markOffline: () => void
@@ -85,8 +91,9 @@ export class QuickRunner {
       return
     }
 
+    const canRunVariance = capabilities.varianceGroups === true
     new ChainPicker(this.deps.app, chains, chain =>
-      this.pickParameter({ chain, seed, source }),
+      this.pickParameter({ chain, seed, source }, canRunVariance),
     ).open()
   }
 
@@ -97,14 +104,25 @@ export class QuickRunner {
   }
 
   /** Asks for the chain's dropdown when it has one to ask for; launches when it does not. */
-  private pickParameter(run: QuickRun): void {
+  private pickParameter(run: QuickRun, canRunVariance: boolean): void {
     const parameter = parameterToAsk(run.chain)
     if (!parameter) {
-      void this.launch(run)
+      this.pickRunCount(run, canRunVariance)
       return
     }
     new ParameterPicker(this.deps.app, parameter.name, parameter.options, paramValue => {
-      void this.launch({ ...run, paramValue })
+      this.pickRunCount({ ...run, paramValue }, canRunVariance)
+    }).open()
+  }
+
+  private pickRunCount(run: QuickRun, canRunVariance: boolean): void {
+    if (!canRunVariance) {
+      void this.launch(run)
+      return
+    }
+    new RunCountPicker(this.deps.app, count => {
+      if (count === 1) void this.launch(run)
+      else void this.launchVariance(run, count)
     }).open()
   }
 
@@ -131,7 +149,7 @@ export class QuickRunner {
 
     const outcome = await streamRun({
       engine: this.deps.engine,
-      request: { chainName: chain.name, seedPrompt: seed.text, ...(paramValue ? { paramValue } : {}) },
+      request: requestOf(run),
       signal: controller.signal,
       onState: next => {
         state = next
@@ -148,4 +166,75 @@ export class QuickRunner {
     state = settleRun(outcome.state, outcome.failure)
     show()
   }
+
+  private async launchVariance(run: QuickRun, count: number): Promise<void> {
+    const view = await this.deps.openVarianceView()
+    if (!view) {
+      this.deps.notify('No room in the sidebar for the variance group')
+      return
+    }
+
+    this.stop()
+    const controller = new AbortController()
+    this.inFlight = controller
+    const members = new Map<number, { state: RunState; status: VarianceMemberProgress['status'] }>()
+    const showProgress = (): void => {
+      const progress: VarianceMemberProgress[] = Array.from({ length: count }, (_, instance) => {
+        const member = members.get(instance)
+        const currentNode = member?.state.nodes.started.at(-1)?.agentName
+        return {
+          instance,
+          status: member?.status ?? 'queued',
+          outputCount: member?.state.nodes.outputs.length ?? 0,
+          ...(member?.state.runId ? { runId: member.state.runId } : {}),
+          ...(currentNode ? { currentNode } : {}),
+        }
+      })
+      const current: VarianceProgress = { chainName: run.chain.name, expectedRunCount: count, members: progress }
+      view.showProgress(current)
+    }
+
+    showProgress()
+    let groupId: string | undefined
+    try {
+      for await (const event of this.deps.engine.launchVariance({ ...requestOf(run), count }, controller.signal)) {
+        if (event.type === 'variance_complete' && 'groupId' in event && typeof event.groupId === 'string') {
+          groupId = event.groupId
+          continue
+        }
+        const memberEvent = event as VarianceMemberEvent
+        const previous = members.get(memberEvent.instance) ?? { state: emptyRunState(), status: 'queued' as const }
+        previous.state = applyRunEvent(previous.state, memberEvent)
+        if (isEvent(memberEvent, 'run_start') || isEvent(memberEvent, 'agent_start')) previous.status = 'running'
+        if (isEvent(memberEvent, 'run_complete')) previous.status = 'complete'
+        if (isEvent(memberEvent, 'run_waiting')) previous.status = 'waiting'
+        if (isEvent(memberEvent, 'error')) previous.status = 'failed'
+        members.set(memberEvent.instance, previous)
+        showProgress()
+      }
+
+      if (controller.signal.aborted || this.inFlight !== controller) return
+      if (!groupId) {
+        const failure = 'The engine ended the variance run without naming its group.'
+        this.deps.notify(failure)
+        view.showFailure(failure)
+        return
+      }
+      const group: VarianceGroup = await this.deps.engine.getVarianceGroup(groupId)
+      if (this.inFlight === controller) view.showGroup(group)
+    } catch (error) {
+      if (error instanceof RequestAbortedError || controller.signal.aborted || this.inFlight !== controller) return
+      const failure = engineFailureMessage(error)
+      if (failure === undefined) throw error
+      if (error instanceof EngineOfflineError) this.deps.markOffline()
+      this.deps.notify(failure)
+      view.showFailure(failure)
+    } finally {
+      if (this.inFlight === controller) this.inFlight = undefined
+    }
+  }
+}
+
+function requestOf({ chain, seed, paramValue }: QuickRun): { chainName: string; seedPrompt: string; paramValue?: string } {
+  return { chainName: chain.name, seedPrompt: seed.text, ...(paramValue ? { paramValue } : {}) }
 }

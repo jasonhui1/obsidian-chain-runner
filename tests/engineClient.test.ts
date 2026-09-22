@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { EngineClient } from '@/engine/client'
 import { createNodeTransport } from '@/engine/nodeTransport'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
-import type { ChatEvent, PromoteRequest, ResumeRequest, RunEvent } from '@/engine/types'
+import type { ChatEvent, PromoteRequest, ResumeRequest, RunEvent, VarianceRunEvent } from '@/engine/types'
 import { FakeEngine, frame } from './fakeEngine'
 
 let engine: FakeEngine
@@ -25,6 +25,12 @@ async function drain(source: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
 
 async function drainChat(source: AsyncIterable<ChatEvent>): Promise<ChatEvent[]> {
   const events: ChatEvent[] = []
+  for await (const event of source) events.push(event)
+  return events
+}
+
+async function drainVariance(source: AsyncIterable<VarianceRunEvent>): Promise<VarianceRunEvent[]> {
+  const events: VarianceRunEvent[] = []
   for await (const event of source) events.push(event)
   return events
 }
@@ -316,6 +322,42 @@ describe('launchRun', () => {
       })(),
     ).rejects.toThrow()
     expect(events).toHaveLength(1)
+  })
+})
+
+describe('launchVariance', () => {
+  it('posts one request and keeps interleaved member events and the group completion frame', async () => {
+    engine.varianceFrames = [
+      frame({ type: 'run_start', runId: 'r0', instance: 0 }),
+      frame({ type: 'run_start', runId: 'r1', instance: 1 }),
+      frame({ type: 'token', nodeId: 'writer', token: 'first', instance: 0 }),
+      frame({ type: 'token', nodeId: 'writer', token: 'second', instance: 1 }),
+      frame({ type: 'variance_complete', groupId: 'group-1', runIds: ['r0', 'r1'] }),
+    ]
+
+    const events = await drainVariance(client.launchVariance({ chainName: 'c', seedPrompt: 's', paramValue: 'p', count: 2 }))
+
+    expect(events).toEqual([
+      { type: 'run_start', runId: 'r0', instance: 0 },
+      { type: 'run_start', runId: 'r1', instance: 1 },
+      { type: 'token', nodeId: 'writer', token: 'first', instance: 0 },
+      { type: 'token', nodeId: 'writer', token: 'second', instance: 1 },
+      { type: 'variance_complete', groupId: 'group-1', runIds: ['r0', 'r1'] },
+    ])
+    expect(engine.requests.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/api/variance',
+      body: JSON.stringify({ chainName: 'c', seedPrompt: 's', paramValue: 'p', count: 2 }),
+    })
+  })
+})
+
+describe('getVarianceGroup', () => {
+  it('reads the engine summary from the encoded group route', async () => {
+    engine.varianceGroup = { groupId: 'g/1', expectedRunCount: 2, completedRunCount: 1, runs: [], nodes: [] }
+
+    expect(await client.getVarianceGroup('g/1')).toEqual(engine.varianceGroup)
+    expect(engine.requests.at(-1)?.path).toBe('/api/variance/g%2F1')
   })
 })
 
