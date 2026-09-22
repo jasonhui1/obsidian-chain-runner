@@ -527,9 +527,9 @@ export class Holds {
    */
   private async exclusive<T>(runId: string, cause: RerunCause, act: (found: Located, report: RerunReport) => Promise<T | undefined>): Promise<T | undefined> {
     const { reruns, store } = this.deps
-    const underIt = store.at(this.pathOf(runId)) === 'note'
-    let report = underIt ? reruns.begin([runId], cause) : undefined
-    if (underIt && !report) return this.refuse(ALREADY_GOING)
+    const hasHoldNote = store.at(this.pathOf(runId)) === 'note'
+    let report = hasHoldNote ? reruns.begin([runId], cause) : undefined
+    if (hasHoldNote && !report) return this.refuse(ALREADY_GOING)
     try {
       const found = await this.locateOrRefuse(runId)
       if (!found) return undefined

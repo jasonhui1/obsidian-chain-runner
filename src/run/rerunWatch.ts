@@ -2,11 +2,7 @@ import type { RepliedTurn } from './chat'
 import type { RerunProgress } from './rerunProgress'
 import type { LayoutPanel } from '../engine/types'
 
-/**
- * Every rerun going, from its start to its end: the one registry the drawing's
- * cards, the header and the directing panel all read. Told by the rerun itself,
- * so no panel has to be open.
- */
+/** Every rerun in flight, shared by drawing cards, output headers and the directing panel. */
 
 /** What started a rerun: the edited proposals, a reply used as the revision, or a resume. */
 export type RerunCause = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn } | { kind: 'resume' }
