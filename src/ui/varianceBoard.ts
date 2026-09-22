@@ -210,7 +210,7 @@ export class VarianceBoard {
 function nodeLabel(node: VarianceNode): string {
   const spread = node.spread === undefined
     ? `Spread unavailable · ${node.successfulSampleCount}/${node.expectedSampleCount} successful`
-    : `Spread ${node.spread.toFixed(2)}`
+    : `Spread ${node.spread}`
   return `${node.nodeName} · ${spread}`
 }
 

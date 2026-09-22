@@ -78,9 +78,24 @@ describe('variance summary', () => {
       }],
     }))
 
-    expect(root.textContent).toContain('Spread 0.00')
+    expect(root.textContent).toContain('Spread 0')
     expect(root.textContent).toContain('$0.00')
     expect(root.textContent).not.toContain('Spread unavailable')
+  })
+
+  it('preserves small nonzero engine spreads instead of rounding them to zero', () => {
+    board.showGroup(group({
+      nodes: [{
+        nodeId: 'writer',
+        nodeName: 'Writer',
+        spread: 0.004,
+        successfulSampleCount: 3,
+        expectedSampleCount: 3,
+        samples: [sample('r0', 0, 'same'), sample('r1', 1, 'close'), sample('r2', 2, 'close')],
+      }],
+    }))
+
+    expect(root.querySelector('[data-node-id="writer"]')?.textContent).toBe('Writer · Spread 0.004')
   })
 
   it('lets a reader choose two successful samples and shows each full output side by side', () => {
