@@ -6,8 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EngineClient } from '@/engine/client'
 import { createNodeTransport } from '@/engine/nodeTransport'
-import type { Capabilities, ChainSummary, HoldRecord, LayoutModel, PromoteRequest, RunEvent, RunMeta, RunRequest, ResumeRequest } from '@/engine/types'
-import { buildRunPanels } from '@/run/panels'
+import type { AgentOutput, Capabilities, ChainSummary, HoldRecord, LayoutModel, PromoteRequest, RunEvent, RunMeta, RunRequest, ResumeRequest } from '@/engine/types'
 import { directionLines } from '@/run/holdNote'
 import { promoteRequest, runPromote, UNSUPPORTED_PROMOTE } from '@/run/promote'
 import { resumeRequest, runResume, UNSUPPORTED_RESUME } from '@/run/resume'
@@ -204,18 +203,43 @@ describe('the pinned engine contract manifest', () => {
       .filter((event): event is Extract<RunEvent, { type: 'layout' }> => event.type === 'layout')
       .at(-1)?.model
     expect(final.layout).toEqual(lastStreamLayout)
-    expect(state.nodes.outputs).toEqual(
-      events
-        .filter((event): event is Extract<RunEvent, { type: 'agent_done' }> => event.type === 'agent_done')
-        .map(event => ({ ...event.output, nodeId: event.nodeId })),
-    )
-    expect(buildRunPanels(chain, final.layout, final.nodes)).toEqual(result.layout)
+    const foldedOutputs = projectOutputs(state.nodes.outputs)
     if (scenarioName === 'error') {
       expect(layout.panels.every(panel => panel.state === 'pending')).toBe(true)
       expect(run.agentOutputs).toEqual([])
-      expect(final.layout).not.toEqual(layout)
+      expect(foldedOutputs).toEqual([
+        {
+          nodeId: 'proposer',
+          status: 'success',
+          output: 'Draft proposal ready\n\n## Summary\nDraft proposal summary',
+        },
+        {
+          nodeId: 'decider',
+          status: 'success',
+          output: '## Candidate 1\nAlpha Option\n\n## Candidate 2\nBeta Option',
+        },
+      ])
+      const errorPanels = [
+        { name: 'proposal', node: 'proposer', text: 'Draft proposal summary', lines: 1, state: 'filled' },
+        { name: 'verdict', node: 'decider', text: '', lines: 0, state: 'empty' },
+        {
+          name: 'after',
+          node: 'after',
+          text: '',
+          lines: 0,
+          state: 'errored',
+          emphasis: 'last',
+          error: 'Simulated persistence failure',
+        },
+      ]
+      expect(final.layout).toEqual({ kind: 'timeline', panels: errorPanels })
+      expect(result.layout).toEqual({ kind: 'timeline', panels: errorPanels })
+      expect(result.layout).not.toEqual(layout)
     } else {
+      const expectedRecordedOutputs = recordedStreamOutputs(scenarioName, run)
+      expect(foldedOutputs).toEqual(projectOutputs(expectedRecordedOutputs))
       expect(final.layout).toEqual(layout)
+      expect(result.layout).toEqual(layout)
     }
     expect(events.at(-1)?.type).toBe(expectedTerminal)
     const streamedHopFailed = state.nodes.outputs.some(output => output.status === 'error')
@@ -312,12 +336,12 @@ describe('recorded request builders', () => {
     })
     expect(request).toEqual(expected)
 
-    activeResponse = responseFor('resume')
-    const client = clientWithCodePointChunks([])
-    await drain(client.resumeRun(originalRun.runId, request))
-    const sent = capturedRequests.filter(request => request.method === scenario.request.method).at(-1)
-    expect(sent?.path).toBe(scenario.request.path.replace(':id', encodeURIComponent(originalRun.runId)))
-    expect(JSON.parse(sent?.body ?? '{}')).toEqual(expected)
+    await expectRecordedPost(
+      'resume',
+      scenario.request.path.replace(':id', encodeURIComponent(originalRun.runId)),
+      expected,
+      client => client.resumeRun(originalRun.runId, request),
+    )
   })
 
   it('builds the promote body from the recorded turn and posts the recorded shape', async () => {
@@ -335,16 +359,14 @@ describe('recorded request builders', () => {
     })
     expect(request).toEqual(expected)
 
-    activeResponse = responseFor('promote')
-    const client = clientWithCodePointChunks([])
-    await drain(client.promoteNode({ runId: originalRun.runId, nodeId }, request))
-    const sent = capturedRequests.filter(request => request.method === scenario.request.method).at(-1)
-    expect(sent?.path).toBe(
+    await expectRecordedPost(
+      'promote',
       scenario.request.path
         .replace(':id', encodeURIComponent(originalRun.runId))
         .replace(':nodeId', encodeURIComponent(nodeId)),
+      expected,
+      client => client.promoteNode({ runId: originalRun.runId, nodeId }, request),
     )
-    expect(JSON.parse(sent?.body ?? '{}')).toEqual(expected)
   })
 })
 
@@ -422,6 +444,20 @@ function contractRun(scenarioName: string): ContractRun {
 
 function contractLayout(scenarioName: string): LayoutModel {
   return readContractJson<LayoutModel>(observationFile(scenarioName, '/api/runs/:id/layout'))
+}
+
+function projectOutputs(outputs: readonly AgentOutput[]) {
+  return outputs.map(({ nodeId, status, output }) => ({ nodeId, status, output }))
+}
+
+function recordedStreamOutputs(scenarioName: string, run: ContractRun): AgentOutput[] {
+  // Follow-up recordings retain earlier outputs; their stream carries this action's suffix.
+  if (scenarioName === 'resume' || scenarioName === 'promote') {
+    return run.agentOutputs.slice(contractRun('hold').agentOutputs.length)
+  }
+  if (scenarioName === 'reroll') return run.agentOutputs.slice(-1)
+  if (scenarioName === 'reroll-failed') return run.agentOutputs.filter(output => output.status === 'error')
+  return run.agentOutputs
 }
 
 function responseFor(name: string): ActiveResponse {
@@ -506,6 +542,19 @@ async function drain(events: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
   const all: RunEvent[] = []
   for await (const event of events) all.push(event)
   return all
+}
+
+async function expectRecordedPost(
+  scenarioName: string,
+  expectedPath: string,
+  expectedBody: object,
+  send: (client: EngineClient) => AsyncIterable<RunEvent>,
+): Promise<void> {
+  activeResponse = responseFor(scenarioName)
+  await drain(send(clientWithCodePointChunks([])))
+  const sent = capturedRequests.filter(request => request.method === 'POST').at(-1)
+  expect(sent?.path).toBe(expectedPath)
+  expect(JSON.parse(sent?.body ?? '{}')).toEqual(expectedBody)
 }
 
 function countMultibyteLeads(bytes: Buffer): number {

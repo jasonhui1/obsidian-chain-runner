@@ -111,10 +111,12 @@ For non-streaming endpoints (such as the HTTP 400 Bad Request recorded in `error
 
 ## Checking & Updating Contracts
 
-```bash
-# Check mode (fails on drift without modifying files):
-npm run contracts:check
+The contract tests replay the committed fixtures offline as part of `npm test`; they do not fetch the engine or compare against a moving branch.
 
-# Regeneration mode (updates committed fixtures; refused in CI):
-npm run contracts:update
+To deliberately refresh the fixtures, pass the full engine commit SHA to the updater:
+
+```bash
+npm run contracts:update -- <full commit SHA>
 ```
+
+The updater fetches only that pinned commit and records it in `SOURCE.md`.
