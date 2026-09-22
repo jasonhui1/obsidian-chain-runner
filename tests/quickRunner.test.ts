@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { QuickRunner } from '@/ui/quickRun'
+import type { SeedChoice } from '@/ui/chainPicker'
 import type { EngineClient } from '@/engine/client'
 import type { RunEvent, VarianceGroup, VarianceRequest, VarianceRunEvent } from '@/engine/types'
 import type { RunResult } from '@/run/session'
@@ -173,9 +174,14 @@ describe('what the run reads', () => {
     lastModal()?.choose(0)
     await Promise.resolve()
 
-    const picker = lastModal() as unknown as { placeholder: string; getItems(): boolean[]; getItemText(useHint: boolean): string }
+    const picker = lastModal() as unknown as {
+      placeholder: string
+      getItems(): SeedChoice[]
+      getItemText(choice: SeedChoice): string
+    }
     expect(picker.placeholder).toBe('Choose how to start')
-    expect(picker.getItems().map(item => picker.getItemText(item))).toEqual([
+    expect(picker.getItems()).toEqual(['hint', 'no-hint'])
+    expect(picker.getItems().map(choice => picker.getItemText(choice))).toEqual([
       'Use the note as a rough hint',
       'Start with no hint',
     ])

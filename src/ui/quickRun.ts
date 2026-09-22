@@ -120,8 +120,9 @@ export class QuickRunner {
     let hintLabel = 'Use the note as a rough hint'
     if (run.seed.from === 'selection') hintLabel = 'Use the selection as a rough hint'
     if (run.seed.from === 'marks') hintLabel = 'Use the marked lines as a rough hint'
-    new SeedPicker(this.deps.app, hintLabel, useHint => {
-      this.pickRunCount(useHint ? run : { ...run, seed: { text: '', from: 'none' } }, canRunVariance)
+    new SeedPicker(this.deps.app, hintLabel, choice => {
+      const selected: QuickRun = choice === 'hint' ? run : { ...run, seed: { text: '', from: 'none' } }
+      this.pickRunCount(selected, canRunVariance)
     }).open()
   }
 

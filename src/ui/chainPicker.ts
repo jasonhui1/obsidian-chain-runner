@@ -109,26 +109,28 @@ export class ParameterPicker extends FuzzySuggestModal<string> {
 }
 
 /** Whether the quick run should use the note or selection as a rough hint. */
-export class SeedPicker extends FuzzySuggestModal<boolean> {
+export type SeedChoice = 'hint' | 'no-hint'
+
+export class SeedPicker extends FuzzySuggestModal<SeedChoice> {
   constructor(
     app: App,
     private readonly hintLabel: string,
-    private readonly onPick: (useHint: boolean) => void,
+    private readonly onPick: (choice: SeedChoice) => void,
   ) {
     super(app)
     this.setPlaceholder('Choose how to start')
   }
 
-  getItems(): boolean[] {
-    return [true, false]
+  getItems(): SeedChoice[] {
+    return ['hint', 'no-hint']
   }
 
-  getItemText(useHint: boolean): string {
-    return useHint ? this.hintLabel : 'Start with no hint'
+  getItemText(choice: SeedChoice): string {
+    return choice === 'hint' ? this.hintLabel : 'Start with no hint'
   }
 
-  onChooseItem(useHint: boolean): void {
-    this.onPick(useHint)
+  onChooseItem(choice: SeedChoice): void {
+    this.onPick(choice)
   }
 }
 
