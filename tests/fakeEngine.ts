@@ -9,6 +9,8 @@ export interface RecordedRequest {
 
 const CHAT_ROUTE = /^\/api\/runs\/[^/]+\/nodes\/[^/]+\/chat$/
 const RESUME_ROUTE = /^\/api\/runs\/[^/]+\/resume$/
+const REROLL_ROUTE = /^\/api\/runs\/[^/]+\/holds\/[^/]+\/reroll$/
+const HOLD_FEEDBACK_ROUTE = /^\/api\/runs\/[^/]+\/holds\/[^/]+$/
 const FORK_ROUTE = /^\/api\/runs\/[^/]+\/fork$/
 const PROMOTE_ROUTE = /^\/api\/runs\/[^/]+\/nodes\/[^/]+\/promote$/
 
@@ -34,6 +36,7 @@ export class FakeEngine {
   runs: unknown = []
   layout: unknown = { kind: 'undeclared', panels: [] }
   varianceGroup: unknown = {}
+  holdFeedback: unknown = { hold: { nodeId: 'hold', input: '', candidates: [], reachedAt: '' } }
   /** When set, every route answers with this status and body instead. */
   failWith?: { status: number; body: string }
 
@@ -68,10 +71,12 @@ export class FakeEngine {
         res.end(this.failWith.body)
       } else if (req.method === 'POST' && path === '/api/variance') {
         this.stream(res, this.varianceFrames)
-      } else if (req.method === 'POST' && (path === '/api/run' || RESUME_ROUTE.test(path) || FORK_ROUTE.test(path) || PROMOTE_ROUTE.test(path))) {
+      } else if (req.method === 'POST' && (path === '/api/run' || RESUME_ROUTE.test(path) || REROLL_ROUTE.test(path) || FORK_ROUTE.test(path) || PROMOTE_ROUTE.test(path))) {
         this.stream(res, this.runFrames)
       } else if (req.method === 'POST' && CHAT_ROUTE.test(path)) {
         this.stream(res, this.chatFrames)
+      } else if (req.method === 'PATCH' && HOLD_FEEDBACK_ROUTE.test(path)) {
+        this.json(res, this.holdFeedback)
       } else if (path === '/api/workspace') {
         this.json(res, { chains: this.chains, agents: [], capabilities: this.capabilities })
       } else if (path.endsWith('/layout')) {

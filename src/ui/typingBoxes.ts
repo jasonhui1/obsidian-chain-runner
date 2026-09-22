@@ -9,6 +9,13 @@ export interface TypingBox {
   key: string
   placeholder: string
   label: string
+  /** Current value when this is an editor for information already on the hold. */
+  value?: string
+  /** Empty text is a meaningful update when the box is saved. */
+  sendEmpty?: boolean
+  /** Keep the submitted value visible while its answer is on the way. */
+  keepWhileSending?: boolean
+  disabled?: boolean
   /** Answers whether what was typed reached the hold. */
   send: (text: string) => Promise<boolean>
   /** Suggestions to pick from, which make the box one line; anything typed still sends. */
@@ -20,6 +27,7 @@ let choiceLists = 0
 
 export class TypingBoxes {
   private readonly drafts = new Map<string, string>()
+  private readonly changed = new Set<string>()
   private readonly sending = new Map<string, string>()
   private readonly rows = new WeakMap<HTMLElement, BoxParts>()
 
@@ -35,10 +43,10 @@ export class TypingBoxes {
     const parts = this.rows.get(row) ?? this.build(row, box)
     parts.box = box
     parts.input.placeholder = box.placeholder
-    const draft = this.drafts.get(box.key) ?? ''
+    const draft = this.changed.has(box.key) ? this.drafts.get(box.key) ?? '' : box.value ?? ''
     if (parts.input.value !== draft) parts.input.value = draft
     parts.button.textContent = box.label
-    parts.button.disabled = this.sending.has(box.key)
+    parts.button.disabled = box.disabled === true || this.sending.has(box.key)
     if (parts.list && box.choices) choose(parts.list, box.choices)
   }
 
@@ -53,7 +61,10 @@ export class TypingBoxes {
 
     // Widened: the input-or-textarea union loses addEventListener's typed events.
     const field: HTMLElement = input
-    field.addEventListener('input', () => void this.drafts.set(parts.box.key, input.value))
+    field.addEventListener('input', () => {
+      this.drafts.set(parts.box.key, input.value)
+      this.changed.add(parts.box.key)
+    })
     // The hold keeps each message on one line, so Enter always sends.
     field.addEventListener('keydown', event => {
       if (event.key !== 'Enter' || event.isComposing) return
@@ -81,17 +92,31 @@ export class TypingBoxes {
   }
 
   private async send(box: TypingBox): Promise<void> {
-    const text = this.drafts.get(box.key)?.trim() ?? ''
-    if (text === '' || this.sending.has(box.key)) return
-    this.drafts.delete(box.key)
+    const text = (this.changed.has(box.key) ? this.drafts.get(box.key) : box.value)?.trim() ?? ''
+    if ((text === '' && !box.sendEmpty) || this.sending.has(box.key)) return
     this.sending.set(box.key, text)
+    if (!box.keepWhileSending) {
+      this.drafts.delete(box.key)
+      this.changed.delete(box.key)
+    } else {
+      this.drafts.set(box.key, text)
+      this.changed.add(box.key)
+    }
     this.redraw()
     let sent = false
     try {
       sent = await box.send(text)
     } finally {
       this.sending.delete(box.key)
-      if (!sent && !this.drafts.get(box.key)) this.drafts.set(box.key, text)
+      if (sent) {
+        if (this.drafts.get(box.key) === text) {
+          this.drafts.delete(box.key)
+          this.changed.delete(box.key)
+        }
+      } else if (!this.changed.has(box.key) || this.drafts.get(box.key) === text) {
+        this.drafts.set(box.key, text)
+        this.changed.add(box.key)
+      }
       this.redraw()
     }
   }

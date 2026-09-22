@@ -122,6 +122,9 @@ function waitingSection(hold: HoldRecord): string[] {
     '',
     ...(hold.prompt ? [`*${hold.prompt.replace(/\s+/g, ' ').trim()}*`] : []),
     `Reached ${hold.reachedAt}`,
+    ...(hold.revision !== undefined ? [`Revision: ${hold.revision}`] : []),
+    ...(hold.feedback !== undefined || hold.revision !== undefined ? [`Feedback: ${hold.feedback ?? ''}`] : []),
+    ...(hold.rerolledAt ? [`Rerolled: ${hold.rerolledAt}`] : []),
     '',
     ...(hold.candidates.length === 0 ? quoted(hold.input) : hold.candidates.flatMap(candidateLines)),
     '',
@@ -202,6 +205,9 @@ export interface HoldPick {
   candidates: CandidateChoice[]
   /** The ticked candidate's heading, which a resume sends as `chosen`. */
   chosen?: string
+  revision?: number
+  feedback?: string
+  rerolledAt?: string
 }
 
 export interface CandidateChoice {
@@ -241,8 +247,34 @@ export function waitingHoldsIn(content: string): HoldPick[] {
     const prompt = PROMPT_LINE.exec(lines.find(line => line.trim() !== '')?.trim() ?? '')?.[1]
     const candidates = candidatesIn(lines)
     const chosen = candidates.find(candidate => candidate.ticked)?.heading
-    return { nodeId, ...(prompt ? { prompt } : {}), candidates, ...(chosen ? { chosen } : {}) }
+    const revision = lines.map(line => /^Revision: (\d+)\s*$/.exec(line)).find(Boolean)?.[1]
+    const feedback = lines.map(line => /^Feedback:\s?(.*)$/.exec(line)).find(Boolean)?.[1]
+    const rerolledAt = lines.map(line => /^Rerolled: (.+?)\s*$/.exec(line)).find(Boolean)?.[1]
+    return {
+      nodeId,
+      ...(prompt ? { prompt } : {}),
+      candidates,
+      ...(chosen ? { chosen } : {}),
+      ...(revision !== undefined ? { revision: Number(revision) } : {}),
+      ...(feedback !== undefined ? { feedback } : {}),
+      ...(rerolledAt ? { rerolledAt } : {}),
+    }
   })
+}
+
+/** Replaces current run facts while retaining its already-folded verdict and human direction. */
+export function refreshHoldNoteInPlace(previous: string, input: HoldNoteInput): string {
+  const earlierVerdicts = bodyUnder(previous, PREVIOUS_VERDICT, [PROPOSALS], 0)?.trim()
+  const fresh = holdNoteContent({ ...input, ...(earlierVerdicts ? { previousVerdicts: earlierVerdicts } : {}) })
+  return mergeHoldNote(fresh, previous)
+}
+
+/** Clears candidate ticks after a new set replaces the one the human picked from. */
+export function clearCandidatePicks(content: string): string {
+  return waitingHoldsIn(content).reduce(
+    (updated, hold) => (hold.chosen ? tickCandidate(updated, hold.nodeId, hold.chosen, false) : updated),
+    content,
+  )
 }
 
 /** Each tick line, and the indented body under it. */

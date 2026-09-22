@@ -120,6 +120,12 @@ export interface HoldRecord {
   custom?: string
   direction?: string
   resolvedAt?: string
+  /** Changes whenever this hold's candidates change; sent back with a pick or reroll. */
+  revision?: number
+  /** Guidance saved for the next candidate reroll. */
+  feedback?: string
+  /** The last time the decider rerolled candidates for this hold. */
+  rerolledAt?: string
 }
 
 /**
@@ -232,6 +238,10 @@ export interface Capabilities {
   runFork?: boolean
   /** `POST /api/variance` repeats one resolved chain request and groups its runs. */
   varianceGroups?: boolean
+  /** `POST /api/runs/:id/holds/:holdId/reroll` asks the decider for new candidates. */
+  holdReroll?: boolean
+  /** `PATCH /api/runs/:id/holds/:holdId` saves candidate feedback. */
+  holdFeedback?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
@@ -275,6 +285,8 @@ export interface ResumeRequest {
   custom?: string
   /** The hold to answer, which is its `nodeId`; needed only when the engine cannot tell which. */
   holdId?: string
+  /** The candidate set version the human picked from. */
+  revision?: number
   /** Overrides a `context` node's file, keyed by the node's declared `file`. */
   context?: Record<string, string>
 }
@@ -346,6 +358,14 @@ export interface RunWaitingEvent {
   hold: HoldRecord
 }
 
+/** A decider reroll that produced no candidates, retaining the previous hold. */
+export interface RerollFailedEvent {
+  type: 'reroll_failed'
+  runId: string
+  nodeId: string
+  error: string
+}
+
 export interface RunErrorEvent {
   type: 'error'
   error: string
@@ -377,6 +397,7 @@ export type KnownRunEvent =
   | RunStartEvent
   | RunCompleteEvent
   | RunWaitingEvent
+  | RerollFailedEvent
   | RunErrorEvent
 
 export type RunEvent = KnownRunEvent | UnknownRunEvent

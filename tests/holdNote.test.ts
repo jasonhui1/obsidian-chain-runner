@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   appendDirectionLine,
   appendResumeLink,
+  clearCandidatePicks,
   directionBlock,
   directionLine,
   holdHeading,
@@ -11,6 +12,7 @@ import {
   editsToCarry,
   proposalEdits,
   refreshHoldNote,
+  refreshHoldNoteInPlace,
   readHold,
   earlierRunsIn,
   tickCandidate,
@@ -523,6 +525,23 @@ describe('a waiting run’s hold note', () => {
     ])
   })
 
+  it('retains the hold revision, feedback and rerolled time in the note', () => {
+    const content = waiting([pick({ revision: 3, feedback: 'More hopeful', rerolledAt: '2026-09-17T10:02:00.000Z' })])
+    expect(content).toContain('Revision: 3\nFeedback: More hopeful\nRerolled: 2026-09-17T10:02:00.000Z')
+    expect(readHold(content, [])?.holds[0]).toMatchObject({
+      revision: 3,
+      feedback: 'More hopeful',
+      rerolledAt: '2026-09-17T10:02:00.000Z',
+    })
+  })
+
+  it('replaces current hold facts without folding the same verdict a second time', () => {
+    const previous = holdNoteContent(input({ panels: [panel(), panel({ name: 'creative-director', node: 'decider', text: 'Old verdict.', emphasis: 'join' })], holds: [pick({ revision: 1, feedback: 'Old' })] }))
+    const updated = refreshHoldNoteInPlace(previous, input({ panels: [panel(), panel({ name: 'creative-director', node: 'decider', text: 'New verdict.', emphasis: 'join' })], holds: [pick({ revision: 2, feedback: 'New', rerolledAt: 'then' })] }))
+    expect(updated.match(/<summary>run /g)).toBeNull()
+    expect(readHold(updated, [])?.holds[0]).toMatchObject({ revision: 2, feedback: 'New', rerolledAt: 'then' })
+  })
+
   it('keeps the decider’s words out of the note’s own sections', () => {
     const content = waiting([pick({ candidates: [{ heading: 'Candidate 1', body: '## Direction\nnot this one' }] })])
     expect(directionBlock(content)).toBe(directionBlock(holdNoteContent(input())))
@@ -584,6 +603,11 @@ describe('a waiting run’s hold note', () => {
       expect(tickCandidate(content, 'other', 'Candidate 1', true)).toBe(content)
       expect(tickCandidate(content, 'pick', 'Candidate 9', true)).toBe(content)
     })
+  })
+
+  it('clears a previous pick when a fresh candidate set replaces it', () => {
+    const ticked = tickCandidate(waiting([pick()]), 'pick', 'Candidate 1', true)
+    expect(readHold(clearCandidatePicks(ticked), [])?.holds[0]?.chosen).toBeUndefined()
   })
 
   describe('refreshed', () => {

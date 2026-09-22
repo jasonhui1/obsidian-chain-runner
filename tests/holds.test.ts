@@ -11,8 +11,9 @@ import {
   type Hold,
   type Landing,
 } from '@/ui/holds'
-import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerunDownstreamFront, resumeFront, sendFront } from '@/ui/holdCommands'
+import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerollCandidatesFront, rerunDownstreamFront, resumeFront, sendFront } from '@/ui/holdCommands'
 import { runViewUrl } from '@/run/provenance'
+import { holdNoteContent, holdNoteInput } from '@/run/holdNote'
 import { RerunWatch, type GoingRerun } from '@/run/rerunWatch'
 import { UNSUPPORTED_RESUME } from '@/run/resume'
 import { UNSUPPORTED_FORK } from '@/run/rerun'
@@ -31,6 +32,7 @@ import type {
   RunRequest,
 } from '@/engine/types'
 import { answer, layoutFrame, output, panel, started } from './engineFrames'
+import { isEvent } from '@/engine/types'
 import { MemoryNoteStore } from './memoryNoteStore'
 import { stubEngine } from './stubEngine'
 
@@ -153,11 +155,14 @@ let notes: Record<string, string>
 let notices: string[]
 let framesByAgent: Record<string, RunEvent[]>
 let rerunFrames: RunEvent[]
+let rerollFrames: RunEvent[]
 let chainFrames: RunEvent[]
 let resumeFrames: RunEvent[]
 let requests: RunRequest[]
 let forks: { runId: string; request: ForkRequest }[]
 let resumes: { runId: string; request: ResumeRequest }[]
+let rerolls: { runId: string; holdId: string; revision: number }[]
+let feedbackPatches: { runId: string; holdId: string; feedback: string }[]
 let promotes: { runId: string; nodeId: string; request: PromoteRequest }[]
 let online: boolean
 let layoutsOf: string[]
@@ -170,6 +175,12 @@ let chats: { nodeId: string; message: string; noteThen: string | undefined }[]
 let conversations: Record<string, ChatMessage[]>
 /** The holds the engine has the run waiting at. */
 let waitingAt: HoldRecord[]
+let rerollThrown: unknown
+let resumeThrown: unknown
+let feedbackThrown: unknown
+let rerollConflictHolds: HoldRecord[] | undefined
+let resumeConflictHolds: HoldRecord[] | undefined
+let feedbackConflictHolds: HoldRecord[] | undefined
 /** Holds each streaming call until the test lets it go. */
 let gate: Promise<void> | undefined
 let reruns: RerunWatch
@@ -222,8 +233,36 @@ function makeHolds(): Holds {
     },
     resumeRun: async function* (runId: string, request: ResumeRequest) {
       resumes.push({ runId, request })
+      if (resumeThrown) {
+        if (resumeConflictHolds) waitingAt = resumeConflictHolds
+        throw resumeThrown
+      }
       await gate
       yield* resumeFrames
+    },
+    updateHoldFeedback: (runId: string, holdId: string, feedback: string) => {
+      feedbackPatches.push({ runId, holdId, feedback })
+      if (feedbackThrown) {
+        if (feedbackConflictHolds) waitingAt = feedbackConflictHolds
+        return Promise.reject(feedbackThrown)
+      }
+      const current = waitingAt.find(hold => hold.nodeId === holdId)
+      if (!current) return Promise.reject(new Error('hold not found'))
+      const saved = { ...current, feedback }
+      waitingAt = waitingAt.map(hold => (hold.nodeId === holdId ? saved : hold))
+      return Promise.resolve(saved)
+    },
+    rerollHold: async function* (runId: string, holdId: string, revision: number) {
+      rerolls.push({ runId, holdId, revision })
+      if (rerollThrown) {
+        if (rerollConflictHolds) waitingAt = rerollConflictHolds
+        throw rerollThrown
+      }
+      await gate
+      for (const event of rerollFrames) {
+        if (isEvent(event, 'run_waiting')) waitingAt = [...waitingAt.filter(hold => hold.nodeId !== event.nodeId), event.hold]
+        yield event
+      }
     },
     promoteNode: async function* (node: { runId: string; nodeId: string }, request: PromoteRequest) {
       promotes.push({ ...node, request })
@@ -246,6 +285,12 @@ function makeHolds(): Holds {
   })
 }
 
+function noteWaitingAt(hold: HoldRecord, chosen?: string): string {
+  const run = { ...theRun(RUN), status: 'waiting' as const, holds: [hold] }
+  const content = holdNoteContent(holdNoteInput(run, panels))
+  return chosen ? content.replace(`- [ ] ${chosen}`, `- [x] ${chosen}`) : content
+}
+
 const notify = (message: string): void => void notices.push(message)
 
 beforeEach(() => {
@@ -254,11 +299,14 @@ beforeEach(() => {
   notices = []
   framesByAgent = {}
   rerunFrames = [...started(NEW), { type: 'run_complete', runId: NEW }]
+  rerollFrames = []
   chainFrames = [...started(QUEST), { type: 'run_complete', runId: QUEST }]
   resumeFrames = started(RUN)
   requests = []
   forks = []
   resumes = []
+  rerolls = []
+  feedbackPatches = []
   promotes = []
   online = true
   layoutsOf = []
@@ -267,6 +315,12 @@ beforeEach(() => {
   chats = []
   conversations = {}
   waitingAt = []
+  rerollThrown = undefined
+  resumeThrown = undefined
+  feedbackThrown = undefined
+  rerollConflictHolds = undefined
+  resumeConflictHolds = undefined
+  feedbackConflictHolds = undefined
   gate = undefined
   reruns = new RerunWatch()
 })
@@ -426,6 +480,118 @@ describe('refresh', () => {
 
   it('is nothing for a run with no hold note', async () => {
     expect(await makeHolds().refresh(NONE)).toBeUndefined()
+  })
+})
+
+describe('reroll', () => {
+  const original = (): HoldRecord => ({
+    nodeId: 'pick',
+    input: '## Candidate 1\nOld alpha\n\n## Candidate 2\nOld beta',
+    candidates: [
+      { heading: 'Candidate 1', body: 'Old alpha' },
+      { heading: 'Candidate 2', body: 'Old beta' },
+    ],
+    reachedAt: 'then',
+    revision: 1,
+    feedback: 'Keep a cost',
+  })
+
+  it('saves edited feedback, rerolls with the current revision, replaces candidates and clears the old pick', async () => {
+    capabilities = { runFork: true, holdReroll: true, holdFeedback: true }
+    const before = original()
+    waitingAt = [before]
+    notes[PATH] = noteWaitingAt(before, 'Candidate 1')
+    const after: HoldRecord = {
+      ...before,
+      input: '## Candidate 1\nSofter alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'Softer alpha' }],
+      feedback: 'Make it kinder',
+      revision: 2,
+      rerolledAt: 'later',
+    }
+    rerollFrames = [started(RUN)[0]!, { type: 'run_waiting', runId: RUN, nodeId: 'pick', hold: after }]
+
+    const hold = await makeHolds().reroll(RUN, 'pick', 'Make it kinder')
+    expect(feedbackPatches).toEqual([{ runId: RUN, holdId: 'pick', feedback: 'Make it kinder' }])
+    expect(rerolls).toEqual([{ runId: RUN, holdId: 'pick', revision: 1 }])
+    expect(hold?.holds[0]).toMatchObject({ revision: 2, feedback: 'Make it kinder', rerolledAt: 'later' })
+    expect(hold?.holds[0]?.candidates).toEqual([{ heading: 'Candidate 1', body: 'Softer alpha', ticked: false }])
+    expect(notes[PATH]).toContain('Softer alpha')
+    expect(notices).toEqual(['Rerolled candidates at pick'])
+  })
+
+  it('clears feedback with an empty patch and keeps the old candidates after reroll_failed', async () => {
+    capabilities = { runFork: true, holdReroll: true, holdFeedback: true }
+    const before = original()
+    waitingAt = [before]
+    notes[PATH] = noteWaitingAt(before, 'Candidate 2')
+    const error = 'No candidates came back; the earlier ones stay'
+    const noCandidates: HoldRecord = { ...before, input: 'No options', candidates: [], feedback: '', revision: 1 }
+    rerollFrames = [
+      started(RUN)[0]!,
+      { type: 'reroll_failed', runId: RUN, nodeId: 'pick', error },
+      { type: 'run_waiting', runId: RUN, nodeId: 'pick', hold: noCandidates },
+    ]
+
+    const hold = await makeHolds().reroll(RUN, 'pick', '')
+    expect(feedbackPatches).toEqual([{ runId: RUN, holdId: 'pick', feedback: '' }])
+    expect(hold?.holds[0]).toMatchObject({ revision: 1, feedback: '', chosen: 'Candidate 2' })
+    expect(hold?.holds[0]?.candidates.map(candidate => candidate.heading)).toEqual(['Candidate 1', 'Candidate 2'])
+    expect(notices).toEqual([`Reroll failed: ${error} — the run is still waiting`])
+  })
+
+  it('reloads a newer candidate revision after a stale 409 and does not retry', async () => {
+    capabilities = { runFork: true, holdReroll: true }
+    const before = original()
+    waitingAt = [before]
+    notes[PATH] = noteWaitingAt(before, 'Candidate 1')
+    rerollThrown = new EngineHttpError(409, '/reroll', '{"error":"Candidates of hold pick are at revision 3, not 1"}')
+    rerollConflictHolds = [{
+      ...before,
+      input: '## Candidate 1\nNew alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'New alpha' }],
+      revision: 3,
+      feedback: 'Latest',
+      rerolledAt: 'latest',
+    }]
+
+    expect(await makeHolds().reroll(RUN, 'pick')).toBeUndefined()
+    expect(rerolls).toEqual([{ runId: RUN, holdId: 'pick', revision: 1 }])
+    expect(notes[PATH]).toContain('Revision: 3\nFeedback: Latest\nRerolled: latest')
+    expect(notes[PATH]).toContain('New alpha')
+    expect(notes[PATH]).not.toContain('- [x] Candidate 1')
+    expect(notices[0]).toContain('Candidates changed while rerolling')
+  })
+
+  it('reloads the hold after a stale feedback PATCH and does not start the reroll', async () => {
+    capabilities = { runFork: true, holdReroll: true, holdFeedback: true }
+    const before = original()
+    waitingAt = [before]
+    notes[PATH] = noteWaitingAt(before, 'Candidate 1')
+    feedbackThrown = new EngineHttpError(409, '/feedback', '{"error":"Candidates are now at revision 2"}')
+    feedbackConflictHolds = [{
+      ...before,
+      input: '## Candidate 1\nRemote alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'Remote alpha' }],
+      revision: 2,
+      feedback: 'Remote feedback',
+    }]
+
+    expect(await makeHolds().reroll(RUN, 'pick', 'Local feedback')).toBeUndefined()
+    expect(rerolls).toEqual([])
+    expect(notes[PATH]).toContain('Revision: 2\nFeedback: Remote feedback')
+    expect(notes[PATH]).toContain('Remote alpha')
+    expect(notes[PATH]).not.toContain('- [x] Candidate 1')
+    expect(notices[0]).toContain('Candidates changed while saving feedback')
+  })
+
+  it('keeps ordinary candidate picking available when reroll is not advertised', async () => {
+    const before = original()
+    notes[PATH] = noteWaitingAt(before)
+    const hold = await makeHolds().pickCandidate(RUN, 'pick', 'Candidate 2', true)
+    expect(hold?.holds[0]?.chosen).toBe('Candidate 2')
+    expect(hold?.canReroll).toBeUndefined()
+    expect(rerolls).toEqual([])
   })
 })
 
@@ -827,7 +993,8 @@ describe('rerun', () => {
     const first = holds.rerun(RUN)
     expect(await holds.resume(RUN)).toBeUndefined()
     expect(await holds.rerun('2026-09-14-old')).toBeUndefined()
-    expect(notices).toEqual([ALREADY_GOING, ALREADY_GOING])
+    expect(await holds.reroll(RUN)).toBeUndefined()
+    expect(notices).toEqual([ALREADY_GOING, ALREADY_GOING, ALREADY_GOING])
     release()
     expect((await first)?.hold.runId).toBe(NEW)
   })
@@ -873,6 +1040,32 @@ describe('revise', () => {
 })
 
 describe('resume', () => {
+  it('sends the picked candidate revision and refreshes an old pick after a stale 409', async () => {
+    const before: HoldRecord = {
+      nodeId: 'pick',
+      input: '## Candidate 1\nOld alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'Old alpha' }],
+      reachedAt: 'then',
+      revision: 1,
+    }
+    waitingAt = [before]
+    notes[PATH] = noteWaitingAt(before, 'Candidate 1')
+    resumeThrown = new EngineHttpError(409, '/resume', '{"error":"Candidates of hold pick are at revision 3, not 1"}')
+    resumeConflictHolds = [{
+      ...before,
+      input: '## Candidate 1\nNew alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'New alpha' }],
+      revision: 3,
+    }]
+
+    await makeHolds().resume(RUN)
+    expect(resumes[0]?.request).toMatchObject({ chosen: 'Candidate 1', revision: 1 })
+    expect(notes[PATH]).toContain('Revision: 3')
+    expect(notes[PATH]).toContain('New alpha')
+    expect(notes[PATH]).not.toContain('- [x] Candidate 1')
+    expect(notices[0]).toContain('revision 3')
+  })
+
   it('posts the Direction to the hold’s own run, with canon as its context', async () => {
     notes[CANON] = '## LOCKED\n- an older commitment\n'
     await makeHolds().resume(RUN)
@@ -981,6 +1174,24 @@ describe('the palette', () => {
     store.inFront = { path: PATH }
     await rerunDownstreamFront(makeHolds(), notify)
     expect(notices).toEqual([`Reran downstream as run ${NEW}`])
+  })
+
+  it('rerolls the engine open hold in the note in front', async () => {
+    capabilities = { holdReroll: true }
+    const record: HoldRecord = {
+      nodeId: 'pick', input: '## Candidate 1\nOld', candidates: [{ heading: 'Candidate 1', body: 'Old' }], reachedAt: 'then', revision: 1,
+    }
+    waitingAt = [record]
+    notes[PATH] = noteWaitingAt(record)
+    rerollFrames = [
+      started(RUN)[0]!,
+      { type: 'run_waiting', runId: RUN, nodeId: 'pick', hold: { ...record, revision: 2, candidates: [{ heading: 'Candidate 1', body: 'New' }] } },
+    ]
+    store.inFront = { path: PATH }
+
+    await rerollCandidatesFront(makeHolds(), notify)
+    expect(rerolls).toEqual([{ runId: RUN, holdId: 'pick', revision: 1 }])
+    expect(notices).toEqual(['Rerolled candidates at pick'])
   })
 
   it('directs the run on screen: writes its hold note and opens it', async () => {

@@ -4,7 +4,8 @@ import { DirectingBoard, type MenuItem } from '@/ui/directingBoard'
 import { ALREADY_GOING, Holds, type Hold } from '@/ui/holds'
 import type { ProposalEditor } from '@/ui/proposalEditor'
 import { RerunWatch } from '@/run/rerunWatch'
-import type { ChatEvent, ForkRequest, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import { isEvent, type Capabilities, type ChatEvent, type ForkRequest, type HoldRecord, type RunEvent, type RunMeta, type RunRequest } from '@/engine/types'
+import { holdNoteContent, holdNoteInput } from '@/run/holdNote'
 import { answer, layoutFrame, output, panel, started } from './engineFrames'
 import { MemoryNoteStore } from './memoryNoteStore'
 import { stubEngine } from './stubEngine'
@@ -87,6 +88,7 @@ const theRun = (runId: string): RunMeta => ({
   seedPrompt: 'a combat trial',
   startedAt: '',
   status: 'complete',
+  ...(waitingAt.length > 0 ? { holds: waitingAt } : {}),
   agentOutputs: [output('gameplay', 'Rotate abilities mid-fight.'), output('world', 'A controlled test.'), output('creative-director', 'A combat trial in a void.')],
   graph: {
     edges: [
@@ -156,8 +158,13 @@ let promoted: { nodeId: string; turn: number }[]
 let chats: string[]
 let framesByAgent: Record<string, RunEvent[]>
 let rerunFrames: RunEvent[]
+let rerollFrames: RunEvent[]
 let resumeFrames: RunEvent[]
 let chatFrames: ChatEvent[]
+let capabilities: Capabilities
+let waitingAt: HoldRecord[]
+let rerolls: { runId: string; holdId: string; revision: number }[]
+let feedbackPatches: { runId: string; holdId: string; feedback: string }[]
 
 /** Stands in for the CodeMirror editor: a textarea, so a test can type into it. */
 interface FakeEditor extends ProposalEditor {
@@ -190,7 +197,7 @@ async function* stream<T>(frames: () => T[]): AsyncGenerator<T> {
 
 function makeHolds(): Holds {
   const engine = stubEngine({
-    capabilities: () => Promise.resolve({ runFork: true }),
+    capabilities: () => Promise.resolve(capabilities),
     getRun: (runId: string) => Promise.resolve(theRun(runId)),
     getLayout: () => Promise.resolve({ kind: 'columns', panels: PANELS }),
     waitingRun: () => Promise.resolve(undefined),
@@ -206,6 +213,23 @@ function makeHolds(): Holds {
     resumeRun: (runId: string) => {
       resumed.push(runId)
       return stream(() => resumeFrames)
+    },
+    updateHoldFeedback: (runId: string, holdId: string, feedback: string) => {
+      feedbackPatches.push({ runId, holdId, feedback })
+      const current = waitingAt.find(one => one.nodeId === holdId)
+      if (!current) return Promise.reject(new Error('hold not found'))
+      const saved = { ...current, feedback }
+      waitingAt = waitingAt.map(one => (one.nodeId === holdId ? saved : one))
+      return Promise.resolve(saved)
+    },
+    rerollHold: (runId: string, holdId: string, revision: number) => {
+      rerolls.push({ runId, holdId, revision })
+      return stream(() => {
+        for (const event of rerollFrames) {
+          if (isEvent(event, 'run_waiting')) waitingAt = [...waitingAt.filter(one => one.nodeId !== event.nodeId), event.hold]
+        }
+        return rerollFrames
+      })
     },
     promoteNode: (node: { nodeId: string }, request: { turn: number }) => {
       promoted.push({ nodeId: node.nodeId, turn: request.turn })
@@ -264,6 +288,10 @@ function open(reading: Hold | undefined = hold(), proposal?: string): DirectingB
 /** A board showing the hold as the note now reads. */
 async function openNote(proposal?: string): Promise<DirectingBoard> {
   return open(await holds.read(RUN), proposal)
+}
+
+function noteForWait(waiting: HoldRecord): string {
+  return holdNoteContent(holdNoteInput({ ...theRun(RUN), status: 'waiting', holds: [waiting] }, PANELS))
 }
 
 /** Lets the board's awaited answers land. */
@@ -333,8 +361,13 @@ beforeEach(() => {
   chats = []
   framesByAgent = {}
   rerunFrames = [...started(NEW), complete(NEW)]
+  rerollFrames = []
   resumeFrames = [...started(RUN), complete(RUN)]
   chatFrames = [{ type: 'chat_done', message: { role: 'assistant', content: 'Because it is.' } }]
+  capabilities = { runFork: true }
+  waitingAt = []
+  rerolls = []
+  feedbackPatches = []
   reruns = new RerunWatch(() => clock)
   holds = makeHolds()
 })
@@ -861,7 +894,19 @@ describe('the Run tab', () => {
 })
 
 describe('the Run tab, waiting at a hold', () => {
-  const waitingAt = hold({
+  const engineHold: HoldRecord = {
+    nodeId: 'pick',
+    prompt: 'Which pitch goes forward?',
+    input: '## Candidate 1\nA combat trial.\n\n## Candidate 2\nA quiet shrine.',
+    candidates: [
+      { heading: 'Candidate 1', body: 'A combat trial.' },
+      { heading: 'Candidate 2', body: 'A quiet shrine.' },
+    ],
+    reachedAt: 'then',
+    revision: 1,
+    feedback: 'Keep the risk clear',
+  }
+  const waitingReading = hold({
     canon: [],
     holds: [
       {
@@ -878,7 +923,7 @@ describe('the Run tab, waiting at a hold', () => {
   const section = (): string => root.querySelector('.chain-runner-directing-hold')?.textContent ?? ''
 
   it('names the node, asks its question, and shows each candidate', () => {
-    open(waitingAt)
+    open(waitingReading)
     expect(section()).toContain('Waiting at pick')
     expect(section()).toContain('Which pitch goes forward?')
     expect(section()).toContain('A combat trial.')
@@ -893,6 +938,42 @@ describe('the Run tab, waiting at a hold', () => {
     expect((await holds.read(RUN))?.holds[0]?.chosen).toBe('Candidate 1')
   })
 
+  it('keeps ordinary candidate picks when the engine has not advertised reroll', async () => {
+    waitingAt = [engineHold]
+    notes[PATH] = noteForWait(engineHold)
+    await openNote()
+    expect(has('⟳ Reroll candidates')).toBe(false)
+    root.querySelector<HTMLInputElement>('.chain-runner-directing-hold input[type="checkbox"]')?.click()
+    await settled()
+    expect((await holds.read(RUN))?.holds[0]?.chosen).toBe('Candidate 1')
+  })
+
+  it('edits saved feedback and shows the final waiting candidates from the reroll stream', async () => {
+    capabilities = { holdReroll: true, holdFeedback: true, runFork: true }
+    waitingAt = [engineHold]
+    notes[PATH] = noteForWait(engineHold)
+    const updated: HoldRecord = {
+      ...engineHold,
+      input: '## Candidate 1\nA warmer trial.',
+      candidates: [{ heading: 'Candidate 1', body: 'A warmer trial.' }],
+      feedback: 'Keep the cost visible',
+      revision: 2,
+      rerolledAt: 'later',
+    }
+    rerollFrames = [started(RUN)[0]!, { type: 'run_waiting', runId: RUN, nodeId: 'pick', hold: updated }]
+    await openNote()
+    expect(composer('Optional feedback for new candidates…').value).toBe('Keep the risk clear')
+    type(composer('Optional feedback for new candidates…'), 'Keep the cost visible')
+    button('⟳ Reroll candidates').click()
+    await settled()
+
+    expect(feedbackPatches).toEqual([{ runId: RUN, holdId: 'pick', feedback: 'Keep the cost visible' }])
+    expect(rerolls).toEqual([{ runId: RUN, holdId: 'pick', revision: 1 }])
+    expect(section()).toContain('A warmer trial.')
+    expect(section()).not.toContain('A combat trial.')
+    expect(composer('Optional feedback for new candidates…').value).toBe('Keep the cost visible')
+  })
+
   it('says a hold offered no candidates', () => {
     open(hold({ holds: [{ nodeId: 'pick', candidates: [] }] }))
     expect(section()).toContain('No candidates')
@@ -904,7 +985,7 @@ describe('the Run tab, waiting at a hold', () => {
   })
 
   it('shows nothing of the hold on a proposal tab', () => {
-    open(waitingAt, 'world')
+    open(waitingReading, 'world')
     expect(section()).toBe('')
   })
 })

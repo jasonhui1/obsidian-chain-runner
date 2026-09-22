@@ -5,7 +5,7 @@ import type { LayoutPanel } from '../engine/types'
 /** Every rerun in flight, shared by drawing cards, output headers and the directing panel. */
 
 /** What started a rerun: the edited proposals, a reply used as the revision, or a resume. */
-export type RerunCause = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn } | { kind: 'resume' }
+export type RerunCause = { kind: 'edits' } | { kind: 'reply'; turn: RepliedTurn } | { kind: 'resume' } | { kind: 'reroll' }
 
 /** A rerun going: what started it, when, and how it is getting on once it has said. */
 export interface GoingRerun {

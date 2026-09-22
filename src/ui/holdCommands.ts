@@ -32,6 +32,13 @@ export async function rerunDownstreamFront(holds: Holds, notify: Notify): Promis
   else notify(NOT_A_HOLD_NOTE)
 }
 
+/** "Reroll candidates" on the note in front; the engine's last open hold is the one rerolled. */
+export async function rerollCandidatesFront(holds: Holds, notify: Notify): Promise<void> {
+  const hold = await holds.front()
+  if (!hold) return notify(NOT_A_HOLD_NOTE)
+  await holds.reroll(hold.runId, hold.holds.at(-1)?.nodeId)
+}
+
 /** "Chat with proposer", "Ask the room" and "Side quest": the trigger line typed in the note in front, answered. */
 export async function sendFront(holds: Holds, notify: Notify, kind: TriggerKind): Promise<void> {
   const hold = await holds.front()

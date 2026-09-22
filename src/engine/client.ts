@@ -14,6 +14,7 @@ import type {
   ChatEvent,
   ForkRequest,
   LayoutModel,
+  HoldRecord,
   PromoteRequest,
   RunEvent,
   RunExistence,
@@ -164,6 +165,25 @@ export class EngineClient {
    */
   async *resumeRun(runId: string, request: ResumeRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
     yield* this.streamRun(`/api/runs/${encodeURIComponent(runId)}/resume`, request, signal)
+  }
+
+  /** Saves guidance on one open hold without running the chain again. */
+  async updateHoldFeedback(runId: string, holdId: string, feedback: string): Promise<HoldRecord> {
+    const path = `/api/runs/${encodeURIComponent(runId)}/holds/${encodeURIComponent(holdId)}`
+    const response = await this.request({
+      url: this.resolve(path),
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ feedback }),
+    })
+    const parsed = JSON.parse(response) as { hold: HoldRecord }
+    return parsed.hold
+  }
+
+  /** Re-runs only the decider for one open hold, yielding the ordinary run events. */
+  async *rerollHold(runId: string, holdId: string, revision: number, signal?: AbortSignal): AsyncGenerator<RunEvent> {
+    const path = `/api/runs/${encodeURIComponent(runId)}/holds/${encodeURIComponent(holdId)}/reroll`
+    yield* this.streamRun(path, { revision }, signal)
   }
 
   /**

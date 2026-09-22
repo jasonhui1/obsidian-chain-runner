@@ -22,7 +22,7 @@ import {
 import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
-import { directRun, rerunDownstreamFront, resumeFront, sendFront } from './ui/holdCommands'
+import { directRun, rerollCandidatesFront, rerunDownstreamFront, resumeFront, sendFront } from './ui/holdCommands'
 import { Holds } from './ui/holds'
 import { KeepMarks } from './ui/keepMarks'
 import { KeepPiece } from './ui/keepPiece'
@@ -357,6 +357,12 @@ export default class ChainRunnerPlugin extends Plugin {
       id: 'rerun-downstream',
       name: 'Rerun downstream',
       callback: () => void rerunDownstreamFront(holds, notify),
+    })
+
+    this.addCommand({
+      id: 'reroll-hold-candidates',
+      name: 'Reroll hold candidates',
+      callback: () => void rerollCandidatesFront(holds, notify),
     })
 
     this.addCommand({

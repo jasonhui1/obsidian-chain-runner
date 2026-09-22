@@ -52,6 +52,8 @@ export interface Refusals {
   invalid: (said: string) => string
   /** 422, for an endpoint that answers it. */
   unprocessable?: string
+  /** Lets a caller refresh state after a conflict without changing the refusal message. */
+  onConflict?: () => void
 }
 
 export interface EngineCall {
@@ -74,6 +76,7 @@ export async function answer(engine: EngineClient, call: EngineCall): Promise<An
       return await drain(call.open(), onEvent)
     } catch (error) {
       if (!(error instanceof EngineHttpError)) throw error
+      if (error.status === 409) refusals?.onConflict?.()
       if (refusals && mayLackRoute(error, capabilities, refusals.endpoint)) {
         return refusals.missingRoute !== undefined
           ? { kind: 'refused', said: refusals.missingRoute }

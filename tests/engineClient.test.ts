@@ -202,6 +202,30 @@ describe('waitingRun', () => {
   })
 })
 
+describe('hold feedback and reroll', () => {
+  it('saves empty feedback with PATCH and decodes the returned hold', async () => {
+    engine.holdFeedback = { hold: { nodeId: 'pick', input: 'old', candidates: [], reachedAt: 'now', revision: 2, feedback: '' } }
+    const hold = await client.updateHoldFeedback('run/1', 'pick/one', '')
+    expect(hold).toMatchObject({ nodeId: 'pick', revision: 2, feedback: '' })
+    expect(engine.requests.at(-1)).toMatchObject({
+      method: 'PATCH',
+      path: '/api/runs/run%2F1/holds/pick%2Fone',
+      body: '{"feedback":""}',
+    })
+  })
+
+  it('posts the current revision to the hold reroll stream', async () => {
+    engine.runFrames = [frame({ type: 'run_start', runId: 'r1' }), frame({ type: 'run_waiting', runId: 'r1', nodeId: 'pick', hold: { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now', revision: 3 } })]
+    const events = await drain(client.rerollHold('r1', 'pick', 3))
+    expect(events.at(-1)?.type).toBe('run_waiting')
+    expect(engine.requests.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/api/runs/r1/holds/pick/reroll',
+      body: '{"revision":3}',
+    })
+  })
+})
+
 describe('runExists', () => {
   it('finds a run the engine still holds', async () => {
     engine.runMeta = { runId: 'r1', chainName: 'c', status: 'complete', agentOutputs: [] }

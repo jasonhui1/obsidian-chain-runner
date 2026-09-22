@@ -20,6 +20,7 @@ import type { ConversationEntry } from '../run/conversation'
 import {
   appendDirectionLine,
   appendResumeLink,
+  clearCandidatePicks,
   directionBlock,
   directionLine,
   directionLines,
@@ -28,10 +29,10 @@ import {
   holdNoteContent,
   holdNoteInput,
   holdNotePath,
-  mergeHoldNote,
   proposalEdits,
   readHold,
   refreshHoldNote,
+  refreshHoldNoteInPlace,
   removeDirectionLines,
   earlierRunsIn,
   rewriteProposal,
@@ -50,10 +51,12 @@ import { rerunRequest, runFork } from '../run/rerun'
 import { RerunProgressTracker } from '../run/rerunProgress'
 import type { RerunCause, RerunReport, RerunWatch } from '../run/rerunWatch'
 import { resumeRequest, runResume } from '../run/resume'
+import { runReroll, UNSUPPORTED_REROLL } from '../run/reroll'
 import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
 import type { EngineClient } from '../engine/client'
-import { engineFailureMessage } from '../engine/guard'
-import { waitingHolds, type LayoutModel, type LayoutPanel, type RunMeta } from '../engine/types'
+import { engineFailureMessage, engineSaid } from '../engine/guard'
+import { EngineHttpError } from '../engine/transport'
+import { waitingHolds, type HoldRecord, type LayoutModel, type LayoutPanel, type RunMeta } from '../engine/types'
 
 /**
  * The hold module: reads a hold note, calls the engine, writes the note and
@@ -82,6 +85,8 @@ export const REPLY_NOT_ON_ENGINE = (name: string): string =>
 export const NOBODY_ANSWERED = 'Nobody in the room answered'
 export const NO_EDITED_PROPOSAL = 'Edit a proposal in this hold note first'
 export const ALREADY_GOING = 'This hold is already rerunning or resuming — wait for it to land'
+export const NO_OPEN_HOLD = 'This run has no open hold to reroll'
+export const UNSUPPORTED_FEEDBACK = 'This engine cannot save hold feedback. Update maestro-playground.'
 
 /** A trigger line in the Conversation with no answer under it yet. */
 export type PendingTrigger =
@@ -94,7 +99,7 @@ export type PendingTrigger =
 type Trigger = Exclude<PendingTrigger, { kind: 'revise' }>
 
 /** The hold as it now reads, under the run it now lives under. */
-export type Hold = HoldReading & { pending?: PendingTrigger }
+export type Hold = HoldReading & { pending?: PendingTrigger; canReroll?: true; canEditFeedback?: true }
 
 /** What a call that moved the hold answers: a fork's own hold for a fork. */
 export interface Landing {
@@ -224,9 +229,12 @@ export class Holds {
     const { engine } = this.deps
     const current = found.heading.runId
     try {
-      const open = waitingHolds((await engine.waitingRun(current))?.holds).map(hold => hold.nodeId)
-      const shown = waitingHoldsIn(found.content).map(hold => hold.nodeId)
-      if (open.join('\n') !== shown.join('\n')) await this.writeFetched(await fetchRun(engine, current))
+      const open = waitingHolds((await engine.waitingRun(current))?.holds)
+      const shown = waitingHoldsIn(found.content)
+      if (!sameWaitingHolds(open, shown)) {
+        const changedChoices = waitingChoicesChanged(open, shown)
+        await this.writeFetched(await fetchRun(engine, current), undefined, changedChoices)
+      }
     } catch (error) {
       if (engineFailureMessage(error) === undefined) throw error
     }
@@ -317,6 +325,11 @@ export class Holds {
     return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report))
   }
 
+  /** Re-runs the decider for one open hold; an omitted id means the engine's last open hold. */
+  reroll(runId: string, holdId?: string, feedback?: string): Promise<Hold | undefined> {
+    return this.exclusive(runId, { kind: 'reroll' }, (found, report) => this.rerolled(found, report, holdId, feedback))
+  }
+
   private pathOf(runId: string): string {
     return normalizePath(holdNotePath(runId))
   }
@@ -360,7 +373,17 @@ export class Holds {
     const reading = readHold(found.content, (await this.panels.of(found.heading.runId)) ?? [])
     if (!reading) return undefined
     const pending = pendingIn(found.content, reading.conversation)
-    return pending ? { ...reading, pending } : reading
+    try {
+      const capabilities = await this.deps.engine.capabilities()
+      return {
+        ...reading,
+        ...(pending ? { pending } : {}),
+        ...(capabilities.holdReroll === true ? { canReroll: true as const } : {}),
+        ...(capabilities.holdFeedback === true ? { canEditFeedback: true as const } : {}),
+      }
+    } catch {
+      return pending ? { ...reading, pending } : reading
+    }
   }
 
   private refuse(notice: string): undefined {
@@ -390,9 +413,13 @@ export class Holds {
     return guardWrite(this.deps.notify, what, async () => (await write()) ?? { wrote: true as const })
   }
 
-  private async writeFetched({ run, layout }: FetchedRun, chainName?: string): Promise<Hold | undefined> {
-    const fresh = holdNoteContent(holdNoteInput(run, layout.panels, chainName))
-    const wrote = await this.writeNote(this.pathOf(run.runId), 'the hold note', previous => mergeHoldNote(fresh, previous))
+  private async writeFetched({ run, layout }: FetchedRun, chainName?: string, clearPicks = false): Promise<Hold | undefined> {
+    const input = holdNoteInput(run, layout.panels, chainName)
+    const fresh = holdNoteContent(input)
+    const wrote = await this.writeNote(this.pathOf(run.runId), 'the hold note', previous => {
+      const merged = previous === undefined ? fresh : refreshHoldNoteInPlace(previous, input)
+      return clearPicks ? clearCandidatePicks(merged) : merged
+    })
     return wrote ? this.read(run.runId) : undefined
   }
 
@@ -585,9 +612,13 @@ export class Holds {
     const canon = await this.canon()
     const request = resumeRequest({ direction, said: directionLines(direction), holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
 
-    const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, progressTo(report)))
+    let stale = false
+    const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, progressTo(report), () => (stale = true)))
     if (!resumed) return undefined
-    if (resumed.kind === 'refused') return this.refuse(resumed.said)
+    if (resumed.kind === 'refused') {
+      if (stale) await this.refresh(heading.runId)
+      return this.refuse(resumed.said)
+    }
     const { runId, forked, error } = resumed
     if (!runId) return this.refuse(error ? `Resume failed: ${error}` : 'Resume produced no run')
 
@@ -596,6 +627,77 @@ export class Holds {
     await this.rewrite(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
     const hold = forked ? await this.fork(heading, runId, report) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
     return hold && { hold, forked, ...(error !== undefined ? { error } : {}), canon: locked }
+  }
+
+  private async rerolled(found: Located, report: RerunReport, requestedHoldId: string | undefined, feedback: string | undefined): Promise<Hold | undefined> {
+    const { engine } = this.deps
+    const { runId } = found.heading
+    const capabilities = await engine.capabilities()
+    if (capabilities.holdReroll !== true) return this.refuse(UNSUPPORTED_REROLL)
+    if (feedback !== undefined && capabilities.holdFeedback !== true) return this.refuse(UNSUPPORTED_FEEDBACK)
+
+    const source = await this.deps.withEngine(() => engine.getRun(runId))
+    if (!source) return undefined
+    const open = waitingHolds(source.holds)
+    const current = requestedHoldId === undefined ? open.at(-1) : open.find(hold => hold.nodeId === requestedHoldId)
+    if (!current) return this.refuse(NO_OPEN_HOLD)
+    if (current.revision === undefined) return this.refuse(UNSUPPORTED_REROLL)
+
+    let revision = current.revision
+    if (feedback !== undefined) {
+      const clean = oneLine(feedback)
+      if (clean !== (current.feedback ?? '')) {
+        const saved = await this.deps.withEngine(async () => {
+          try {
+            return { kind: 'saved' as const, hold: await engine.updateHoldFeedback(runId, current.nodeId, clean) }
+          } catch (error) {
+            if (error instanceof EngineHttpError && error.status === 409) return { kind: 'stale' as const, said: engineSaid(error) }
+            throw error
+          }
+        })
+        if (!saved) return undefined
+        if (saved.kind === 'stale') {
+          await this.refresh(runId)
+          return this.refuse(`Candidates changed while saving feedback — the hold was refreshed. ${saved.said}`)
+        }
+        revision = saved.hold.revision ?? revision
+      }
+    }
+
+    const answer = await this.deps.withEngine(() => runReroll(engine, runId, current.nodeId, revision, progressTo(report)))
+    if (!answer) return undefined
+    if (answer.kind === 'stale') {
+      await this.refresh(runId)
+      return this.refuse(`Candidates changed while rerolling — the hold was refreshed. ${answer.said}`)
+    }
+    if (answer.kind === 'refused') return this.refuse(answer.said)
+
+    const fetched = await this.deps.withEngine(() => fetchRun(engine, answer.runId))
+    if (!fetched) return undefined
+    const failed = answer.error !== undefined || answer.hold.candidates.length === 0
+    const error = answer.error ?? (failed ? 'Reroll returned no candidates; the previous candidates stay' : undefined)
+    const replacement: HoldRecord = {
+      ...answer.hold,
+      revision: answer.hold.revision ?? current.revision,
+      feedback: answer.hold.feedback ?? current.feedback,
+      rerolledAt: answer.hold.rerolledAt ?? current.rerolledAt,
+    }
+    const hold: HoldRecord = failed
+      ? { ...replacement, input: current.input, candidates: current.candidates }
+      : replacement
+    const holds = [...(fetched.run.holds ?? []).filter(one => one.nodeId !== hold.nodeId), hold]
+    const run = { ...fetched.run, status: 'waiting' as const, holds }
+    const input = holdNoteInput(run, fetched.layout.panels, found.heading.chainName)
+    const wrote = await this.writeNote(found.path, 'the hold note', previous => {
+      const next = previous === undefined ? holdNoteContent(input) : refreshHoldNoteInPlace(previous, input)
+      return failed ? next : clearCandidatePicks(next)
+    })
+    if (!wrote) return undefined
+    const refreshed = await this.read(run.runId)
+    if (!refreshed) return undefined
+    if (error) this.deps.notify(`Reroll failed: ${error} — the run is still waiting`)
+    else this.deps.notify(`Rerolled candidates at ${hold.nodeId}`)
+    return refreshed
   }
 
   /**
@@ -697,6 +799,29 @@ function progressTo(report: RerunReport): OnEvent {
 async function fetchRun(engine: EngineClient, runId: string): Promise<FetchedRun> {
   const [run, layout] = await Promise.all([engine.getRun(runId), engine.getLayout(runId)])
   return { run, layout }
+}
+
+function sameWaitingHolds(open: HoldRecord[], shown: ReturnType<typeof waitingHoldsIn>): boolean {
+  const facts = (holds: readonly { nodeId: string; prompt?: string; candidates: readonly { heading: string; body: string }[]; revision?: number; feedback?: string; rerolledAt?: string }[]) =>
+    holds.map(hold => ({
+      nodeId: hold.nodeId,
+      prompt: hold.prompt ?? null,
+      candidates: hold.candidates.map(({ heading, body }) => ({ heading, body })),
+      revision: hold.revision ?? null,
+      feedback: hold.feedback || null,
+      rerolledAt: hold.rerolledAt ?? null,
+    }))
+  return JSON.stringify(facts(open)) === JSON.stringify(facts(shown))
+}
+
+function waitingChoicesChanged(open: HoldRecord[], shown: ReturnType<typeof waitingHoldsIn>): boolean {
+  if (open.length !== shown.length) return true
+  return open.some((hold, index) => {
+    const previous = shown[index]
+    return previous === undefined || hold.nodeId !== previous.nodeId || hold.revision !== previous.revision ||
+      JSON.stringify(hold.candidates.map(({ heading, body }) => ({ heading, body }))) !==
+        JSON.stringify(previous.candidates.map(({ heading, body }) => ({ heading, body })))
+  })
 }
 
 /** A trailing bare `revise` first; else the Conversation's last entry, when nothing answers it yet. */

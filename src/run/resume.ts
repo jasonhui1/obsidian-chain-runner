@@ -14,6 +14,7 @@ export const UNSUPPORTED_RESUME = 'This engine cannot resume a hold. Update maes
 export interface ResumedHold {
   nodeId: string
   chosen?: string
+  revision?: number
 }
 
 /** What the note offers a resume: its Direction, what the human wrote in it, the holds it shows open, and canon as it stands. */
@@ -49,6 +50,7 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
     // One open hold needs no naming; with several, the engine would answer its
     // own last one rather than the one the human ticked.
     ...(hold && source.holds.length > 1 ? { holdId: hold.nodeId } : {}),
+    ...(hold?.revision !== undefined ? { revision: hold.revision } : {}),
     ...(source.canon !== undefined ? { context: { [CANON_CONTEXT_KEY]: source.canon } } : {}),
   }
 }
@@ -58,7 +60,7 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
  * names — a hold already answered forks instead (#53). Every refusal comes
  * back as words to show; only an unreachable engine still throws.
  */
-export function runResume(engine: EngineClient, runId: string, request: ResumeRequest, onEvent?: OnEvent): Promise<Answer> {
+export function runResume(engine: EngineClient, runId: string, request: ResumeRequest, onEvent?: OnEvent, onConflict?: () => void): Promise<Answer> {
   const gone = `Run ${runId} no longer has the hold this note answers`
   return answer(engine, {
     open: () => engine.resumeRun(runId, request),
@@ -72,6 +74,7 @@ export function runResume(engine: EngineClient, runId: string, request: ResumeRe
       running: said => `Run ${runId} cannot be resumed yet: ${said}`,
       gone,
       invalid: said => `The engine would not resume run ${runId}: ${said}`,
+      onConflict,
     },
   })
 }

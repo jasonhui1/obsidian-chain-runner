@@ -224,7 +224,7 @@ export class DirectingBoard {
     if (going && rewritten) this.progress(body, going)
 
     if (!proposal) {
-      for (const waiting of hold.holds) this.waitingAt(body, waiting)
+      for (const waiting of hold.holds) this.waitingAt(body, waiting, hold)
       this.verdict(body, hold)
       const direction = this.section(body, 'direction', 'Direction so far')
       this.directionSoFar(direction, hold.direction)
@@ -587,17 +587,38 @@ export class DirectingBoard {
   }
 
   /** A hold the run waits at: its question, and a checkbox per candidate. */
-  private waitingAt(body: HTMLElement, hold: HoldPick): void {
-    const el = this.section(body, `waiting ${hold.nodeId}`, `Waiting at ${hold.nodeId}`)
+  private waitingAt(body: HTMLElement, waiting: HoldPick, owner: Hold): void {
+    const el = this.section(body, `waiting ${waiting.nodeId}`, `Waiting at ${waiting.nodeId}`)
     el.classList.add(`${CLS}-hold`)
-    if (hold.prompt) this.add(el, 'div', '', hold.prompt)
-    if (hold.candidates.length === 0) this.add(el, 'div', `${CLS}-faint`, 'No candidates')
-    for (const candidate of hold.candidates) {
+    if (waiting.prompt) this.add(el, 'div', '', waiting.prompt)
+    if (waiting.candidates.length === 0) this.add(el, 'div', `${CLS}-faint`, 'No candidates')
+    for (const candidate of waiting.candidates) {
       this.checkbox(el, undefined, candidate.heading, candidate.ticked, ticked =>
-        void this.act(runId => this.deps.holds.pickCandidate(runId, hold.nodeId, candidate.heading, ticked)),
+        void this.act(runId => this.deps.holds.pickCandidate(runId, waiting.nodeId, candidate.heading, ticked)),
       )
       this.markdown(el, candidate.body)
     }
+    if (owner.canReroll) this.rerollControl(el, owner, waiting)
+  }
+
+  private rerollControl(el: HTMLElement, owner: Hold, waiting: HoldPick): void {
+    const rerolling = this.rerunning(owner)?.cause.kind === 'reroll'
+    if (owner.canEditFeedback) {
+      this.box(el, {
+        key: boxKey(owner.runId, `reroll ${waiting.nodeId}`),
+        value: waiting.feedback ?? '',
+        placeholder: 'Optional feedback for new candidates…',
+        label: rerolling ? 'Rerolling…' : '⟳ Reroll candidates',
+        sendEmpty: true,
+        keepWhileSending: true,
+        disabled: this.going(owner) !== undefined,
+        send: feedback => this.act(runId => this.deps.holds.reroll(runId, waiting.nodeId, feedback)),
+      })
+      return
+    }
+    const button = this.button(el, rerolling ? 'Rerolling…' : '⟳ Reroll candidates', `${CLS}-quiet`)
+    button.disabled = this.going(owner) !== undefined
+    button.onclick = (): void => void this.act(runId => this.deps.holds.reroll(runId, waiting.nodeId))
   }
 
   /** Checkboxes, grouped under who offered each line when more than one proposal is shown. */

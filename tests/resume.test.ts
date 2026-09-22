@@ -36,6 +36,14 @@ describe('resumeRequest', () => {
     expect(request.chosen).toBe('Candidate 2')
   })
 
+  it('sends the revision the chosen candidate came from', () => {
+    const request = resumeRequest({
+      direction: DIRECTION,
+      holds: [{ ...hold('decider', ['Candidate 1'], 'Candidate 1'), revision: 4 }],
+    })
+    expect(request).toMatchObject({ chosen: 'Candidate 1', revision: 4 })
+  })
+
   it('never sends both picks, since the engine refuses a request carrying the two', () => {
     const request = resumeRequest({ direction: DIRECTION, holds: [hold('decider', ['Candidate 1'], 'Candidate 1')] })
     expect(request.custom).toBeUndefined()
@@ -143,6 +151,17 @@ describe('runResume', () => {
       kind: 'refused',
       said: 'Run 2026-09-15-Ab3dE1 cannot be resumed yet: run is running',
     })
+  })
+
+  it('notifies the caller of a 409 so it can reload the hold without retrying the old pick', async () => {
+    const engine = refusingEngine(
+      new EngineHttpError(409, '/resume', '{"error":"Candidates of hold decider are at revision 3, not 1"}'),
+      RESUMES,
+    )
+    let conflicted = false
+    const result = await runResume(engine, '2026-09-15-Ab3dE1', { direction: DIRECTION, chosen: 'Candidate 1', revision: 1 }, undefined, () => (conflicted = true))
+    expect(result).toMatchObject({ kind: 'refused' })
+    expect(conflicted).toBe(true)
   })
 
   it('falls back to the status when a 409 carries no reason', async () => {
