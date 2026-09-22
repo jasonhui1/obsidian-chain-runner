@@ -4,7 +4,7 @@ import { DirectingBoard, type MenuItem } from '@/ui/directingBoard'
 import { ALREADY_GOING, Holds, type Hold } from '@/ui/holds'
 import type { ProposalEditor } from '@/ui/proposalEditor'
 import { RerunWatch } from '@/run/rerunWatch'
-import type { ChatEvent, RunEvent, RunMeta, RunRequest } from '@/engine/types'
+import type { ChatEvent, ForkRequest, RunEvent, RunMeta, RunRequest } from '@/engine/types'
 import { answer, layoutFrame, output, panel, started } from './engineFrames'
 import { MemoryNoteStore } from './memoryNoteStore'
 import { stubEngine } from './stubEngine'
@@ -150,6 +150,7 @@ let release: () => void
 /** Feeds the one streaming call a test watches frame by frame, in place of the frames below. */
 let feed: Feed<RunEvent> | undefined
 let requests: RunRequest[]
+let forks: { runId: string; request: ForkRequest }[]
 let resumed: string[]
 let promoted: { nodeId: string; turn: number }[]
 let chats: string[]
@@ -189,15 +190,18 @@ async function* stream<T>(frames: () => T[]): AsyncGenerator<T> {
 
 function makeHolds(): Holds {
   const engine = stubEngine({
-    capabilities: () => Promise.resolve({}),
+    capabilities: () => Promise.resolve({ runFork: true }),
     getRun: (runId: string) => Promise.resolve(theRun(runId)),
     getLayout: () => Promise.resolve({ kind: 'columns', panels: PANELS }),
     waitingRun: () => Promise.resolve(undefined),
     launchRun: (request: RunRequest) => {
       requests.push(request)
-      if (request.branchedFromRunId) return stream(() => rerunFrames)
       if (request.agentName) return stream(() => framesByAgent[request.agentName!] ?? [])
       return stream(() => [...started(QUEST), complete(QUEST)])
+    },
+    forkRun: (runId: string, request: ForkRequest) => {
+      forks.push({ runId, request })
+      return stream(() => rerunFrames)
     },
     resumeRun: (runId: string) => {
       resumed.push(runId)
@@ -323,6 +327,7 @@ beforeEach(() => {
   release = () => {}
   feed = undefined
   requests = []
+  forks = []
   resumed = []
   promoted = []
   chats = []
@@ -631,7 +636,7 @@ describe('rerunning downstream', () => {
     expect(button('✎ Edit').disabled).toBe(true)
     button('Rerunning…').click()
     await settled()
-    expect(requests.map(request => request.branchedFromRunId)).toEqual([RUN])
+    expect(forks).toEqual([{ runId: RUN, request: { revisions: { gameplay: 'Rotate stances.' } } }])
     release()
     await settled()
     expect(header()).toContain('Xy9zW2')

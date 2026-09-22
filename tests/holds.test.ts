@@ -15,12 +15,13 @@ import { directRun, NO_RUN_TO_DIRECT, NOT_A_HOLD_NOTE, rerunDownstreamFront, res
 import { runViewUrl } from '@/run/provenance'
 import { RerunWatch, type GoingRerun } from '@/run/rerunWatch'
 import { UNSUPPORTED_RESUME } from '@/run/resume'
+import { UNSUPPORTED_FORK } from '@/run/rerun'
 import { EngineHttpError, EngineOfflineError } from '@/engine/transport'
 import type {
-  AgentOutput,
   Capabilities,
   ChatEvent,
   ChatMessage,
+  ForkRequest,
   HoldRecord,
   LayoutModel,
   PromoteRequest,
@@ -129,9 +130,6 @@ const RESUMED_PATH = `Maestro/holds/${RESUMED}.md`
 const ENGINE_URL = 'http://localhost:4000'
 const CANON = 'context/canon-anime-game.md'
 
-/** A human's words replayed in place of a node's output: nothing ran, so nothing was spent. */
-const revision = (nodeId: string, text: string): AgentOutput => ({ ...output(nodeId, text), tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 })
-
 const GAMEPLAY = '## Core verb\nRotate abilities mid-fight.\n\n## Proposed canon\n- LOCKED: Abilities rotate randomly during active combat.'
 const WORLD = '## The rule\nThe world is a test — and someone is watching.\n\n## Proposed canon\n- LOCKED: The world is a controlled testing environment.'
 
@@ -158,6 +156,7 @@ let rerunFrames: RunEvent[]
 let chainFrames: RunEvent[]
 let resumeFrames: RunEvent[]
 let requests: RunRequest[]
+let forks: { runId: string; request: ForkRequest }[]
 let resumes: { runId: string; request: ResumeRequest }[]
 let promotes: { runId: string; nodeId: string; request: PromoteRequest }[]
 let online: boolean
@@ -213,9 +212,13 @@ function makeHolds(): Holds {
     launchRun: async function* (request: RunRequest) {
       requests.push(request)
       await gate
-      if (request.branchedFromRunId) yield* rerunFrames
-      else if (request.agentName) yield* framesByAgent[request.agentName] ?? []
+      if (request.agentName) yield* framesByAgent[request.agentName] ?? []
       else yield* chainFrames
+    },
+    forkRun: async function* (runId: string, request: ForkRequest) {
+      forks.push({ runId, request })
+      await gate
+      yield* rerunFrames
     },
     resumeRun: async function* (runId: string, request: ResumeRequest) {
       resumes.push({ runId, request })
@@ -254,11 +257,12 @@ beforeEach(() => {
   chainFrames = [...started(QUEST), { type: 'run_complete', runId: QUEST }]
   resumeFrames = started(RUN)
   requests = []
+  forks = []
   resumes = []
   promotes = []
   online = true
   layoutsOf = []
-  capabilities = {}
+  capabilities = { runFork: true }
   chatFrames = undefined
   chats = []
   conversations = {}
@@ -741,21 +745,28 @@ describe('the panel and the palette write the same note', () => {
 })
 
 describe('rerun', () => {
+  it('tells the human an engine without runFork is too old and sends no run request', async () => {
+    capabilities = {}
+    await makeHolds().editProposal(RUN, 'world', 'The world is real.')
+    expect(await makeHolds().rerun(RUN)).toBeUndefined()
+    expect(notices).toEqual([UNSUPPORTED_FORK])
+    expect(forks).toEqual([])
+    expect(requests).toEqual([])
+  })
+
   it('reruns downstream from the hold’s run, each edited proposal’s words as its output', async () => {
     const holds = makeHolds()
     await holds.editProposal(RUN, 'world', 'The world is real.')
     await holds.rerun(RUN)
-    expect(requests).toHaveLength(1)
-    expect(requests[0]?.branchedFromRunId).toBe(RUN)
-    expect(requests[0]?.branchOutputs).toContainEqual(revision('world', 'The world is real.'))
-    expect(requests[0]?.branchOutputs).toContainEqual(output('gameplay', '## Core verb\nRotate abilities mid-fight.'))
+    expect(requests).toEqual([])
+    expect(forks).toEqual([{ runId: RUN, request: { revisions: { world: 'The world is real.' } } }])
   })
 
   it('lands the hold on the run it reran as, folding the old verdict and renaming the note', async () => {
     const holds = makeHolds()
     await holds.editProposal(RUN, 'world', 'The world is real.')
     const landing = await holds.rerun(RUN)
-    expect(landing).toMatchObject({ forked: false, hold: { runId: NEW, earlierRuns: [RUN, '2026-09-14-old'] } })
+    expect(landing).toMatchObject({ forked: true, hold: { runId: NEW, earlierRuns: [RUN, '2026-09-14-old'] } })
     expect(Object.keys(notes)).toEqual([NEW_PATH])
     expect(notices).toEqual([`Reran downstream as run ${NEW}`])
   })

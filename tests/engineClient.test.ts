@@ -319,6 +319,23 @@ describe('launchRun', () => {
   })
 })
 
+describe('forkRun', () => {
+  it('posts revisions and context to the encoded run fork route', async () => {
+    engine.runFrames = [frame({ type: 'run_start', runId: 'forked' })]
+    const events = await drain(client.forkRun('source/1', {
+      revisions: { gameplay: '## Pitch\nNew idea.' },
+      context: { 'canon-anime-game': 'Current canon' },
+      versions: 'pinned',
+    }))
+    expect(events).toEqual([{ type: 'run_start', runId: 'forked' }])
+    expect(engine.requests.at(-1)).toEqual({
+      method: 'POST',
+      path: '/api/runs/source%2F1/fork',
+      body: JSON.stringify({ revisions: { gameplay: '## Pitch\nNew idea.' }, context: { 'canon-anime-game': 'Current canon' }, versions: 'pinned' }),
+    })
+  })
+})
+
 describe('resumeRun', () => {
   const resume = (request: ResumeRequest = { direction: 'KEEP: fast combat' }) => client.resumeRun('2026-09-15-Ab3dE1', request)
 

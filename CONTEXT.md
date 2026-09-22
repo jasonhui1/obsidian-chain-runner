@@ -24,9 +24,10 @@ never the id the call was made against.
 _Avoid_: new run, result run
 
 **Fork**:
-A run of record other than the run a resume or a revise was called on. The
-engine decides to fork; the plugin only notices.
-_Avoid_: branch (that is a rerun's `branchedFromRunId`, a different thing)
+A run of record other than the run a resume, revise or rerun downstream was
+called on. The engine decides which run of record the call lands on.
+Rerun downstream asks it to fork from edited proposals.
+_Avoid_: branch
 
 ### Holds
 

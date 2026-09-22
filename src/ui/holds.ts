@@ -46,7 +46,7 @@ import {
 import { proposerPanels } from '../run/panels'
 import { runPromote } from '../run/promote'
 import { chatReply, repliesSoFar } from '../run/proposerChat'
-import { rerunRequest } from '../run/rerun'
+import { rerunRequest, runFork } from '../run/rerun'
 import { RerunProgressTracker } from '../run/rerunProgress'
 import type { RerunCause, RerunReport, RerunWatch } from '../run/rerunWatch'
 import { resumeRequest, runResume } from '../run/resume'
@@ -550,8 +550,7 @@ export class Holds {
     const edits = proposalEdits(found.content, panels)
     if (Object.keys(edits).length === 0) return this.refuse(NO_EDITED_PROPOSAL)
     const request = rerunRequest(source.run, panels, edits, await this.canon())
-    if (!request) return this.refuse(`Run ${runId} carries no graph to rerun from`)
-    return this.land(found, report, onEvent => launch(engine, request, onEvent), {
+    return this.land(found, report, onEvent => runFork(engine, runId, request, onEvent), {
       edits: { before: panels, sent: edits },
       wording: RERUN_DOWNSTREAM_WORDING,
     })

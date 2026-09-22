@@ -4,9 +4,10 @@ import type { Capabilities } from './types'
 /**
  * The endpoints an engine too old to report its capabilities may still have.
  * Their flag is read three ways: `true` has it, `false` has not, and absent
- * leaves only the call itself to find out (ADR-0017, #54).
+ * leaves only the call itself to find out (ADR-0017, #54). Forking instead
+ * requires an explicit `runFork: true` before the call (#67).
  */
-export type ProbedEndpoint = 'proposerChat' | 'runResume' | 'nodePromote'
+export type ProbedEndpoint = 'proposerChat' | 'runResume' | 'nodePromote' | 'runFork'
 
 /** The engine says it has no such endpoint: nothing is worth asking. */
 export function disclaims(capabilities: Capabilities, endpoint: ProbedEndpoint): boolean {

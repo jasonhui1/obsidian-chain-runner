@@ -3,7 +3,7 @@ import type { StreamEvent } from '@/run/answer'
 import type { Capabilities } from '@/engine/types'
 
 /** Every call that answers with a stream: run, resume, promote and chat. */
-const STREAMING = ['launchRun', 'resumeRun', 'promoteNode', 'chatWithNode'] as const
+const STREAMING = ['launchRun', 'forkRun', 'resumeRun', 'promoteNode', 'chatWithNode'] as const
 
 function engineWhere(capabilities: Capabilities, call: (first: unknown) => AsyncIterable<StreamEvent>): EngineClient {
   const engine: Record<string, unknown> = { capabilities: () => Promise.resolve(capabilities) }

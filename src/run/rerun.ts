@@ -1,65 +1,51 @@
+import { answer, type Answer, type OnEvent } from './answer'
 import { CANON_CONTEXT_KEY } from './canon'
-import type { AgentOutput, LayoutPanel, RunGraph, RunMeta, RunRequest } from '../engine/types'
+import type { EngineClient } from '../engine/client'
+import type { ForkRequest, LayoutPanel, RunMeta } from '../engine/types'
 
-/** Rerun-downstream: which of a finished run's outputs a new run replays, so only what a revision feeds executes again. */
+export const UNSUPPORTED_FORK = 'This engine cannot rerun downstream. Update maestro-playground.'
 
-/** A node and every node reachable from it along the graph's edges. */
-export function descendants(graph: RunGraph, nodeId: string): Set<string> {
-  const reached = new Set([nodeId])
-  const queue = [nodeId]
-  for (let at = queue.shift(); at !== undefined; at = queue.shift()) {
-    for (const edge of graph.edges) {
-      if (edge.fromNode !== at || reached.has(edge.toNode)) continue
-      reached.add(edge.toNode)
-      queue.push(edge.toNode)
-    }
-  }
-  return reached
-}
-
-/**
- * Replays every output outside the revised nodes' descendants, plus each
- * revision (keyed by node id) as its node's output — omitted, it would regenerate.
- */
+/** The engine chooses what to replay; the plugin supplies whole revised outputs. */
 export function rerunRequest(
   run: RunMeta,
   panels: LayoutPanel[],
-  revisions: Record<string, string>,
+  edits: Record<string, string>,
   canon: string | undefined,
-): RunRequest | undefined {
-  const graph = run.graph
-  if (!graph) return undefined
-
-  const rerun = new Set(Object.keys(revisions).flatMap(nodeId => [...descendants(graph, nodeId)]))
-  const branchOutputs = run.agentOutputs.flatMap((output): AgentOutput[] => {
-    const nodeId = output.nodeId
-    if (nodeId === undefined || !rerun.has(nodeId)) return [output]
-    const revision = revisions[nodeId]
-    if (revision === undefined) return []
-    return [revised(output, panels.find(panel => panel.node === nodeId)?.text.trim() ?? '', revision)]
-  })
+  versions?: 'pinned',
+): ForkRequest {
+  const outputs = new Map(run.agentOutputs.filter(output => output.nodeId !== undefined).map(output => [output.nodeId, output.output]))
+  const revisions = Object.fromEntries(Object.entries(edits).map(([nodeId, edit]) => {
+    const original = outputs.get(nodeId) ?? ''
+    const shown = panels.find(panel => panel.node === nodeId)?.text.trim() ?? ''
+    return [nodeId, revised(original, shown, edit)]
+  }))
 
   return {
-    chainName: run.chainName,
-    seedPrompt: run.seedPrompt,
-    ...(run.parameter ? { paramValue: run.parameter.value } : {}),
-    // A context node is read on every run, never replayed, so canon goes along.
+    revisions,
     ...(canon !== undefined ? { context: { [CANON_CONTEXT_KEY]: canon } } : {}),
-    branchedFromRunId: run.runId,
-    branchOutputs,
+    ...(versions !== undefined ? { versions } : {}),
   }
 }
 
-/**
- * The output with the panel's part swapped for the edit; a panel may show only
- * one section of what its node wrote. No thought: it reasoned toward the old text.
- * The engine logs a replayed output's metrics, so they stay, at zero: nothing ran.
- */
-function revised(original: AgentOutput, shown: string, edit: string): AgentOutput {
-  const at = shown === '' ? -1 : original.output.indexOf(shown)
-  const output = at === -1 ? edit : original.output.slice(0, at) + edit + original.output.slice(at + shown.length)
-  const kept: AgentOutput = { ...original, output, status: 'success', tokensIn: 0, tokensOut: 0, costUsd: 0, latencyMs: 0 }
-  delete kept.thought
-  delete kept.error
-  return kept
+/** A panel can show one section of a node's output; replace only that section. */
+function revised(original: string, shown: string, edit: string): string {
+  const at = shown === '' ? -1 : original.indexOf(shown)
+  return at === -1 ? edit : original.slice(0, at) + edit + original.slice(at + shown.length)
+}
+
+/** Forks the source run with revised outputs, returning the streamed run of record. */
+export async function runFork(engine: EngineClient, runId: string, request: ForkRequest, onEvent?: OnEvent): Promise<Answer> {
+  if ((await engine.capabilities()).runFork !== true) return { kind: 'refused', said: UNSUPPORTED_FORK, unsupported: true }
+  return answer(engine, {
+    open: () => engine.forkRun(runId, request),
+    calledOn: runId,
+    onEvent,
+    refusals: {
+      endpoint: 'runFork',
+      unsupported: UNSUPPORTED_FORK,
+      running: said => `Run ${runId} cannot be forked yet: ${said}`,
+      gone: `Run ${runId} or a revised node no longer exists`,
+      invalid: said => `The engine would not rerun downstream: ${said}`,
+    },
+  })
 }

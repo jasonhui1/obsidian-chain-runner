@@ -12,6 +12,7 @@ import type {
   ChainSummary,
   ChainView,
   ChatEvent,
+  ForkRequest,
   LayoutModel,
   PromoteRequest,
   RunEvent,
@@ -136,6 +137,10 @@ export class EngineClient {
    */
   async *launchRun(request: RunRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
     yield* this.streamRun('/api/run', request, signal)
+  }
+
+  async *forkRun(runId: string, request: ForkRequest, signal?: AbortSignal): AsyncGenerator<RunEvent> {
+    yield* this.streamRun(`/api/runs/${encodeURIComponent(runId)}/fork`, request, signal)
   }
 
   /**

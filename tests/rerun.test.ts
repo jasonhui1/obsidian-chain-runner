@@ -1,27 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { descendants, rerunRequest } from '@/run/rerun'
-import type { AgentOutput, LayoutPanel, RunGraph, RunMeta } from '@/engine/types'
+import { rerunRequest, runFork, UNSUPPORTED_FORK } from '@/run/rerun'
+import { EngineHttpError } from '@/engine/transport'
+import type { AgentOutput, LayoutPanel, RunMeta } from '@/engine/types'
+import { refusingEngine, streamingEngine } from './stubEngine'
 
-/**
- * Rerun-downstream, apart from the vault: which outputs a revision replays, and
- * the request that replays them.
- */
+/** The fork request built from edited proposals, apart from the vault. */
 
 const SPECIALISTS = ['character-director', 'gameplay-director', 'world-director', 'art-director', 'devils-advocate']
-
-/** The creative-director chain's shape, down to what the rule reads. */
-const graph: RunGraph = {
-  edges: [
-    ...['creative-brief', ...SPECIALISTS, 'creative-director'].flatMap(to =>
-      ['seed', 'experimental', 'canon'].map(fromNode => ({ fromNode, toNode: to })),
-    ),
-    ...SPECIALISTS.map(toNode => ({ fromNode: 'creative-brief', toNode })),
-    ...SPECIALISTS.map(fromNode => ({ fromNode, toNode: 'join' })),
-    { fromNode: 'creative-brief', toNode: 'creative-director' },
-    { fromNode: 'join', toNode: 'creative-director' },
-    { fromNode: 'creative-director', toNode: 'report' },
-  ],
-}
 
 const output = (nodeId: string, text = `${nodeId} said this.`): AgentOutput => ({
   nodeId,
@@ -39,7 +24,6 @@ const run = (over: Partial<RunMeta> = {}): RunMeta => ({
   startedAt: '2026-09-15T10:00:00.000Z',
   status: 'complete',
   agentOutputs: ['creative-brief', ...SPECIALISTS, 'join', 'creative-director', 'report'].map(id => output(id)),
-  graph,
   ...over,
 })
 
@@ -47,49 +31,10 @@ const panel = (node: string, text = `${node} said this.`): LayoutPanel => ({ nam
 
 const panels = SPECIALISTS.map(node => panel(node))
 
-const replayedNodes = (request: ReturnType<typeof rerunRequest>) => request?.branchOutputs?.map(o => o.nodeId)
-
-describe('descendants', () => {
-  it('holds the node itself and everything reachable from it', () => {
-    expect([...descendants(graph, 'gameplay-director')].sort()).toEqual(['creative-director', 'gameplay-director', 'join', 'report'])
-  })
-
-  it('reaches no sibling that only shares an upstream', () => {
-    expect(descendants(graph, 'gameplay-director').has('world-director')).toBe(false)
-  })
-})
-
 describe('rerunRequest', () => {
-  it('replays every output but the revised node’s descendants', () => {
+  it('sends only revised nodes and leaves replay selection to the engine', () => {
     const request = rerunRequest(run(), panels, { 'gameplay-director': 'Halo is a burden.' }, undefined)
-    expect(replayedNodes(request)).toEqual(['creative-brief', ...SPECIALISTS])
-  })
-
-  it('replays the edited text as the revised node’s output, rather than letting it regenerate', () => {
-    const request = rerunRequest(run(), panels, { 'gameplay-director': 'Halo is a burden.' }, undefined)
-    const revised = request?.branchOutputs?.find(o => o.nodeId === 'gameplay-director')
-    expect(revised).toMatchObject({ agentName: 'gameplay-director', output: 'Halo is a burden.', status: 'success' })
-  })
-
-  it('drops the stored thought from the revision, since it reasoned toward the old text', () => {
-    const outputs = run().agentOutputs.map(o => (o.nodeId === 'gameplay-director' ? { ...o, thought: 'Stances first.' } : o))
-    const request = rerunRequest(run({ agentOutputs: outputs }), panels, { 'gameplay-director': 'Halo is a burden.' }, undefined)
-    expect(request?.branchOutputs?.find(o => o.nodeId === 'gameplay-director')).not.toHaveProperty('thought')
-  })
-
-  it('gives the revision every field the engine logs a replayed output with, at no cost, since nothing ran', () => {
-    const logged = { systemPrompt: 'You direct gameplay.', input: 'the brief', tokensIn: 900, tokensOut: 400, costUsd: 0.02, latencyMs: 8000, model: 'claude' }
-    const outputs = run().agentOutputs.map(o => (o.nodeId === 'gameplay-director' ? { ...o, ...logged } : o))
-    const request = rerunRequest(run({ agentOutputs: outputs }), panels, { 'gameplay-director': 'Halo is a burden.' }, undefined)
-    expect(request?.branchOutputs?.find(o => o.nodeId === 'gameplay-director')).toMatchObject({
-      systemPrompt: 'You direct gameplay.',
-      input: 'the brief',
-      model: 'claude',
-      tokensIn: 0,
-      tokensOut: 0,
-      costUsd: 0,
-      latencyMs: 0,
-    })
+    expect(request).toEqual({ revisions: { 'gameplay-director': 'Halo is a burden.' } })
   })
 
   it('swaps only the panel’s part of an output that carried more than the panel shows', () => {
@@ -102,30 +47,57 @@ describe('rerunRequest', () => {
       { 'gameplay-director': 'Burden.' },
       undefined,
     )
-    expect(request?.branchOutputs?.find(o => o.nodeId === 'gameplay-director')?.output).toBe('## Pitch\nBurden.\n\n## Notes\nKeep it fast.')
+    expect(request.revisions['gameplay-director']).toBe('## Pitch\nBurden.\n\n## Notes\nKeep it fast.')
   })
 
   it('keeps each revision when one revised node lies downstream of another', () => {
     const request = rerunRequest(run(), [...panels, panel('join')], { 'creative-brief': 'A new brief.', join: 'A new room.' }, undefined)
-    expect(replayedNodes(request)).toEqual(['creative-brief', 'join'])
+    expect(request.revisions).toEqual({ 'creative-brief': 'A new brief.', join: 'A new room.' })
   })
 
-  it('branches from the run, with its seed and parameter pick', () => {
-    expect(rerunRequest(run(), panels, { 'gameplay-director': 'x' }, undefined)).toMatchObject({
-      chainName: 'creative-director',
-      seedPrompt: 'anime girl with a giant mechanical halo',
-      paramValue: '3 - fresh',
-      branchedFromRunId: '2026-09-15-Ab3dE1',
-    })
-  })
-
-  it('sends today’s canon, since a context node is read fresh on every run rather than replayed', () => {
-    expect(rerunRequest(run(), panels, { 'gameplay-director': 'x' }, '## LOCKED\n- halo = burden\n')).toMatchObject({
+  it('sends today’s canon with the revisions', () => {
+    expect(rerunRequest(run(), panels, { 'gameplay-director': 'x' }, '## LOCKED\n- halo = burden\n')).toEqual({
+      revisions: { 'gameplay-director': 'x' },
       context: { 'canon-anime-game': '## LOCKED\n- halo = burden\n' },
     })
   })
 
-  it('answers undefined for a run that carries no graph to walk', () => {
-    expect(rerunRequest(run({ graph: undefined }), panels, { 'gameplay-director': 'x' }, undefined)).toBeUndefined()
+  it('can request the source run’s pinned files', () => {
+    expect(rerunRequest(run(), panels, { 'gameplay-director': 'x' }, undefined, 'pinned')).toEqual({
+      revisions: { 'gameplay-director': 'x' },
+      versions: 'pinned',
+    })
+  })
+
+  it('uses the latest output when a node has more than one record', () => {
+    const records = [...run().agentOutputs, output('gameplay-director', '## Pitch\nFinal.\n\n## Notes\nKeep it fast.')]
+    const request = rerunRequest(run({ agentOutputs: records }), [panel('gameplay-director', 'Final.')], { 'gameplay-director': 'Burden.' }, undefined)
+    expect(request.revisions['gameplay-director']).toBe('## Pitch\nBurden.\n\n## Notes\nKeep it fast.')
+  })
+})
+
+describe('runFork', () => {
+  const request = { revisions: { 'gameplay-director': 'Burden.' } }
+
+  it('calls the fork route and reads its run of record', async () => {
+    const called: unknown[] = []
+    const result = await runFork(streamingEngine([{ type: 'run_start', runId: 'forked' }], { runFork: true }, called), 'source', request)
+    expect(called).toEqual(['source'])
+    expect(result).toEqual({ kind: 'landed', runId: 'forked', forked: true })
+  })
+
+  it('asks nothing of an engine that does not advertise the fork route', async () => {
+    const result = await runFork(refusingEngine(new Error('must not call')), 'source', request)
+    expect(result).toEqual({ kind: 'refused', said: UNSUPPORTED_FORK, unsupported: true })
+  })
+
+  it.each([
+    [400, 'revising a hold; use resume', 'The engine would not rerun downstream: revising a hold; use resume'],
+    [400, 'node inside a loop', 'The engine would not rerun downstream: node inside a loop'],
+    [400, 'node has no output', 'The engine would not rerun downstream: node has no output'],
+    [404, 'unknown node', 'Run source or a revised node no longer exists'],
+  ])('shows the engine refusal for %i', async (status, said, notice) => {
+    const engine = refusingEngine(new EngineHttpError(status, 'http://engine/fork', JSON.stringify({ error: said })), { runFork: true })
+    expect(await runFork(engine, 'source', request)).toEqual({ kind: 'refused', said: notice })
   })
 })

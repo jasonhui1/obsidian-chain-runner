@@ -9,6 +9,7 @@ export interface RecordedRequest {
 
 const CHAT_ROUTE = /^\/api\/runs\/[^/]+\/nodes\/[^/]+\/chat$/
 const RESUME_ROUTE = /^\/api\/runs\/[^/]+\/resume$/
+const FORK_ROUTE = /^\/api\/runs\/[^/]+\/fork$/
 const PROMOTE_ROUTE = /^\/api\/runs\/[^/]+\/nodes\/[^/]+\/promote$/
 
 /**
@@ -19,7 +20,7 @@ export class FakeEngine {
   private readonly server: http.Server
   readonly requests: RecordedRequest[] = []
 
-  /** Frames `POST /api/run`, resume and promote write, in order. `null` closes the stream. */
+  /** Frames run, fork, resume and promote write, in order. `null` closes the stream. */
   runFrames: (string | null)[] = []
   /** Frames the node chat route writes, in order. `null` closes the stream. */
   chatFrames: (string | null)[] = []
@@ -62,7 +63,7 @@ export class FakeEngine {
       if (this.failWith) {
         res.writeHead(this.failWith.status)
         res.end(this.failWith.body)
-      } else if (req.method === 'POST' && (path === '/api/run' || RESUME_ROUTE.test(path) || PROMOTE_ROUTE.test(path))) {
+      } else if (req.method === 'POST' && (path === '/api/run' || RESUME_ROUTE.test(path) || FORK_ROUTE.test(path) || PROMOTE_ROUTE.test(path))) {
         this.stream(res, this.runFrames)
       } else if (req.method === 'POST' && CHAT_ROUTE.test(path)) {
         this.stream(res, this.chatFrames)

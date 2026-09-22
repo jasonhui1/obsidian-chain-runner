@@ -195,6 +195,8 @@ export interface Capabilities {
   runResume?: boolean
   /** `POST /api/runs/:id/nodes/:nodeId/promote` makes a chat reply the node's output (#54). */
   nodePromote?: boolean
+  /** `POST /api/runs/:id/fork` reruns descendants of revised outputs (#67). */
+  runFork?: boolean
 }
 
 /** What `POST /api/run` is asked for. A run names a chain, or one agent alone, and supplies its inputs. */
@@ -208,10 +210,16 @@ export interface RunRequest {
   paramValue?: string
   /** Overrides a `context` node's file, keyed by the node's declared `file`. */
   context?: Record<string, string>
-  /** The run this one branches from, for lineage only. */
-  branchedFromRunId?: string
-  /** Outputs set on their nodes as-is; any node without one executes. */
-  branchOutputs?: AgentOutput[]
+}
+
+/** What `POST /api/runs/:id/fork` is asked for. */
+export interface ForkRequest {
+  /** Full replacement output text, keyed by node id. */
+  revisions: Record<string, string>
+  /** Overrides a `context` node's file, keyed by its declared `file`. */
+  context?: Record<string, string>
+  /** Use the source run's pinned files; omitted uses current files. */
+  versions?: 'pinned'
 }
 
 /**
