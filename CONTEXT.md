@@ -148,3 +148,14 @@ _Avoid_: command class, action
 The verb buttons drawn under each proposal heading in a rendered hold note, a
 shortcut for typing the same line under Direction.
 _Avoid_: verb bar, proposal buttons
+
+**Hold column**:
+A waiting hold as the drawing shows it: its prompt, its candidates one under
+another, and a card for the human's own words. Picking one resumes the hold.
+_Avoid_: idea list, options
+
+**Pick row**:
+What one answered candidate ran into, drawn to its right on the drawing: the
+panels after the hold, one card tall. The first pick fills the run's own row;
+a pick that forks gets a row of its own.
+_Avoid_: branch (that is the engine's older fork), lane
