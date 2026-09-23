@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   ALREADY_RUNNING,
   NO_FRAME,
@@ -9,6 +9,7 @@ import {
   PICK_A_CHAIN,
   SOME_UNBOUND,
 } from '@/ui/nodeRun'
+import type { ChainNodeData } from '@/ui/chainNode'
 import { MISSING_NOTE } from '@/ui/inputSeed'
 import { CHAIN_GONE, NODE_GONE } from '@/ui/chainNodes'
 import { UNSUPPORTED_STREAMING } from '@/run/stream'
@@ -19,8 +20,10 @@ import { OutputNotes } from '@/ui/outputNotes'
 import type { RunFrame } from '@/run/runFrame'
 import type { EngineClient } from '@/engine/client'
 import { EngineOfflineError } from '@/engine/transport'
-import type { Capabilities, ChainSummary, RunEvent } from '@/engine/types'
+import type { App } from 'obsidian'
+import type { Capabilities, ChainSummary, RunEvent, VarianceRequest, VarianceRunEvent } from '@/engine/types'
 import { MemoryNoteStore } from './memoryNoteStore'
+import { lastModal, resetModals } from './obsidian'
 
 /** The order a run happens in. The pure pieces are checked in their own files. */
 
@@ -37,11 +40,13 @@ const nodeData = {
 const ENGINE_URL = 'http://localhost:3000'
 
 const RUN_ID = '2026-09-02-ab12c'
+const SECOND_RUN_ID = '2026-09-02-cd34e'
 const FIRST = `chains/runs/${RUN_ID}/First.md`
 const SURVIVOR = `chains/runs/${RUN_ID}/Survivor.md`
 
 let reading: NodeReading | undefined
 let events: RunEvent[]
+let varianceEvents: VarianceRunEvent[]
 /** Each hold the run reached, as the node run handed it on. */
 let held: string[]
 let launchError: unknown
@@ -50,6 +55,7 @@ let chains: ChainSummary[]
 let online: boolean
 
 let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
+let varianceRequests: VarianceRequest[]
 let notices: string[]
 let labels: string[]
 let framed: { frame: RunFrame; notes: string[] }[]
@@ -159,10 +165,15 @@ function makeRun(): NodeRun {
         duringRun.push({ ...vault })
       }
     },
+    launchVariance: async function* (request: VarianceRequest) {
+      varianceRequests.push(request)
+      for (const event of varianceEvents) yield event
+    },
   } as unknown as EngineClient
 
   const notify = (message: string): void => void notices.push(message)
   return new NodeRun({
+    app: {} as App,
     store,
     engine,
     withEngine: async action => (online ? action() : undefined),
@@ -185,7 +196,7 @@ const finishes = (): RunEvent[] => [
 
 const HOLD = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
 
-const start = (): Promise<void> => makeRun().run(nodeData, { groupIds: ['g-1'] })
+const start = (data: ChainNodeData = nodeData): Promise<void> => makeRun().run(data, { groupIds: ['g-1'] })
 
 beforeEach(() => {
   reading = {
@@ -194,12 +205,14 @@ beforeEach(() => {
     drawing: 'boards/wall.excalidraw.md',
   }
   events = finishes()
+  varianceEvents = []
   held = []
   launchError = undefined
   capabilities = { runLayoutFrames: true, runStartEvent: true, runFailureFrame: true }
   chains = [relay]
   online = true
   launched = []
+  varianceRequests = []
   notices = []
   labels = []
   framed = []
@@ -213,6 +226,7 @@ beforeEach(() => {
   writes = []
   store.onChange(path => void writes.push(path))
   duringRun = []
+  resetModals()
 })
 
 describe('what the run is given', () => {
@@ -479,6 +493,90 @@ describe('a run that dies before a hop', () => {
   it('says failed on the node, with the engine’s words', async () => {
     await start()
     expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: died }))
+  })
+})
+
+describe('variance runs', () => {
+  const member = (instance: number, event: RunEvent): VarianceRunEvent => ({ ...event, instance })
+
+  beforeEach(() => {
+    capabilities.varianceGroups = true
+    varianceEvents = [
+      member(0, { type: 'run_start', runId: RUN_ID }),
+      member(1, { type: 'run_start', runId: SECOND_RUN_ID }),
+      member(1, layout(['Second'], 0)),
+      member(0, layout(['First'], 0)),
+      member(1, layout(['Second'], 1)),
+      member(0, layout(['First'], 1)),
+      member(1, { type: 'run_complete', runId: SECOND_RUN_ID }),
+      member(0, { type: 'run_complete', runId: RUN_ID }),
+      { type: 'variance_complete', groupId: 'group-1', runIds: [RUN_ID, SECOND_RUN_ID] },
+    ]
+  })
+
+  it('asks for a run count when the engine supports variance groups', async () => {
+    const pending = start()
+    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
+    lastModal()?.choose(0)
+    await pending
+
+    expect(launched).toHaveLength(1)
+    expect(varianceRequests).toEqual([])
+  })
+
+  it.each([false, undefined])('keeps the direct single run when variance groups are %s', async capability => {
+    capabilities.varianceGroups = capability
+    await start()
+
+    expect(launched).toHaveLength(1)
+    expect(varianceRequests).toEqual([])
+    expect(lastModal()).toBeUndefined()
+  })
+
+  it('can dismiss the count picker without leaving the node busy', async () => {
+    const runner = makeRun()
+    const pending = runner.run(nodeData, { groupIds: ['g-1'] })
+    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
+    lastModal()?.close()
+    await pending
+
+    expect(runner.isRunning(nodeData.nodeId)).toBe(false)
+    expect(launched).toEqual([])
+    expect(varianceRequests).toEqual([])
+  })
+
+  it('closes the count picker when the plugin stops', async () => {
+    const runner = makeRun()
+    const pending = runner.run(nodeData, { groupIds: ['g-1'] })
+    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
+    runner.stop()
+    await pending
+
+    expect(runner.isRunning(nodeData.nodeId)).toBe(false)
+    expect(launched).toEqual([])
+    expect(varianceRequests).toEqual([])
+  })
+
+  it('runs the chosen count with the node inputs and dropdown, then places separate frames', async () => {
+    const pending = start({ ...nodeData, parameterValue: 'engineers' })
+    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
+    lastModal()?.choose(1)
+    await pending
+
+    expect(launched).toEqual([])
+    expect(varianceRequests).toEqual([
+      { chainName: 'Relay', seedPrompt: 'a premise', paramValue: 'engineers', count: 2 },
+    ])
+    expect(framed.map(one => one.frame.name).sort()).toEqual([
+      `Relay · ${RUN_ID}`,
+      `Relay · ${SECOND_RUN_ID}`,
+    ])
+    expect(vault[`chains/runs/${RUN_ID}/First.md`]).toContain('First said something')
+    expect(vault[`chains/runs/${SECOND_RUN_ID}/Second.md`]).toContain('Second said something')
+
+    const stacked = [...framed].sort((left, right) => left.frame.box.y - right.frame.box.y)
+    expect(stacked[0]?.frame.box.y).toBe(reading?.box.y)
+    expect(stacked[0]!.frame.box.y + stacked[0]!.frame.box.height).toBeLessThanOrEqual(stacked[1]!.frame.box.y)
   })
 })
 

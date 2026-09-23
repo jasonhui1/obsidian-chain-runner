@@ -136,9 +136,20 @@ export class SeedPicker extends FuzzySuggestModal<SeedChoice> {
 
 /** The count choice shown only when the engine advertises variance groups. */
 export class RunCountPicker extends FuzzySuggestModal<number> {
-  constructor(app: App, private readonly onPick: (count: number) => void) {
+  private picked = false
+
+  constructor(
+    app: App,
+    private readonly onPick: (count: number) => void,
+    private readonly onCancel?: () => void,
+  ) {
     super(app)
     this.setPlaceholder('Run how many times?')
+  }
+
+  override onClose(): void {
+    super.onClose()
+    if (!this.picked) this.onCancel?.()
   }
 
   getItems(): number[] {
@@ -150,6 +161,7 @@ export class RunCountPicker extends FuzzySuggestModal<number> {
   }
 
   onChooseItem(count: number): void {
+    this.picked = true
     this.onPick(count)
   }
 }

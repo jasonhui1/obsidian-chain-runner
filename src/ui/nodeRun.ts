@@ -1,3 +1,5 @@
+import type { App } from 'obsidian'
+import { RunCountPicker } from './chainPicker'
 import { chainIsUnset, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
 import type { DrawingView, NodeReading, PlacedOutput, RunDrawing, RunSurface } from './excalidraw'
 import type { Box } from './nodeScene'
@@ -7,13 +9,13 @@ import { CHAIN_GONE, NODE_GONE } from './chainNodes'
 import { runIntoNotes, type ChainRunOutcome } from './chainRun'
 import { openLiveOutputs, type LiveOutput } from './liveOutputs'
 import type { RunLayout } from '../run/panels'
-import { buildRunFrame, type FramedPanel, type RunFrame } from '../run/runFrame'
+import { buildRunFrame, RUN_FRAME_GAP, type FramedPanel, type RunFrame } from '../run/runFrame'
 import { seedFromInputs } from './inputSeed'
 import { onDrawing, readDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { runFailure } from '../run/session'
 import { streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary, LayoutModel } from '../engine/types'
+import type { ChainSummary, LayoutModel, RunEvent, VarianceMemberEvent } from '../engine/types'
 
 /**
  * Running a chain node: the arrows in become the seed, and the outputs become
@@ -41,6 +43,7 @@ export const NO_FRAME =
   'This Excalidraw cannot make frames, so the outputs were placed loose beside the node. Update it to group them.'
 
 export interface NodeRunDeps {
+  app: App
   store: NoteStore
   engine: EngineClient
   /** Offline is a notice and nothing else. */
@@ -150,7 +153,8 @@ export class NodeRun {
       node: reading.box,
       ...(data.parameterValue ? { parameterValue: data.parameterValue } : {}),
     }
-    await this.launch(plan, controller)
+    const count = capabilities.varianceGroups === true ? await this.pickRunCount(controller.signal) : 1
+    if (count !== undefined) await this.launch(plan, controller, count)
   }
 
   /** Whether that node has a run going; a chain is not changed underneath one. */
@@ -176,49 +180,182 @@ export class NodeRun {
     return undefined
   }
 
-  private async launch(plan: NodeRunPlan, controller: AbortController): Promise<void> {
-    const { chain, seed, target, touch, parameterValue } = plan
+  private async launch(plan: NodeRunPlan, controller: AbortController, count: number): Promise<void> {
+    const runPlan = count > 1 ? { ...plan, touch: serializeTouch(plan.touch) } : plan
+    const { chain, target, touch } = runPlan
 
-    let said = ''
+    let lastStatus = ''
     // Every write to a drawing is a save, so only a change of words earns one.
     const say = async (status: NodeRunStatus): Promise<void> => {
       const next = JSON.stringify(status)
-      if (next === said) return
-      said = next
+      if (next === lastStatus) return
+      lastStatus = next
       await touch(drawing => drawing.setRunStatus(target, status))
     }
 
     await say({ kind: 'running', done: 0 })
 
+    if (count > 1) {
+      await this.launchVariance(runPlan, controller, count, say)
+      return
+    }
+
     const outcome = await runIntoNotes({
       engine: this.deps.engine,
       chain,
-      request: {
-        chainName: chain.name,
-        seedPrompt: seed,
-        ...(parameterValue ? { paramValue: parameterValue } : {}),
-      },
+      request: requestOf(runPlan),
       signal: controller.signal,
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
       holdReached: this.deps.holdReached,
       onProgress: model => say(progress(model)),
-      place: (runId, layout) => this.open(runId, layout, plan),
+      place: (runId, layout) => this.open(runId, layout, runPlan),
     })
     // Dropped by an unload: the notes stay as a record of a real run.
     if (outcome.aborted) return
 
-    await this.finish(outcome, plan)
+    await this.finish(outcome, runPlan)
+  }
+
+  private pickRunCount(signal: AbortSignal): Promise<number | undefined> {
+    return new Promise(resolve => {
+      let settled = false
+      const finish = (count: number | undefined): void => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', abort)
+        resolve(count)
+      }
+      const picker = new RunCountPicker(this.deps.app, finish, () => finish(undefined))
+      const abort = (): void => {
+        finish(undefined)
+        picker.close()
+      }
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+      else picker.open()
+    })
+  }
+
+  /** Runs one variance member per stream, keeping each run's output on its own frame. */
+  private async launchVariance(
+    plan: NodeRunPlan,
+    controller: AbortController,
+    count: number,
+    say: (status: NodeRunStatus) => Promise<void>,
+  ): Promise<void> {
+    const queues = Array.from({ length: count }, () => new RunEventQueue())
+    const layouts: (LayoutModel | undefined)[] = Array.from({ length: count })
+    const notified = new Set<string>()
+    const notify = (message: string): void => {
+      if (notified.has(message)) return
+      notified.add(message)
+      this.deps.notify(message)
+    }
+    let markedOffline = false
+    const markOffline = (): void => {
+      if (markedOffline) return
+      markedOffline = true
+      this.deps.markOffline()
+    }
+    let nextFrameY = plan.node.y
+
+    const members = queues.map((events, instance) =>
+      runIntoNotes({
+        engine: this.deps.engine,
+        chain: plan.chain,
+        events,
+        signal: controller.signal,
+        notify,
+        markOffline,
+        holdReached: this.deps.holdReached,
+        onProgress: model => {
+          layouts[instance] = model
+          return say(varianceProgress(layouts))
+        },
+        place: (runId, layout) =>
+          this.open(runId, layout, plan, { ...plan.node, y: nextFrameY }, frame => {
+            nextFrameY = frame.box.y + frame.box.height + RUN_FRAME_GAP
+          }),
+      }),
+    )
+    const allMembers = Promise.allSettled(members)
+
+    let groupId: string | undefined
+    let protocolFailure: string | undefined
+    let sourceFailure: unknown
+    try {
+      for await (const event of this.deps.engine.launchVariance({ ...requestOf(plan), count }, controller.signal)) {
+        if (event.type === 'variance_complete' && 'groupId' in event && typeof event.groupId === 'string') {
+          groupId = event.groupId
+          continue
+        }
+        const member = event as VarianceMemberEvent
+        if (!Number.isInteger(member.instance) || member.instance < 0 || member.instance >= count) {
+          protocolFailure = `The engine sent an invalid run number for a ${count}-run variance.`
+          break
+        }
+        queues[member.instance]?.push(member)
+      }
+    } catch (error) {
+      sourceFailure = error
+    }
+
+    if (sourceFailure !== undefined) queues.forEach(queue => queue.close(sourceFailure))
+    else if (protocolFailure) {
+      queues.forEach(queue => queue.push({ type: 'error', error: protocolFailure! }))
+      queues.forEach(queue => queue.close())
+    } else queues.forEach(queue => queue.close())
+
+    const settled = await allMembers
+    const outcomes: ChainRunOutcome<FramedPanel>[] = []
+    for (const member of settled) {
+      if (member.status === 'rejected') throw member.reason
+      outcomes.push(member.value)
+    }
+    if (controller.signal.aborted || outcomes.some(outcome => outcome.aborted)) return
+
+    const failures: string[] = []
+    for (const outcome of outcomes) {
+      const error = runFailure(outcome.state) ?? outcome.failure
+      if (error) {
+        failures.push(error)
+        if (error !== outcome.failure) notify(error)
+      } else if (!outcome.state.runId) {
+        failures.push(NOTHING_WRITTEN)
+        notify(NOTHING_WRITTEN)
+      }
+      if (!outcome.live && outcome.state.runId) notify(NO_OUTPUTS)
+    }
+    if (protocolFailure) failures.push(protocolFailure)
+    if (!groupId && !sourceFailure && !protocolFailure) {
+      const failure = 'The engine ended the variance run without naming its group.'
+      failures.push(failure)
+      notify(failure)
+    }
+
+    await say(failures.length > 0 ? { kind: 'failed', error: failures[0] } : { kind: 'done' })
   }
 
   /** One empty note per declared output, placed in the frame. */
-  private async open(runId: string, layout: RunLayout, plan: NodeRunPlan): Promise<LiveOutput<FramedPanel>[]> {
-    const frame = buildRunFrame({ layout, chainName: plan.chain.name, runId, node: plan.node })
+  private async open(
+    runId: string,
+    layout: RunLayout,
+    plan: NodeRunPlan,
+    node: Box = plan.node,
+    onFrame?: (frame: RunFrame) => void,
+  ): Promise<LiveOutput<FramedPanel>[]> {
+    const frame = buildRunFrame({ layout, chainName: plan.chain.name, runId, node })
+    onFrame?.(frame)
+    return this.openFrame(frame, plan)
+  }
+
+  private async openFrame(frame: RunFrame, plan: NodeRunPlan): Promise<LiveOutput<FramedPanel>[]> {
     // A refused note has said so already; the rest of the run still lands.
     const outputs = await openLiveOutputs({
       places: frame.panels,
       notes: this.deps.notes,
-      run: { runId, chainName: plan.chain.name },
+      run: { runId: frame.runId, chainName: plan.chain.name },
     })
 
     const placed: PlacedOutput[] = outputs.map(one => ({ placed: one.place, notePath: one.note.path }))
@@ -280,5 +417,77 @@ function progress(model: LayoutModel | undefined): NodeRunStatus {
     kind: 'running',
     done: model.panels.filter(panel => panel.state !== 'pending').length,
     total: model.panels.length,
+  }
+}
+
+function varianceProgress(models: readonly (LayoutModel | undefined)[]): NodeRunStatus {
+  const panels = models.flatMap(model => model?.panels ?? [])
+  if (panels.length === 0) return { kind: 'running', done: 0 }
+  return {
+    kind: 'running',
+    done: panels.filter(panel => panel.state !== 'pending').length,
+    total: panels.length,
+  }
+}
+
+function requestOf(plan: NodeRunPlan): { chainName: string; seedPrompt: string; paramValue?: string } {
+  return {
+    chainName: plan.chain.name,
+    seedPrompt: plan.seed,
+    ...(plan.parameterValue ? { paramValue: plan.parameterValue } : {}),
+  }
+}
+
+function serializeTouch(touch: Touch): Touch {
+  let previous = Promise.resolve()
+  return async write => {
+    const current = previous.then(() => touch(write))
+    previous = current.catch(() => undefined)
+    await current
+  }
+}
+
+class RunEventQueue implements AsyncIterable<RunEvent>, AsyncIterator<RunEvent> {
+  private readonly events: RunEvent[] = []
+  private readonly waiting: {
+    resolve: (result: IteratorResult<RunEvent>) => void
+    reject: (failure: unknown) => void
+  }[] = []
+  private closed = false
+  private failed = false
+  private failure: unknown
+
+  [Symbol.asyncIterator](): AsyncIterator<RunEvent> {
+    return this
+  }
+
+  push(event: RunEvent): void {
+    if (this.closed) return
+    const next = this.waiting.shift()
+    if (next) next.resolve({ done: false, value: event })
+    else this.events.push(event)
+  }
+
+  close(failure?: unknown): void {
+    if (this.closed) return
+    this.closed = true
+    this.failed = failure !== undefined
+    this.failure = failure
+    while (this.waiting.length > 0) {
+      const next = this.waiting.shift()!
+      if (this.failed) next.reject(this.failure)
+      else next.resolve({ done: true, value: undefined })
+    }
+  }
+
+  next(): Promise<IteratorResult<RunEvent>> {
+    const event = this.events.shift()
+    if (event) return Promise.resolve({ done: false, value: event })
+    if (this.closed) {
+      return this.failed
+        ? Promise.reject(this.failure)
+        : Promise.resolve({ done: true, value: undefined })
+    }
+    return new Promise((resolve, reject) => this.waiting.push({ resolve, reject }))
   }
 }

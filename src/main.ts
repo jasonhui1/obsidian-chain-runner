@@ -164,6 +164,7 @@ export default class ChainRunnerPlugin extends Plugin {
     const onDrawing = new RerunOnDrawing({ surface, notes, ...sharedDeps })
     this.register(reruns.onLanding(landing => onDrawing.land(landing)))
     const nodeRun = new NodeRun({
+      app: this.app,
       store,
       engine: this.engine,
       ...sharedDeps,

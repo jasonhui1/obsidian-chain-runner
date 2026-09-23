@@ -3,7 +3,7 @@ import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
 import { answer } from './answer'
 import { applyRunEvent, emptyRunState, type RunState } from './session'
 import type { EngineClient } from '../engine/client'
-import { isEvent, type Capabilities, type RunRequest } from '../engine/types'
+import { isEvent, type Capabilities, type RunEvent, type RunRequest } from '../engine/types'
 
 /** One run, from launch to the last event, for both surfaces that show one. */
 
@@ -31,6 +31,19 @@ export function streamsOutputs(capabilities: Capabilities): boolean {
   )
 }
 
+type StreamRunBase = {
+  engine: EngineClient
+  signal: AbortSignal
+  onState: (state: RunState) => void | Promise<void>
+  /** Each hold the run reaches; several can open in one wave. */
+  holdReached: (runId: string, nodeId: string) => Promise<void>
+  notify: (message: string) => void
+  markOffline: () => void
+}
+
+export type StreamRunInput = StreamRunBase &
+  ({ request: RunRequest; events?: never } | { request?: never; events: AsyncIterable<RunEvent> })
+
 /** How a run's stream ended, as the drawing surfaces read it. */
 interface DrawnRun {
   state: RunState
@@ -45,20 +58,11 @@ interface DrawnRun {
  * part of the state, not a throw; anything but an unreachable engine or a
  * refused request is a bug and is rethrown.
  */
-export async function streamRun(input: {
-  engine: EngineClient
-  request: RunRequest
-  signal: AbortSignal
-  onState: (state: RunState) => void | Promise<void>
-  /** Each hold the run reaches; several can open in one wave. */
-  holdReached: (runId: string, nodeId: string) => Promise<void>
-  notify: (message: string) => void
-  markOffline: () => void
-}): Promise<DrawnRun> {
+export async function streamRun(input: StreamRunInput): Promise<DrawnRun> {
   let state = emptyRunState()
   try {
     const answered = await answer(input.engine, {
-      open: () => input.engine.launchRun(input.request, input.signal),
+      open: () => input.events ?? input.engine.launchRun(input.request, input.signal),
       onEvent: async event => {
         state = applyRunEvent(state, event)
         await input.onState(state)

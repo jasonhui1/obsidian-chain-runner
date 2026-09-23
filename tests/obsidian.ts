@@ -17,6 +17,7 @@ export interface OpenModal {
   anchor?: { x: number; y: number }
   /** Answers it the way arrowing to a row and pressing enter would. */
   choose(index: number, query?: string): void
+  close(): void
 }
 
 export function resetModals(): void {
@@ -42,7 +43,11 @@ class BaseModal {
     openedModals.push(this as unknown as OpenModal)
   }
 
-  close(): void {}
+  close(): void {
+    this.onClose()
+  }
+
+  onClose(): void {}
 
   /** The real one draws; the anchoring that overrides it is checked on screen. */
   onOpen(): void {}

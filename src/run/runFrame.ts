@@ -28,7 +28,8 @@ const GAP = 24
 /** Room inside the frame around its panels. */
 export const FRAME_PADDING = 32
 /** Between the node and the frame its run produced. */
-const NODE_GAP = 80
+export const RUN_FRAME_GAP = 80
+const NODE_GAP = RUN_FRAME_GAP
 
 /** How much of the previous panel's width each hop of a relay keeps. */
 const SHRINK = 0.82

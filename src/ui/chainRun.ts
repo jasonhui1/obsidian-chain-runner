@@ -3,7 +3,7 @@ import { buildRunPanels, type RunLayout } from '../run/panels'
 import { settleRun, type RunState } from '../run/session'
 import { streamRun } from '../run/stream'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary, LayoutModel, RunRequest } from '../engine/types'
+import type { ChainSummary, LayoutModel, RunEvent, RunRequest } from '../engine/types'
 
 /**
  * A chain run landing as output notes, for both surfaces that land one: the
@@ -22,24 +22,30 @@ export interface ChainRunOutcome<P> {
   live?: LiveOutput<P>[]
 }
 
-export async function runIntoNotes<P extends PlacedPanel>(input: {
+type RunSource = { request: RunRequest; events?: never } | { request?: never; events: AsyncIterable<RunEvent> }
+
+export type RunIntoNotesInput<P extends PlacedPanel> = RunSource & {
   engine: EngineClient
   chain: ChainSummary
-  request: RunRequest
   signal: AbortSignal
   notify: (message: string) => void
   markOffline: () => void
-  /** Where the outputs land. An empty list is a run whose notes were all refused. */
-  place: (runId: string, layout: RunLayout) => Promise<LiveOutput<P>[]>
   holdReached: (runId: string, nodeId: string) => Promise<void>
   /** Said as the run goes, for a surface with somewhere to say it. */
   onProgress?: (model: LayoutModel | undefined) => Promise<void>
-}): Promise<ChainRunOutcome<P>> {
+  /** Where the outputs land. An empty list is a run whose notes were all refused. */
+  place: (runId: string, layout: RunLayout) => Promise<LiveOutput<P>[]>
+}
+
+export async function runIntoNotes<P extends PlacedPanel>(input: RunIntoNotesInput<P>): Promise<ChainRunOutcome<P>> {
   let live: LiveOutput<P>[] | undefined
 
+  const source: { request: RunRequest } | { events: AsyncIterable<RunEvent> } = input.events
+    ? { events: input.events }
+    : { request: input.request! }
   const outcome = await streamRun({
     engine: input.engine,
-    request: input.request,
+    ...source,
     signal: input.signal,
     onState: async state => {
       await input.onProgress?.(state.layout)
