@@ -22,7 +22,8 @@ export type RunProvenance = Omit<OutputNoteMeta, 'folder' | 'engineUrl'>
 /** A note a run holds open, to rewrite as its panel fills. */
 export interface OpenOutputNote {
   path: string
-  write(panel: RunPanel): Promise<void>
+  /** `force` rewrites unchanged content for the settled run's final embed refresh. */
+  write(panel: RunPanel, force?: boolean): Promise<void>
 }
 
 export interface OutputNotesDeps {
@@ -82,9 +83,9 @@ export class OutputNotes {
       let said = ''
       return {
         path,
-        write: async next => {
+        write: async (next, force = false) => {
           const content = outputNoteContent(next, meta)
-          if (content === said) return
+          if (!force && content === said) return
           said = content
           await store.modify(path, content)
         },

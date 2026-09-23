@@ -312,8 +312,8 @@ describe('outputs that fill in place', () => {
       { type: 'run_complete', runId: RUN_ID },
     ]
     await start()
-    // One create, one write when the hop lands; the tokens add no line.
-    expect(writes.filter(path => path === `chains/runs/${RUN_ID}/First.md`)).toHaveLength(2)
+    // One create, one write when the hop lands, and the settled refresh; tokens add no writes.
+    expect(writes.filter(path => path === `chains/runs/${RUN_ID}/First.md`)).toHaveLength(3)
   })
 
   it('writes a partial that has reached a new line, so the reader sees it fill', async () => {
