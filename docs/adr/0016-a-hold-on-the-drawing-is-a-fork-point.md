@@ -68,6 +68,11 @@ from the directing panel or the engine's site can therefore be drawn too.
 **A hold inside a pick row repeats the pattern** at the end of that row, and
 the rows below it move down to make room.
 
+**A candidate picked more than once stacks its rows beneath its first**, for
+example when it is continued again with another model. Its slot grows by a row,
+and the slots below move down, the same way they do for a nested hold. This is
+the one case where a pick moves the candidates below it.
+
 **Every run of a node that runs more than once gets its own hold column**, in
 its own frame, stacked as the frames are now. Picks in different runs may go at
 the same time.
