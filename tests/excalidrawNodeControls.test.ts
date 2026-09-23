@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildChainNode, chainNodeData } from '@/ui/chainNode'
-import { createExcalidrawSurface, type DrawingView, type RunSurface } from '@/ui/excalidraw'
+import { buildChainNode, chainNodeData, RUN_COUNT_LINK } from '@/ui/chainNode'
+import { createExcalidrawSurface, type DrawingView, type NodeSurface, type RunSurface } from '@/ui/excalidraw'
 import type { App } from 'obsidian'
 
 interface FakeElement {
@@ -91,7 +91,10 @@ describe('the Excalidraw node run-count control', () => {
     })
     expect(freshCounts.map(element => chainNodeData(element)?.role)).toEqual(['run-count-box', 'run-count'])
     expect(freshCounts.every(element => element.groupIds?.length === 1)).toBe(true)
+    expect(freshCounts.every(element => element.link === RUN_COUNT_LINK)).toBe(true)
     expect((surface as RunSurface).on(fresh.view).read({ nodeId: 'new-node' })?.runCount).toBe('1')
+    await (surface as NodeSurface).on(fresh.view).setRunCount({ nodeId: 'new-node' }, 5)
+    expect((surface as RunSurface).on(fresh.view).read({ nodeId: 'new-node' })?.runCount).toBe('5')
 
     const legacyElements = buildChainNode(chain, { nodeId: 'old-node' })
       .filter(element => element.role !== 'run-count' && element.role !== 'run-count-box')

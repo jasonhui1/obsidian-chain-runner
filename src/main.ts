@@ -269,7 +269,7 @@ export default class ChainRunnerPlugin extends Plugin {
     })
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return
-      // Older drawings get the editable count the first time they are opened.
+      // Older drawings get run-count data the first time they are opened.
       upgradeOpenRunCounts()
       // Each handler claims its own links and passes on what is not its; a
       // proposal's labels and a chain node's lines never overlap.

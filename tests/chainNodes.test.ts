@@ -28,6 +28,7 @@ let notices: string[]
 let placed: ChainNodeElement[][]
 let placedOn: unknown[]
 let parameterSet: { nodeId: string; value: string; on?: unknown }[]
+let runCountSet: { nodeId: string; count: number; on?: unknown }[]
 let onDrawing: string[]
 let unavailable: string | undefined
 let drawingOpen: boolean
@@ -82,6 +83,11 @@ function makeSurface(): NodeSurface {
         parameterSet.push({ nodeId: target.nodeId, value, on: view })
         return Promise.resolve(true)
       },
+      setRunCount: (target, count) => {
+        if (!onDrawing.includes(target.nodeId)) return Promise.resolve(false)
+        runCountSet.push({ nodeId: target.nodeId, count, on: view })
+        return Promise.resolve(true)
+      },
     }),
   }
 }
@@ -126,6 +132,7 @@ beforeEach(() => {
   chainSet = []
   running = []
   parameterSet = []
+  runCountSet = []
   onDrawing = ['n-1']
   unavailable = undefined
   drawingOpen = true
@@ -278,6 +285,66 @@ describe('clicking the node’s links', () => {
     lastModal()?.choose(0)
     await flush()
     expect(notices).toEqual([NODE_GONE])
+  })
+})
+
+describe('choosing how many times a node runs', () => {
+  it('offers 1 through 5 and writes the picked count back to that node', async () => {
+    for (let choice = 0; choice < 5; choice += 1) {
+      makeNodes().handleSelection(element({ role: 'run-count' }))
+      await flush()
+      expect(lastModal()?.placeholder).toBe('Choose run count')
+      lastModal()?.choose(choice)
+      await flush()
+    }
+
+    expect(runCountSet.map(one => one.count)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('offers a custom count and saves a valid entered value', async () => {
+    makeNodes().handleSelection(element({ role: 'run-count-box' }))
+    await flush()
+    lastModal()?.choose(5)
+
+    const custom = lastModal()
+    expect(custom?.placeholder).toBe('Enter custom run count (1–10)')
+    expect(custom?.anchor).toEqual({ x: 0, y: 0 })
+    expect(custom?.getSuggestions?.('7')).toEqual([7])
+    expect(custom?.getSuggestions?.('11')).toEqual([])
+    custom?.choose(0, '7')
+    await flush()
+
+    expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 7, on: undefined }])
+  })
+
+  it('opens the count menu on the group drill-in gesture', async () => {
+    const nodes = makeNodes()
+    nodes.handleDoubleClick()
+    nodes.handleSelection(element({ role: 'run-count' }))
+    await flush()
+
+    expect(lastModal()?.placeholder).toBe('Choose run count')
+  })
+
+  it('opens the count menu through its linked control too', async () => {
+    const view = { file: null }
+    expect(makeNodes().handleLinkClick(element({ role: 'run-count-box' }), view)).toBe(false)
+    await flush()
+    lastModal()?.choose(4)
+    await flush()
+
+    expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 5, on: view }])
+  })
+
+  it('does not write a custom count outside the supported range', async () => {
+    makeNodes().handleSelection(element({ role: 'run-count' }))
+    await flush()
+    lastModal()?.choose(5)
+
+    const custom = lastModal()
+    expect(custom?.emptyStateText).toBe('Type a whole number from 1 to 10')
+
+    expect(runCountSet).toEqual([])
   })
 })
 
@@ -470,6 +537,13 @@ describe('where the picker opens', () => {
     makeNodes().handleSelection(element({ role: 'parameter' }))
     await flush()
     expect(lastModal()?.anchor).toEqual({ x: 12, y: 24 })
+  })
+
+  it('anchors the run-count menu at the press that opened it', async () => {
+    clickSpot = { x: 80, y: 90 }
+    makeNodes().handleSelection(element({ role: 'run-count' }))
+    await flush()
+    expect(lastModal()?.anchor).toEqual({ x: 80, y: 90 })
   })
 
   it('anchors the dropdown that follows a chain pick to the same press', async () => {

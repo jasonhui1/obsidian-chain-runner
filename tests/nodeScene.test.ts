@@ -24,7 +24,7 @@ function nodeElements(): SceneShape[] {
   }))
 }
 
-describe('the editable run count', () => {
+describe('the stored run count', () => {
   it('reads the value shown on the node', () => {
     const scene = nodeElements().map(element =>
       chainNodeData(element)?.role === 'run-count' ? { ...element, text: '3', originalText: '3' } : element,

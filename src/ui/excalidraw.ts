@@ -6,6 +6,7 @@ import {
   nodeTargets,
   parameterEdits,
   reflowEdits,
+  runCountEdits,
   runCountUpgrade,
   runEdits,
   type ChainNodeElement,
@@ -256,6 +257,8 @@ export interface NodeDrawing extends RunCountMigration {
   place(elements: ChainNodeElement[]): Promise<void>
   /** Rewrites a node's parameter in place. `false` means the node is no longer there. */
   setParameter(target: NodeTarget, value: string): Promise<boolean>
+  /** Rewrites a node's run count in place. `false` means the node is no longer there. */
+  setRunCount(target: NodeTarget, count: number): Promise<boolean>
   /** Re-shapes a node around another chain. `false` means the node is no longer there. */
   setChain(target: NodeTarget, chain: ChainSummary, value?: string): Promise<boolean>
   /**
@@ -425,6 +428,10 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
 
   setParameter(target: NodeTarget, value: string): Promise<boolean> {
     return write(this.emptied(), parameterEdits(this.ea.getViewElements(), target, value))
+  }
+
+  setRunCount(target: NodeTarget, count: number): Promise<boolean> {
+    return write(this.emptied(), runCountEdits(this.ea.getViewElements(), target, count))
   }
 
   setChain(target: NodeTarget, chain: ChainSummary, value?: string): Promise<boolean> {

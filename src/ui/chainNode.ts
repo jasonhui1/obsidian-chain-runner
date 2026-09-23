@@ -53,7 +53,7 @@ export interface ChainNodeElement extends MaybeNodeElement {
   fontSize?: number
   textAlign?: 'left' | 'right' | 'center'
   strokeColor: string
-  /** The two lines a click means something on; absent everywhere else. */
+  /** An actionable element's own scheme; absent everywhere else. */
   link?: string
   customData: { chainRunner: ChainNodeData }
 }
@@ -74,6 +74,7 @@ export interface MaybeNodeElement {
 export const CHAIN_LINK = 'chain-runner://chain'
 export const PARAMETER_LINK = 'chain-runner://parameter'
 export const RUN_LINK = 'chain-runner://run'
+export const RUN_COUNT_LINK = 'chain-runner://run-count'
 
 /** Said in the dropdown line before anything has been picked. */
 export const UNSET_PARAMETER = 'unset'
@@ -92,6 +93,8 @@ const RUN_COUNT_BOX_WIDTH = 30
 const RUN_COUNT_BOX_HEIGHT = 24
 const RUN_COUNT_GAP = 8
 const RUN_COUNT_TEXT_WIDTH = 18
+export const MIN_RUN_COUNT = 1
+export const MAX_RUN_COUNT = 10
 const TITLE_SIZE = 20
 const LINE_SIZE = 16
 /** Excalidraw's own line height for its hand-drawn font. */
@@ -170,7 +173,7 @@ export function buildChainNode(chain: ChainSummary | undefined, options: ChainNo
     line('parameter', parameterLabel(parameter.name, options.parameterValue), LINE_SIZE, LINK_BLUE, PARAMETER_LINK)
   }
 
-  // The count sits after Run, in an editable box on the same line.
+  // The count picker sits after Run in a box on the same line.
   const runWidth = textWidth(RUN_LABEL, LINE_SIZE)
   const runHeight = Math.round(LINE_SIZE * LINE_HEIGHT)
   const controls = runControlLayout(0, WIDTH, runWidth)
@@ -324,6 +327,19 @@ export function parameterEdits<E extends MaybeNodeElement>(
     })
   }
   return edits
+}
+
+/** Rewrites the visible run count on the one node copy the reader picked. */
+export function runCountEdits<E extends MaybeNodeElement>(
+  scene: readonly E[],
+  target: NodeTarget,
+  count: number,
+): NodeEdit<E>[] {
+  for (const element of scene) {
+    const data = nodeElementData(element, target)
+    if (data?.role === 'run-count') return [{ element, text: String(count), data }]
+  }
+  return []
 }
 
 /** What the node becomes when its chain is changed (ADR-0009). */
@@ -505,7 +521,7 @@ export function reflowEdits<
   return edits
 }
 
-/** Adds the editable count to nodes already on a drawing before this field existed. */
+/** Adds run-count data to nodes already on a drawing before this field existed. */
 export function runCountUpgrade<E extends MaybeNodeElement & { width?: number; height?: number; text?: string }>(
   scene: readonly E[],
   target: NodeTarget,
@@ -549,6 +565,7 @@ function runCountElements(data: ChainNodeData, x: number, y: number): ChainNodeE
     width: RUN_COUNT_BOX_WIDTH,
     height: RUN_COUNT_BOX_HEIGHT,
     strokeColor: INK,
+    link: RUN_COUNT_LINK,
     customData: { chainRunner: { ...data, role: 'run-count-box' } },
   }
   const count: ChainNodeElement = {
@@ -562,6 +579,7 @@ function runCountElements(data: ChainNodeData, x: number, y: number): ChainNodeE
     fontSize: LINE_SIZE,
     textAlign: 'center',
     strokeColor: LINK_BLUE,
+    link: RUN_COUNT_LINK,
     customData: { chainRunner: { ...data, role: 'run-count' } },
   }
   return [box, count]

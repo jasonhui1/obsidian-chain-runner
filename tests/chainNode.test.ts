@@ -3,6 +3,7 @@ import {
   CHAIN_LINK,
   PARAMETER_LINK,
   RUN_LINK,
+  RUN_COUNT_LINK,
   UNSET_PARAMETER,
   UNSET_CHAIN,
   buildChainNode,
@@ -13,6 +14,7 @@ import {
   parameterEdits,
   parameterLabel,
   reflowEdits,
+  runCountEdits,
   runCountUpgrade,
 } from '@/ui/chainNode'
 import type { ChainNodeElement, NodeEdit } from '@/ui/chainNode'
@@ -48,14 +50,14 @@ describe('building a chain node', () => {
     expect(roles(build())).toEqual(['box', 'chain', 'moment', 'parameter', 'run-count-box', 'run-count', 'run'])
   })
 
-  it('puts an editable run count in a box beside Run', () => {
+  it('puts the run-count control in a box beside Run', () => {
     const elements = build()
     const run = byRole(elements, 'run')
     const field = byRole(elements, 'run-count')
     const box = byRole(elements, 'run-count-box')
 
     expect(field.text).toBe('1')
-    expect(field.link).toBeUndefined()
+    expect(field.link).toBe(RUN_COUNT_LINK)
     expect(box.shape).toBe('rect')
     expect(field.x).toBeGreaterThanOrEqual(box.x)
     expect(field.x + field.width).toBeLessThanOrEqual(box.x + box.width)
@@ -103,14 +105,14 @@ describe('building a chain node', () => {
     expect(byRole(build(), 'parameter').text).toBe(`audience ▾ ${UNSET_PARAMETER}`)
   })
 
-  it('links only the two lines a click means something on', () => {
+  it('links only the actionable lines', () => {
     expect(build().map(element => [element.role, element.link])).toEqual([
       ['box', undefined],
       ['chain', CHAIN_LINK],
       ['moment', undefined],
       ['parameter', PARAMETER_LINK],
-      ['run-count-box', undefined],
-      ['run-count', undefined],
+      ['run-count-box', RUN_COUNT_LINK],
+      ['run-count', RUN_COUNT_LINK],
       ['run', RUN_LINK],
     ])
   })
@@ -373,6 +375,19 @@ describe('changing which chain a node runs', () => {
     )
     const reshape = chainEdits(current, { nodeId: 'n-1' }, relay)
     expect(editText(reshape, 'run-count')).toBeUndefined()
+  })
+
+  it('changes the count label on the targeted node copy', () => {
+    const grouped = scene().map(element =>
+      chainNodeData(element)?.nodeId === 'n-1' ? { ...element, groupIds: ['g-1'] } : element,
+    )
+    const edits = runCountEdits(grouped, { nodeId: 'n-1', groupIds: ['g-1'] }, 5)
+    expect(edits).toHaveLength(1)
+    expect(edits[0]).toMatchObject({ text: '5', data: { nodeId: 'n-1', role: 'run-count' } })
+  })
+
+  it('does nothing when the selected node is gone', () => {
+    expect(runCountEdits(scene(), { nodeId: 'n-gone' }, 2)).toEqual([])
   })
 
   it('draws a line the old chain did not have, at its place on the drawing', () => {

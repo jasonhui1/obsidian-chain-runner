@@ -43,9 +43,10 @@ click as "no press in flight" and opened nothing. So a finished click is held,
 unclaimed, for half a second; the first selection to ask for it takes it, and a
 drag leaves nothing behind to take.
 
-**A single click reaches the two lines that open a picker, and not `▶ Run`.**
-Selecting a node is not asking to run it, and a run cannot be taken back — where
-a picker can be dismissed.
+**A one-element click report reaches the chain, parameter and count pickers, but
+not `▶ Run`.** Selecting a node is not asking to run it, and a run cannot be
+taken back — where a picker can be dismissed. On a grouped node, a click first
+selects the group; the line is named on the drill-in report described below.
 
 **`▶ Run` answers a double-click instead.** Two clicks are a deliberate gesture
 in a way one selection is not, so the reason to keep a run off the single click
@@ -131,8 +132,8 @@ from here is not available either: `selectElementsInView` returns early on an
 empty list.
 
 **Selecting a node from the keyboard opens nothing.** There is no press to
-settle, so there is no click. The two lines stay reachable by Ctrl/Cmd+click and
-by the palette.
+settle, so there is no click. The chain, parameter and count controls stay
+reachable by Ctrl/Cmd+click and the node's double-click drill-in.
 
 **The picker opens on pointer-up, not pointer-down.** A press that never
 releases — the window taking the pointer away without a `pointercancel`, say —

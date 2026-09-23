@@ -37,8 +37,8 @@ that does not claim them is loose on the scene, and the node stops moving and
 copying as one thing.
 
 **The chain-owned lines keep their left edge; only `y` and the box's height
-change.** Since #71, the right-aligned `run` label sits just before the editable
-count box at the box's right edge. Reshaping and reflow update the `x` positions
+change.** Since #71, the right-aligned `run` label sits just before the count
+picker box at the box's right edge. Reshaping and reflow update the `x` positions
 of that pair to keep them aligned, while leaving the count's words alone. The
 `run` line's words still belong to the run, not the chain.
 

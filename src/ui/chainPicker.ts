@@ -3,6 +3,7 @@ import { anchorModal } from './anchorModal'
 import { pickerRows, type Matcher, type PickerRow } from './pickerModel'
 import type { Point } from './panelSpot'
 import type { ChainSummary } from '../engine/types'
+import { MAX_RUN_COUNT, MIN_RUN_COUNT } from './chainNode'
 
 /**
  * The chain picker: purpose groups, the moment under each name, and a fuzzy
@@ -164,4 +165,73 @@ export class RunCountPicker extends FuzzySuggestModal<number> {
     this.picked = true
     this.onPick(count)
   }
+}
+
+export type NodeRunCountChoice = 1 | 2 | 3 | 4 | 5 | 'custom'
+
+/** The count menu attached to an Excalidraw chain node. */
+export class NodeRunCountPicker extends FuzzySuggestModal<NodeRunCountChoice> {
+  constructor(
+    app: App,
+    private readonly onPick: (choice: NodeRunCountChoice) => void,
+    readonly anchor?: Point,
+  ) {
+    super(app)
+    this.setPlaceholder('Choose run count')
+  }
+
+  override onOpen(): void {
+    super.onOpen()
+    if (this.anchor) anchorModal(this, this.anchor)
+  }
+
+  getItems(): NodeRunCountChoice[] {
+    return [1, 2, 3, 4, 5, 'custom']
+  }
+
+  getItemText(choice: NodeRunCountChoice): string {
+    return choice === 'custom' ? 'Custom' : String(choice)
+  }
+
+  onChooseItem(choice: NodeRunCountChoice): void {
+    this.onPick(choice)
+  }
+}
+
+/** A small number prompt reached through the node count menu's Custom choice. */
+export class CustomRunCountPicker extends SuggestModal<number> {
+  constructor(
+    app: App,
+    private readonly onPick: (count: number) => void,
+    readonly anchor?: Point,
+  ) {
+    super(app)
+    this.setPlaceholder(`Enter custom run count (${MIN_RUN_COUNT}–${MAX_RUN_COUNT})`)
+    this.emptyStateText = `Type a whole number from ${MIN_RUN_COUNT} to ${MAX_RUN_COUNT}`
+  }
+
+  override onOpen(): void {
+    super.onOpen()
+    if (this.anchor) anchorModal(this, this.anchor)
+  }
+
+  getSuggestions(query: string): number[] {
+    const count = parseCustomCount(query)
+    return count === undefined ? [] : [count]
+  }
+
+  renderSuggestion(count: number, el: HTMLElement): void {
+    el.createDiv({ text: count === 1 ? 'Run once' : `Run ${count} times` })
+  }
+
+  onChooseSuggestion(count: number): void {
+    this.onPick(count)
+  }
+}
+
+function parseCustomCount(value: string): number | undefined {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const count = Number(trimmed)
+  return Number.isInteger(count) && count >= MIN_RUN_COUNT && count <= MAX_RUN_COUNT ? count : undefined
 }

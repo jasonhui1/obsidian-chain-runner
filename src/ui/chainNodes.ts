@@ -1,5 +1,5 @@
 import type { App } from 'obsidian'
-import { ChainPicker, ParameterPicker } from './chainPicker'
+import { ChainPicker, CustomRunCountPicker, NodeRunCountPicker, ParameterPicker } from './chainPicker'
 import {
   buildChainNode,
   chainNodeData,
@@ -115,8 +115,8 @@ export class ChainNodes {
   }
 
   /**
-   * A plain click, which Excalidraw reports as a change of selection
-   * (ADR-0010). It reaches the two lines that open a picker; a run is not one,
+   * A one-element click report, which Excalidraw sends through selection
+   * (ADR-0010). It reaches the three controls that open a picker; Run is not one,
    * because selecting a node is not asking to run it and a run is not undone.
    */
   handleSelection(element: MaybeNodeElement, view?: DrawingView): void {
@@ -225,6 +225,31 @@ export class ChainNodes {
     const role = chainNodeRole(data.role)
     if (role === 'chain') void this.editChain(data, element, at, view)
     if (role === 'parameter') void this.editParameter(data, element, at, view)
+    if (role === 'run-count' || role === 'run-count-box') this.editRunCount(data, element, at, view)
+  }
+
+  /** The Run/count control: a few common choices, with a validated custom entry. */
+  private editRunCount(
+    data: ChainNodeData,
+    element: MaybeNodeElement,
+    at: Point | undefined,
+    view?: DrawingView,
+  ): void {
+    if (!this.usable()) return
+    const target = this.targetOf(data, element)
+    const save = (count: number): void => {
+      void this.onDrawing(async () => {
+        if (!(await this.deps.surface.on(view).setRunCount(target, count))) this.deps.notify(NODE_GONE)
+      })
+    }
+    new NodeRunCountPicker(
+      this.deps.app,
+      choice => {
+        if (choice === 'custom') new CustomRunCountPicker(this.deps.app, save, at).open()
+        else save(choice)
+      },
+      at,
+    ).open()
   }
 
   /** The chain line: the same picker the command opens, and the node re-shaped around the pick (ADR-0009). */

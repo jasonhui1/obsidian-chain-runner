@@ -1,4 +1,4 @@
-import { chainIsUnset, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
+import { chainIsUnset, MAX_RUN_COUNT, MIN_RUN_COUNT, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
 import type { DrawingView, NodeReading, PlacedOutput, RunDrawing, RunSurface } from './excalidraw'
 import type { Box } from './nodeScene'
 import type { NoteStore } from './noteStore'
@@ -422,7 +422,7 @@ function parseRunCount(value: string): number | undefined {
   const trimmed = value.trim()
   if (!/^\d+$/.test(trimmed)) return undefined
   const count = Number(trimmed)
-  return Number.isInteger(count) && count >= 1 && count <= 10 ? count : undefined
+  return Number.isInteger(count) && count >= MIN_RUN_COUNT && count <= MAX_RUN_COUNT ? count : undefined
 }
 
 function requestOf(plan: NodeRunPlan): { chainName: string; seedPrompt: string; paramValue?: string } {
