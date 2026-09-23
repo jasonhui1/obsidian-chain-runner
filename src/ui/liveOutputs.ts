@@ -56,7 +56,7 @@ export async function fillLiveOutputs<P>(
     const shown = { ...panel, text: shownText(panel) }
     if (!force && !worthWriting(output.written, shown)) continue
     output.written = { text: shown.text, state: shown.state }
-    await output.note.write(shown, force)
+    await output.note.write(shown, { rewriteUnchanged: force })
   }
 }
 
