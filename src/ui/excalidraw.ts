@@ -40,11 +40,13 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
-import { buildDirectLabel, cardProposal, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
+import { buildDirectLabel, cardProposal, directLabelRunId, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
+import { beforeHoldRow, buildHoldColumn, holdStamp, stampHold, type HoldStamp } from './holdColumn'
+import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
-import type { ChainSummary } from '../engine/types'
-import type { FramedPanel, RunFrame } from '../run/runFrame'
+import type { ChainSummary, HoldRecord } from '../engine/types'
+import { RUN_FRAME_GAP, type FramedPanel, type RunFrame } from '../run/runFrame'
 
 /**
  * The Excalidraw plugin, as this plugin reaches it (`docs/spike-ea.md`). What is
@@ -85,6 +87,7 @@ interface ExcalidrawAutomate {
   /** Feature-detected: the spike verified the other `add*` calls, not this one. */
   addFrame?(x: number, y: number, width: number, height: number, name?: string): string
   addText(x: number, y: number, text: string, formatting?: TextFormatting): string
+  getElements(): SceneElement[]
   getElement(id: string): SceneElement | undefined
   getViewElements(): SceneElement[]
   /** What the reader has selected. Feature-detected, like `addFrame`. */
@@ -120,6 +123,8 @@ interface ArrowFormatting {
 }
 
 interface TextFormatting {
+  box?: 'box'
+  boxPadding?: number
   width?: number
   textAlign?: string
   /** Off with a width given, a text element wraps on resize instead of scaling (ADR-0010). */
@@ -284,6 +289,10 @@ export interface RunDrawing extends RunCountMigration {
   setRunStatus(target: NodeTarget, status: NodeRunStatus): Promise<boolean>
   /** `false` means no frame could be made and the outputs landed loose. */
   placeRun(frame: RunFrame, outputs: readonly PlacedOutput[]): Promise<boolean>
+  /** Replaces only unreached cards in a newly started run with its waiting hold. */
+  placeHold(frame: RunFrame, hold: HoldRecord, pending: readonly number[]): Promise<void>
+  /** Makes enlarged waiting frames leave room for the other runs of the same click. */
+  stackRuns(runIds: readonly string[]): Promise<void>
 }
 
 export interface RunSurface extends Reachable {
@@ -484,10 +493,13 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
 
     // First, so the panels can name it as their container.
     const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
+    const madeFrame = frameId ? ea.getElement(frameId) : undefined
+    if (madeFrame) madeFrame.customData = { chainRunnerFrame: { runId: frame.runId } }
 
     for (const { placed, notePath } of outputs) {
       ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
       const element = embedNote(this.app, ea, placed.box, notePath)
+      if (element) element.customData = { chainRunnerPanel: { runId: frame.runId, index: placed.index } }
       // A scripted element has to claim its frame; only a drop is worked out.
       if (element && frameId) element.frameId = frameId
     }
@@ -505,6 +517,152 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     // Not repositioned to the cursor: the coordinates are the node's own.
     await save(ea, false)
     return frameId !== undefined
+  }
+
+  async placeHold(frame: RunFrame, hold: HoldRecord, pending: readonly number[]): Promise<void> {
+    const scene = this.ea.getViewElements()
+    const belonging = scene.find(element =>
+      element.type === 'frame' && frameRunId(element) === frame.runId && element.x === frame.box.x && element.y === frame.box.y,
+    )
+    const pendingSet = new Set(pending)
+    const unreached = scene.filter(element => {
+      const panel = panelStamp(element)
+      return panel?.runId === frame.runId && pendingSet.has(panel.index)
+    })
+    const directLabel = scene.find(element => directLabelRunId(element) === frame.runId && element.frameId === belonging?.id)
+    const prior = scene.filter(element => {
+      const stamp = holdStamp(element)
+      return stamp?.runId === frame.runId && stamp.role === 'column'
+    })
+    const reached = beforeHoldRow(frame, pending)
+    const reachedCards = scene.filter(element => {
+      const panel = panelStamp(element)
+      return panel?.runId === frame.runId && reached.some(placed => placed.index === panel.index)
+    })
+    const right = Math.max(
+      frame.box.x + 8,
+      ...reached.map(panel => panel.box.x + panel.box.width),
+      ...prior.map(element => (element.x ?? 0) + (element.width ?? 0)),
+    )
+    const column = buildHoldColumn(hold, right + 24, frame.box.y + 32)
+    const nextWidth = column.box.x + column.box.width + 32 - frame.box.x
+    const nextHeight = Math.max(
+      column.box.y + column.box.height,
+      ...reached.map(panel => panel.box.y + panel.box.height),
+    ) + 32 - frame.box.y
+    const ea = this.emptied()
+    if (belonging || unreached.length > 0 || directLabel || reachedCards.length > 0) {
+      ea.copyViewElementsToEAforEditing([...(belonging ? [belonging] : []), ...unreached, ...reachedCards, ...(directLabel ? [directLabel] : [])])
+      const actualFrame = belonging ? ea.getElement(belonging.id) : undefined
+      if (actualFrame) {
+        actualFrame.width = nextWidth
+        actualFrame.height = nextHeight
+        actualFrame.name = `${frame.name.slice(0, -frame.runId.length - 3)} · waiting`
+      }
+      for (const card of unreached) {
+        const copy = ea.getElement(card.id)
+        if (copy) copy.isDeleted = true
+      }
+      for (const card of reachedCards) {
+        const copy = ea.getElement(card.id)
+        const panel = panelStamp(card)
+        const placed = reached.find(one => one.index === panel?.index)
+        if (copy && placed) {
+          copy.x = placed.box.x
+          copy.y = placed.box.y
+        }
+      }
+      if (directLabel) {
+        const copy = ea.getElement(directLabel.id)
+        if (copy) {
+          const next = buildDirectLabel({ x: frame.box.x, y: frame.box.y, width: nextWidth, height: nextHeight }, frame.runId)
+          copy.x = next.x
+          copy.y = next.y
+        }
+      }
+    }
+    const columnStamp: HoldStamp = {
+      runId: frame.runId,
+      nodeId: hold.nodeId,
+      heading: '',
+      revision: hold.revision,
+      role: 'column',
+    }
+    ea.style.strokeColor = INK
+    const outline = ea.getElement(ea.addRect(column.box.x, column.box.y, column.box.width, column.box.height))
+    if (outline) {
+      outline.customData = stampHold(columnStamp)
+      if (belonging) outline.frameId = belonging.id
+    }
+    ea.style.fontSize = 16
+    const prompt = ea.getElement(ea.addText(column.prompt.box.x, column.prompt.box.y, column.prompt.text, {
+      width: column.prompt.box.width, autoResize: false,
+    }))
+    if (prompt) {
+      prompt.customData = stampHold(columnStamp)
+      if (belonging) prompt.frameId = belonging.id
+    }
+    for (const candidate of column.candidates) {
+      const stamp: HoldStamp = { ...columnStamp, heading: candidate.heading, role: 'candidate' }
+      ea.style.strokeColor = GREY
+      ea.style.strokeStyle = 'dashed'
+      const id = ea.addText(candidate.box.x, candidate.box.y, candidate.text, {
+        box: 'box', boxPadding: 12, width: candidate.box.width, textAlign: 'left',
+      })
+      const container = ea.getElement(id)
+      const bound = ea.getElements().find(element => element.type === 'text' && element.containerId === id)
+      for (const element of [container, bound]) {
+        if (!element) continue
+        element.customData = stampHold(stamp)
+        element.link = 'chain-runner://hold'
+        if (belonging) element.frameId = belonging.id
+      }
+      if (container) container.height = candidate.box.height - 36
+      if (bound) bound.text = bound.originalText = bound.rawText = candidate.text
+      ea.style.strokeColor = LINK_BLUE
+      ea.style.strokeStyle = 'solid'
+      const continueText = ea.getElement(ea.addText(candidate.continueAt.x, candidate.continueAt.y, '▶ Continue'))
+      if (continueText) {
+        continueText.customData = stampHold({ ...stamp, role: 'continue' })
+        if (belonging) continueText.frameId = belonging.id
+      }
+    }
+    ea.style.strokeColor = GREY
+    ea.style.strokeStyle = 'dashed'
+    const custom = ea.getElement(ea.addText(column.custom.x, column.custom.y, 'Write your own', {
+      box: 'box', boxPadding: 12, width: column.custom.width,
+    }))
+    if (custom) {
+      custom.customData = stampHold(columnStamp)
+      custom.height = column.custom.height
+      if (belonging) custom.frameId = belonging.id
+    }
+    await save(ea, false)
+  }
+
+  async stackRuns(runIds: readonly string[]): Promise<void> {
+    const scene = this.ea.getViewElements()
+    const runs = new Set(runIds)
+    const frames = scene.filter(element => element.type === 'frame' && runs.has(frameRunId(element) ?? ''))
+      .sort((left, right) => (left.y ?? 0) - (right.y ?? 0))
+    const shifts = new Map<string, number>()
+    let bottom: number | undefined
+    for (const frame of frames) {
+      const y = frame.y ?? 0
+      const shifted = bottom === undefined ? y : Math.max(y, bottom + RUN_FRAME_GAP)
+      if (shifted !== y) shifts.set(frame.id, shifted - y)
+      bottom = shifted + (frame.height ?? 0)
+    }
+    if (shifts.size === 0) return
+    const moved = scene.filter(element => shifts.has(element.id) || (element.frameId && shifts.has(element.frameId)))
+    const ea = this.emptied()
+    ea.copyViewElementsToEAforEditing(moved)
+    for (const element of moved) {
+      const copy = ea.getElement(element.id)
+      const shift = shifts.get(element.frameId ?? '') ?? shifts.get(element.id)
+      if (copy && shift) copy.y = (copy.y ?? 0) + shift
+    }
+    await save(ea, false)
   }
 
   async followRerun(
@@ -648,8 +806,28 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
 
   /** The run the reader's selection belongs to: a Direct label's, or a card's output note's. */
   selectedRun(): string | undefined {
-    return selectedRunId(selectedElements(this.ea), noteFrontmatter(this.app, this.view))
+    const selected = selectedElements(this.ea)
+    return selected.map(element => holdStamp(element)?.runId).find(Boolean)
+      ?? selectedRunId(selected, noteFrontmatter(this.app, this.view))
   }
+}
+
+function frameRunId(element: SceneElement): string | undefined {
+  const data = element.customData
+  if (!data || typeof data !== 'object') return undefined
+  const stamp = (data as Record<string, unknown>).chainRunnerFrame
+  if (!stamp || typeof stamp !== 'object') return undefined
+  const runId = (stamp as Record<string, unknown>).runId
+  return typeof runId === 'string' ? runId : undefined
+}
+
+function panelStamp(element: SceneElement): { runId: string; index: number } | undefined {
+  const data = element.customData
+  if (!data || typeof data !== 'object') return undefined
+  const stamp = (data as Record<string, unknown>).chainRunnerPanel
+  if (!stamp || typeof stamp !== 'object') return undefined
+  const { runId, index } = stamp as Record<string, unknown>
+  return typeof runId === 'string' && typeof index === 'number' ? { runId, index } : undefined
 }
 
 /**

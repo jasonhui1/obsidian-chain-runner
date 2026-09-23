@@ -3,7 +3,7 @@ import { EngineOfflineError, RequestAbortedError } from '../engine/transport'
 import { answer } from './answer'
 import { applyRunEvent, emptyRunState, type RunState } from './session'
 import type { EngineClient } from '../engine/client'
-import { isEvent, type Capabilities, type RunEvent, type RunRequest } from '../engine/types'
+import { isEvent, type Capabilities, type HoldRecord, type RunEvent, type RunRequest } from '../engine/types'
 
 /** One run, from launch to the last event, for both surfaces that show one. */
 
@@ -37,6 +37,7 @@ type StreamRunBase = {
   onState: (state: RunState) => void | Promise<void>
   /** Each hold the run reaches; several can open in one wave. */
   holdReached: (runId: string, nodeId: string) => Promise<void>
+  onWaiting?: (runId: string, hold: HoldRecord, state: RunState) => Promise<void>
   notify: (message: string) => void
   markOffline: () => void
 }
@@ -69,7 +70,10 @@ export async function streamRun(input: StreamRunInput): Promise<DrawnRun> {
       onEvent: async event => {
         state = applyRunEvent(state, event)
         await input.onState(state)
-        if (isEvent(event, 'run_waiting')) await input.holdReached(event.runId, event.nodeId)
+        if (isEvent(event, 'run_waiting')) {
+          await input.holdReached(event.runId, event.nodeId)
+          await input.onWaiting?.(event.runId, event.hold, state)
+        }
       },
     })
     if (answered.kind === 'refused') {

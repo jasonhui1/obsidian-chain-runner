@@ -3,7 +3,7 @@ import { buildRunPanels, type RunLayout } from '../run/panels'
 import { settleRun, type RunState } from '../run/session'
 import { streamRun, type RunEventSource } from '../run/stream'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary, LayoutModel } from '../engine/types'
+import type { ChainSummary, HoldRecord, LayoutModel } from '../engine/types'
 
 /**
  * A chain run landing as output notes, for both surfaces that land one: the
@@ -14,6 +14,7 @@ import type { ChainSummary, LayoutModel } from '../engine/types'
 
 export interface ChainRunOutcome<P> {
   state: RunState
+  waiting: boolean
   /** What stopped the run reaching the end. Already said, so it is not said twice. */
   failure?: string
   /** Dropped rather than finished: the plugin unloaded. */
@@ -29,6 +30,7 @@ export type RunIntoNotesInput<P extends PlacedPanel> = RunEventSource & {
   notify: (message: string) => void
   markOffline: () => void
   holdReached: (runId: string, nodeId: string) => Promise<void>
+  onWaiting?: (runId: string, hold: HoldRecord, layout: RunLayout) => Promise<void>
   /** Said as the run goes, for a surface with somewhere to say it. */
   onProgress?: (model: LayoutModel | undefined) => Promise<void>
   /** Where the outputs land. An empty list is a run whose notes were all refused. */
@@ -37,6 +39,7 @@ export type RunIntoNotesInput<P extends PlacedPanel> = RunEventSource & {
 
 export async function runIntoNotes<P extends PlacedPanel>(input: RunIntoNotesInput<P>): Promise<ChainRunOutcome<P>> {
   let live: LiveOutput<P>[] | undefined
+  let waiting = false
 
   const source: RunEventSource = input.events
     ? { events: input.events }
@@ -55,16 +58,21 @@ export async function runIntoNotes<P extends PlacedPanel>(input: RunIntoNotesInp
       if (live) await fillLiveOutputs(live, layout, false)
     },
     holdReached: input.holdReached,
+    onWaiting: async (runId, hold, state) => {
+      waiting = true
+      await input.onWaiting?.(runId, hold, buildRunPanels(input.chain, state.layout, state.nodes))
+    },
     notify: input.notify,
     markOffline: input.markOffline,
   })
-  if (outcome.aborted) return { state: outcome.state, aborted: true, ...(live ? { live } : {}) }
+  if (outcome.aborted) return { state: outcome.state, waiting, aborted: true, ...(live ? { live } : {}) }
 
   const state = settleRun(outcome.state, outcome.failure)
   // A failed run's last frame carries the outcome, so nothing is settled here (ADR-0003).
   if (live) await fillLiveOutputs(live, buildRunPanels(input.chain, state.layout, state.nodes), true)
   return {
     state,
+    waiting,
     aborted: false,
     ...(outcome.failure ? { failure: outcome.failure } : {}),
     ...(live ? { live } : {}),

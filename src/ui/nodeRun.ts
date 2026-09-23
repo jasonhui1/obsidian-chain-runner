@@ -216,6 +216,9 @@ export class NodeRun {
       return
     }
 
+    let frame: RunFrame | undefined
+    let waiting = false
+
     const outcome = await runIntoNotes({
       engine: this.deps.engine,
       chain,
@@ -224,13 +227,18 @@ export class NodeRun {
       notify: this.deps.notify,
       markOffline: this.deps.markOffline,
       holdReached: this.deps.holdReached,
+      onWaiting: async (runId, hold, layout) => {
+        waiting = true
+        if (!frame) await this.open(runId, { kind: layout.kind, panels: [] }, runPlan, plan.node, placed => { frame = placed })
+        if (frame) await touch(async drawing => { await drawing.placeHold(frame!, hold, pendingIndexes(layout)); return true })
+      },
       onProgress: model => say(progress(model)),
-      place: (runId, layout) => this.open(runId, layout, runPlan),
+      place: (runId, layout) => this.open(runId, layout, runPlan, plan.node, placed => { frame = placed }),
     })
     // Dropped by an unload: the notes stay as a record of a real run.
     if (outcome.aborted) return
 
-    await this.finish(outcome, runPlan)
+    await this.finish(outcome, runPlan, waiting)
   }
 
   /** Runs one variance member per stream, keeping each run's output on its own frame. */
@@ -255,9 +263,11 @@ export class NodeRun {
       this.deps.markOffline()
     }
     let nextFrameY = plan.node.y
+    const stacked: RunFrame[] = []
 
-    const members = queues.map((events, instance) =>
-      runIntoNotes({
+    const members = queues.map((events, instance) => {
+      let frame: RunFrame | undefined
+      return runIntoNotes({
         engine: this.deps.engine,
         chain: plan.chain,
         events,
@@ -265,16 +275,26 @@ export class NodeRun {
         notify,
         markOffline,
         holdReached: this.deps.holdReached,
+        onWaiting: async (runId, hold, layout) => {
+          if (!frame) await this.open(runId, { kind: layout.kind, panels: [] }, plan, { ...plan.node, y: nextFrameY }, placed => {
+            frame = placed
+            stacked.push(placed)
+            nextFrameY = placed.box.y + placed.box.height + RUN_FRAME_GAP
+          })
+          if (frame) await plan.touch(async drawing => { await drawing.placeHold(frame!, hold, pendingIndexes(layout)); return true })
+        },
         onProgress: model => {
           layouts[instance] = model
           return say(varianceProgress(layouts))
         },
         place: (runId, layout) =>
-          this.open(runId, layout, plan, { ...plan.node, y: nextFrameY }, frame => {
-            nextFrameY = frame.box.y + frame.box.height + RUN_FRAME_GAP
+          this.open(runId, layout, plan, { ...plan.node, y: nextFrameY }, placed => {
+            frame = placed
+            stacked.push(placed)
+            nextFrameY = placed.box.y + placed.box.height + RUN_FRAME_GAP
           }),
-      }),
-    )
+      })
+    })
     const allMembers = Promise.allSettled(members)
 
     let groupId: string | undefined
@@ -310,6 +330,7 @@ export class NodeRun {
       outcomes.push(member.value)
     }
     if (controller.signal.aborted || outcomes.some(outcome => outcome.aborted)) return
+    if (stacked.length > 1) await plan.touch(async drawing => { await drawing.stackRuns(stacked.map(frame => frame.runId)); return true })
 
     const failures: string[] = []
     for (const outcome of outcomes) {
@@ -321,7 +342,7 @@ export class NodeRun {
         failures.push(NOTHING_WRITTEN)
         notify(NOTHING_WRITTEN)
       }
-      if (!outcome.live && outcome.state.runId) notify(NO_OUTPUTS)
+      if (!outcome.live && outcome.state.runId && !outcome.waiting) notify(NO_OUTPUTS)
     }
     if (protocolFailure) failures.push(protocolFailure)
     if (!groupId && !sourceFailure && !protocolFailure) {
@@ -330,7 +351,7 @@ export class NodeRun {
       notify(failure)
     }
 
-    await say(failures.length > 0 ? { kind: 'failed', error: failures[0] } : { kind: 'done' })
+    await say(failures.length > 0 ? { kind: 'failed', error: failures[0] } : outcomes.some(outcome => outcome.waiting) ? { kind: 'waiting' } : { kind: 'done' })
   }
 
   /** One empty note per declared output, placed in the frame. */
@@ -363,12 +384,12 @@ export class NodeRun {
    * The outputs take their final text and the node says how it went. A run that
    * produced no panels is done, not failed — an empty answer is still an answer.
    */
-  private async finish(run: ChainRunOutcome<FramedPanel>, plan: NodeRunPlan): Promise<void> {
+  private async finish(run: ChainRunOutcome<FramedPanel>, plan: NodeRunPlan, waiting: boolean): Promise<void> {
     const { target, touch } = plan
     const error = runFailure(run.state)
     if (error && error !== run.failure) this.deps.notify(error)
     // The reason goes onto the node too: a notice is gone when the reader looks back.
-    const settled: NodeRunStatus = error ? { kind: 'failed', error } : { kind: 'done' }
+    const settled: NodeRunStatus = error ? { kind: 'failed', error } : waiting ? { kind: 'waiting' } : { kind: 'done' }
 
     // Nothing was placed: a run that never named itself failed, and one that named
     // itself and declared no panels gave an empty answer.
@@ -378,7 +399,7 @@ export class NodeRun {
         await touch(drawing => drawing.setRunStatus(target, { kind: 'failed', ...(error ? { error } : {}) }))
         return
       }
-      this.deps.notify(NO_OUTPUTS)
+      if (!waiting) this.deps.notify(NO_OUTPUTS)
     }
     await touch(drawing => drawing.setRunStatus(target, settled))
   }
@@ -423,6 +444,10 @@ function progressForPanels(panels: readonly LayoutPanel[]): NodeRunStatus {
     done: panels.filter(panel => panel.state !== 'pending').length,
     total: panels.length,
   }
+}
+
+function pendingIndexes(layout: RunLayout): number[] {
+  return layout.panels.flatMap((panel, index) => panel.state === 'pending' ? [index] : [])
 }
 
 function requestOf(plan: NodeRunPlan): { chainName: string; seedPrompt: string; paramValue?: string } {

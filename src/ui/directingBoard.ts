@@ -72,6 +72,7 @@ export class DirectingBoard {
   private stopWatching: (() => void) | undefined
   /** Counts draws, so a slow read overtaken by a later draw draws nothing. */
   private draws = 0
+  private focusHoldId: string | undefined
 
   constructor(
     private readonly root: HTMLElement,
@@ -82,9 +83,10 @@ export class DirectingBoard {
   }
 
   /** Shows a run afresh, on the named proposal's tab or else the Run tab; `hold` is what the hold module answered for it. */
-  show(runId: string, hold: Hold | undefined, proposal?: string): void {
+  show(runId: string, hold: Hold | undefined, proposal?: string, holdId?: string): void {
     this.unclamped.clear()
     this.tab = proposal
+    this.focusHoldId = holdId
     this.draw(stateOf(hold, runId))
     this.tabOpened()
   }
@@ -589,6 +591,7 @@ export class DirectingBoard {
   /** A hold the run waits at: its question, and a checkbox per candidate. */
   private waitingAt(body: HTMLElement, waiting: HoldPick, owner: Hold): void {
     const el = this.section(body, `waiting ${waiting.nodeId}`, `Waiting at ${waiting.nodeId}`)
+    if (waiting.nodeId === this.focusHoldId) el.scrollIntoView?.({ block: 'nearest' })
     el.classList.add(`${CLS}-hold`)
     if (waiting.prompt) this.add(el, 'div', '', waiting.prompt)
     if (waiting.candidates.length === 0) this.add(el, 'div', `${CLS}-faint`, 'No candidates')

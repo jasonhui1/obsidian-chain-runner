@@ -643,6 +643,7 @@ export type NodeRunStatus =
   | { kind: 'idle' }
   | { kind: 'running'; done: number; total?: number }
   | { kind: 'done' }
+  | { kind: 'waiting' }
   /** `error` is the engine's own words for what went wrong, when it had any. */
   | { kind: 'failed'; error?: string }
 
@@ -655,6 +656,7 @@ export function runLabel(status: NodeRunStatus): string {
     return status.total === undefined ? '⏳ running' : `⏳ ${status.done}/${status.total}`
   }
   if (status.kind === 'done') return `✓ done · ${RUN_LABEL}`
+  if (status.kind === 'waiting') return '⏸ waiting for you'
   if (status.kind === 'failed') return `✕ ${failureWords(status.error)} · ${RUN_LABEL}`
   return RUN_LABEL
 }

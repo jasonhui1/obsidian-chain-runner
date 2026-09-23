@@ -1,5 +1,6 @@
 import type { DrawingView, SelectionSurface } from './excalidraw'
 import { directLabelRunId } from './runLabel'
+import { holdStamp } from './holdColumn'
 import { UNREACHABLE_DRAWING } from './onDrawing'
 import type { Point } from './panelSpot'
 
@@ -14,6 +15,7 @@ export interface DirectFromDrawingDeps {
   surface: SelectionSurface
   direct: (runId: string) => Promise<void>
   showProposal: (runId: string, proposal: string) => Promise<void>
+  showHold: (runId: string, nodeId: string) => Promise<void>
   notify: (message: string) => void
   /** Where the press behind a selection settled, or `undefined` for a drag (ADR-0010). */
   clickSpot: (settled: (spot: Point | undefined) => void) => void
@@ -24,6 +26,11 @@ export class DirectFromDrawing {
 
   /** Ctrl/Cmd+click on the label. `true` passes on a link that is not ours. */
   handleLinkClick(element: { customData?: unknown }): boolean {
+    const candidate = holdStamp(element)
+    if (candidate?.role === 'candidate') {
+      void this.deps.showHold(candidate.runId, candidate.nodeId)
+      return false
+    }
     const runId = directLabelRunId(element)
     if (!runId) return true
     void this.deps.direct(runId)
@@ -32,6 +39,11 @@ export class DirectFromDrawing {
 
   /** A plain click on the label or a card, once the press is known not to be a drag. */
   handleSelection(element: { customData?: unknown }, view: DrawingView): void {
+    const candidate = holdStamp(element)
+    if (candidate?.role === 'candidate') {
+      this.deps.clickSpot(spot => { if (spot) void this.deps.showHold(candidate.runId, candidate.nodeId) })
+      return
+    }
     const runId = directLabelRunId(element)
     const card = runId ? undefined : this.deps.surface.cardProposal(element, view)
     if (!runId && !card) return

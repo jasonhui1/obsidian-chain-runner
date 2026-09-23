@@ -59,7 +59,7 @@ export class DirectingView extends ItemView {
   }
 
   /** Shows the hold the hold module answered for `runId`, on a proposal's tab when one is named; none is its missing note. */
-  show(runId: string, hold: Hold | undefined, proposal?: string): void {
-    this.board.show(runId, hold, proposal)
+  show(runId: string, hold: Hold | undefined, proposal?: string, holdId?: string): void {
+    this.board.show(runId, hold, proposal, holdId)
   }
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { DirectFromDrawing, SELECT_A_RUN } from '@/ui/directFromDrawing'
 import { buildDirectLabel } from '@/ui/runLabel'
+import { stampHold } from '@/ui/holdColumn'
 import type { Point } from '@/ui/panelSpot'
 
 /** Directing a run from the drawing: the label's two clicks, and the palette command on a selection. */
@@ -12,6 +13,7 @@ const label = buildDirectLabel({ x: 0, y: 0, width: 1000, height: 400 }, RUN)
 
 let directed: string[]
 let shown: { runId: string; proposal: string }[]
+let shownHolds: { runId: string; nodeId: string }[]
 let cards: Map<unknown, { runId: string; proposal: string }>
 let notices: string[]
 let selected: string | undefined
@@ -33,6 +35,10 @@ function make(): DirectFromDrawing {
       shown.push({ runId, proposal })
       return Promise.resolve()
     },
+    showHold: (runId, nodeId) => {
+      shownHolds.push({ runId, nodeId })
+      return Promise.resolve()
+    },
     notify: message => void notices.push(message),
     clickSpot: settled => settled(settleWith),
   })
@@ -41,6 +47,7 @@ function make(): DirectFromDrawing {
 beforeEach(() => {
   directed = []
   shown = []
+  shownHolds = []
   cards = new Map()
   notices = []
   selected = undefined
@@ -61,6 +68,13 @@ describe('handleLinkClick', () => {
 })
 
 describe('handleSelection', () => {
+  it('opens the selected candidate at its hold and ignores Continue', () => {
+    const candidate = { runId: RUN, nodeId: 'hold-idea', heading: 'Candidate 1', revision: 3, role: 'candidate' as const }
+    const direct = make()
+    direct.handleSelection({ customData: stampHold(candidate) }, view)
+    direct.handleSelection({ customData: stampHold({ ...candidate, role: 'continue' }) }, view)
+    expect(shownHolds).toEqual([{ runId: RUN, nodeId: 'hold-idea' }])
+  })
   it('directs the label’s run on a plain click', () => {
     make().handleSelection(label, view)
     expect(directed).toEqual([RUN])
@@ -127,6 +141,7 @@ describe('directSelected', () => {
       },
       direct: () => Promise.resolve(),
       showProposal: () => Promise.resolve(),
+      showHold: () => Promise.resolve(),
       notify: message => void notices.push(message),
       clickSpot: () => {},
     })

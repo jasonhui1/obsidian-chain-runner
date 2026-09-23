@@ -61,6 +61,8 @@ let varianceRequests: VarianceRequest[]
 let notices: string[]
 let labels: string[]
 let framed: { frame: RunFrame; notes: string[] }[]
+let columns: { frame: RunFrame; nodeId: string; pending: readonly number[] }[]
+let stackedRuns: string[][]
 let store: MemoryNoteStore
 let vault: Record<string, string>
 let offline: number
@@ -158,6 +160,14 @@ function makeRun(): NodeRun {
           framed.push({ frame, notes: outputs.map(output => output.notePath) })
           return Promise.resolve(canFrame)
         },
+        placeHold: (frame, hold, pending) => {
+          columns.push({ frame, nodeId: hold.nodeId, pending })
+          return Promise.resolve()
+        },
+        stackRuns: runIds => {
+          stackedRuns.push([...runIds])
+          return Promise.resolve()
+        },
       }
     },
   }
@@ -228,6 +238,8 @@ beforeEach(() => {
   notices = []
   labels = []
   framed = []
+  columns = []
+  stackedRuns = []
   canFrame = true
   boundOn = []
   unbindable = undefined
@@ -435,12 +447,26 @@ describe('what the node says', () => {
     ])
   })
 
-  it('hands on each hold a run reached, and says it is done', async () => {
+  it('hands on each hold a run reached, replaces unreached panels and says it is waiting', async () => {
     const waitingAt = (nodeId: string): RunEvent => ({ type: 'run_waiting', runId: RUN_ID, nodeId, hold: { ...HOLD, nodeId } })
-    events = [...finishes().slice(0, -1), waitingAt('pick'), waitingAt('pick-2')]
+    events = [{ type: 'run_start', runId: RUN_ID }, layout(['First', 'Survivor'], 1), waitingAt('pick'), waitingAt('pick-2')]
     await start()
     expect(held).toEqual([`${RUN_ID} pick`, `${RUN_ID} pick-2`])
-    expect(labels.at(-1)).toBe(runLabel({ kind: 'done' }))
+    expect(columns.map(column => column.nodeId)).toEqual(['pick', 'pick-2'])
+    expect(columns.map(column => column.pending)).toEqual([[1], [1]])
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'waiting' }))
+  })
+
+  it('draws a waiting hold even when no output panel has been declared', async () => {
+    events = [
+      { type: 'run_start', runId: RUN_ID },
+      { type: 'run_waiting', runId: RUN_ID, nodeId: 'pick', hold: HOLD },
+    ]
+    await start()
+    expect(framed).toHaveLength(1)
+    expect(columns.map(column => column.nodeId)).toEqual(['pick'])
+    expect(notices).not.toContain(NO_OUTPUTS)
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'waiting' }))
   })
 
   it('hands on no hold for a run that completed', async () => {
@@ -567,6 +593,23 @@ describe('variance runs', () => {
     const stacked = [...framed].sort((left, right) => left.frame.box.y - right.frame.box.y)
     expect(stacked[0]?.frame.box.y).toBe(reading?.box.y)
     expect(stacked[0]!.frame.box.y + stacked[0]!.frame.box.height).toBeLessThanOrEqual(stacked[1]!.frame.box.y)
+  })
+
+  it('gives each waiting run its own column and restacks their enlarged frames', async () => {
+    reading!.runCount = '2'
+    varianceEvents = [
+      member(0, { type: 'run_start', runId: RUN_ID }),
+      member(1, { type: 'run_start', runId: SECOND_RUN_ID }),
+      member(0, layout(['First', 'Survivor'], 1)),
+      member(1, layout(['Second', 'Survivor'], 1)),
+      member(0, { type: 'run_waiting', runId: RUN_ID, nodeId: 'pick', hold: HOLD }),
+      member(1, { type: 'run_waiting', runId: SECOND_RUN_ID, nodeId: 'pick', hold: HOLD }),
+      { type: 'variance_complete', groupId: 'group-1', runIds: [RUN_ID, SECOND_RUN_ID] },
+    ]
+    await start()
+    expect(columns.map(column => column.frame.runId).sort()).toEqual([RUN_ID, SECOND_RUN_ID].sort())
+    expect(stackedRuns).toEqual([[RUN_ID, SECOND_RUN_ID]])
+    expect(labels.at(-1)).toBe(runLabel({ kind: 'waiting' }))
   })
 
   it('rejects a count that is not an integer from one through ten', async () => {

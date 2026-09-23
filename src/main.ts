@@ -241,18 +241,19 @@ export default class ChainRunnerPlugin extends Plugin {
         }),
     )
     // From the drawing, a hold opens in the directing panel, brought up to date or written first.
-    const showOnPanel = async (runId: string, proposal?: string): Promise<void> => {
+    const showOnPanel = async (runId: string, proposal?: string, holdId?: string): Promise<void> => {
       const hold = (await holds.refresh(runId)) ?? (await holds.write(runId))
       const panel = await this.openSidebarView(
         DIRECTING_VIEW_TYPE,
         (view): view is DirectingView => view instanceof DirectingView,
       )
-      panel?.show(runId, hold, proposal)
+      panel?.show(runId, hold, proposal, holdId)
     }
     const directFromDrawing = new DirectFromDrawing({
       surface,
       direct: runId => showOnPanel(runId),
       showProposal: (runId, proposal) => showOnPanel(runId, proposal),
+      showHold: (runId, nodeId) => showOnPanel(runId, undefined, nodeId),
       ...sharedDeps,
       clickSpot: settled => clicks.onSettled(settled),
     })

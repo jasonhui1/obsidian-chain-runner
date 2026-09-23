@@ -36,6 +36,7 @@ code enforces is 2.0.0; every call below predates it, but "predates" is not
 | `link` rewritten on a copied embeddable, `name` on a copied frame | #45 — **written, not run**: how a landed rerun points a card at the new run's note and retitles its frame |
 | `getAPI(view)`, and `reset()` keeping the view bound | #63 — **read, not run**, at 2.26.4 only: a fresh EA instance, constructed with `targetView` set, pushed onto a weak list |
 | `addElementsToView` returning `false` | #63 — **read, not run**: only when the view has unloaded; nothing is thrown, so a write to a closed drawing is silent unless checked |
+| `addText` with `box: "box"` for a candidate, then setting the bound text's `rawText` and the box's height | #74 — **written, not run**: the spike attested the box/text pair, but has not checked this later size and save in a vault |
 
 `addFrame`, `addArrow`, `getViewSelectedElements` and
 `getViewFileForImageElement` are feature-detected rather than assumed. A build
