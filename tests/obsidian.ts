@@ -93,8 +93,14 @@ export class Modal extends BaseModal {
     this.contentEl = testElement('div')
     this.modalEl.append(this.titleEl, this.contentEl)
     this.containerEl.append(this.modalEl)
+    document.body.append(this.containerEl)
     openedModals.push(this as unknown as OpenModal)
     this.onOpen()
+  }
+
+  override close(): void {
+    this.containerEl?.remove()
+    super.close()
   }
 }
 

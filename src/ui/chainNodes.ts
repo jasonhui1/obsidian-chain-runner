@@ -1,5 +1,5 @@
 import type { App } from 'obsidian'
-import { ChainPicker, CustomRunCountModal, NodeRunCountPicker, ParameterPicker } from './chainPicker'
+import { ChainPicker, NodeRunCountPicker, ParameterPicker } from './chainPicker'
 import {
   buildChainNode,
   chainNodeData,
@@ -228,7 +228,7 @@ export class ChainNodes {
     if (role === 'run-count' || role === 'run-count-box') this.editRunCount(data, element, at, view)
   }
 
-  /** The Run/count control: a few common choices, with a validated custom entry. */
+  /** The Run/count control: quick choices and a focused, validated number field. */
   private editRunCount(
     data: ChainNodeData,
     element: MaybeNodeElement,
@@ -242,14 +242,7 @@ export class ChainNodes {
         if (!(await this.deps.surface.on(view).setRunCount(target, count))) this.deps.notify(NODE_GONE)
       })
     }
-    new NodeRunCountPicker(
-      this.deps.app,
-      choice => {
-        if (choice === 'custom') new CustomRunCountModal(this.deps.app, save, at).open()
-        else save(choice)
-      },
-      at,
-    ).open()
+    new NodeRunCountPicker(this.deps.app, save, at).open()
   }
 
   /** The chain line: the same picker the command opens, and the node re-shaped around the pick (ADR-0009). */

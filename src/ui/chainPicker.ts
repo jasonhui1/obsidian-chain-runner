@@ -167,41 +167,11 @@ export class RunCountPicker extends FuzzySuggestModal<number> {
   }
 }
 
-export type NodeRunCountChoice = 1 | 2 | 3 | 4 | 5 | 'custom'
+const QUICK_NODE_RUN_COUNTS = [1, 2, 3, 4, 5] as const
+const NODE_RUN_COUNT_SIZE: Size = { width: 320, height: 260 }
 
-/** The count menu attached to an Excalidraw chain node. */
-export class NodeRunCountPicker extends FuzzySuggestModal<NodeRunCountChoice> {
-  constructor(
-    app: App,
-    private readonly onPick: (choice: NodeRunCountChoice) => void,
-    readonly anchor?: Point,
-  ) {
-    super(app)
-    this.setPlaceholder('Choose run count')
-  }
-
-  override onOpen(): void {
-    super.onOpen()
-    if (this.anchor) anchorModal(this, this.anchor)
-  }
-
-  getItems(): NodeRunCountChoice[] {
-    return [1, 2, 3, 4, 5, 'custom']
-  }
-
-  getItemText(choice: NodeRunCountChoice): string {
-    return choice === 'custom' ? 'Custom' : String(choice)
-  }
-
-  onChooseItem(choice: NodeRunCountChoice): void {
-    this.onPick(choice)
-  }
-}
-
-const CUSTOM_COUNT_SIZE: Size = { width: 300, height: 190 }
-
-/** A number field for counts outside the quick choices. */
-export class CustomRunCountModal extends Modal {
+/** The count picker attached to an Excalidraw chain node. */
+export class NodeRunCountPicker extends Modal {
   constructor(
     app: App,
     private readonly onPick: (count: number) => void,
@@ -211,27 +181,33 @@ export class CustomRunCountModal extends Modal {
   }
 
   override onOpen(): void {
-    this.titleEl.setText('Custom run count')
-
+    this.titleEl.setText('Choose run count')
     const form = this.contentEl.createEl('form', { cls: 'chain-runner-run-count-form' })
-    const field = form.createDiv({ cls: 'setting-item chain-runner-run-count-field' })
-    const info = field.createDiv({ cls: 'setting-item-info' })
-    info.createEl('label', {
-      cls: 'setting-item-name',
-      text: 'Number of runs',
-      attr: { for: 'chain-runner-custom-run-count' },
+    const quickChoices = form.createDiv({
+      cls: 'chain-runner-run-count-quick',
+      attr: { role: 'group', 'aria-label': 'Quick run counts' },
     })
-    info.createDiv({
-      cls: 'setting-item-description',
-      text: `Enter a whole number from ${MIN_RUN_COUNT} to ${MAX_RUN_COUNT}.`,
+    for (const count of QUICK_NODE_RUN_COUNTS) {
+      const label = count === 1 ? 'Run once' : `Run ${count} times`
+      quickChoices.createEl('button', {
+        cls: 'chain-runner-run-count-choice',
+        text: String(count),
+        attr: { type: 'button', 'data-run-count': count, 'aria-label': label },
+      }).addEventListener('click', () => this.pick(count))
+    }
+
+    const field = form.createDiv({ cls: 'chain-runner-run-count-field' })
+    field.createEl('label', {
+      cls: 'chain-runner-run-count-label',
+      text: `Or enter a number (${MIN_RUN_COUNT}–${MAX_RUN_COUNT})`,
+      attr: { for: 'chain-runner-run-count-value' },
     })
-    const control = field.createDiv({ cls: 'setting-item-control' })
-    const input = control.createEl('input', {
+    const input = field.createEl('input', {
       cls: 'chain-runner-run-count-input',
       type: 'number',
-      placeholder: `${MIN_RUN_COUNT}–${MAX_RUN_COUNT}`,
+      placeholder: 'Run count',
       attr: {
-        id: 'chain-runner-custom-run-count',
+        id: 'chain-runner-run-count-value',
         min: MIN_RUN_COUNT,
         max: MAX_RUN_COUNT,
         step: 1,
@@ -240,15 +216,13 @@ export class CustomRunCountModal extends Modal {
     })
 
     const actions = form.createDiv({ cls: 'chain-runner-run-count-actions' })
-    const cancel = actions.createEl('button', { text: 'Cancel', attr: { type: 'button' } })
     const save = actions.createEl('button', { cls: 'mod-cta', text: 'Set count', attr: { type: 'submit' } })
     save.disabled = true
 
-    const enteredCount = (): number | undefined => parseCustomCount(input.value)
+    const enteredCount = (): number | undefined => parseRunCount(input.value)
     input.addEventListener('input', () => {
       save.disabled = enteredCount() === undefined
     })
-    cancel.addEventListener('click', () => this.close())
     form.addEventListener('submit', event => {
       event.preventDefault()
       const count = enteredCount()
@@ -256,16 +230,20 @@ export class CustomRunCountModal extends Modal {
         input.focus()
         return
       }
-      this.close()
-      this.onPick(count)
+      this.pick(count)
     })
 
     input.focus()
-    if (this.anchor) anchorModal(this, this.anchor, CUSTOM_COUNT_SIZE)
+    if (this.anchor) anchorModal(this, this.anchor, NODE_RUN_COUNT_SIZE)
+  }
+
+  private pick(count: number): void {
+    this.close()
+    this.onPick(count)
   }
 }
 
-function parseCustomCount(value: string): number | undefined {
+function parseRunCount(value: string): number | undefined {
   const trimmed = value.trim()
   if (!/^\d+$/.test(trimmed)) return undefined
   const count = Number(trimmed)

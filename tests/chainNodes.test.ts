@@ -18,11 +18,13 @@ interface TestDOM {
   }
 }
 
-const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new () => TestDOM }
+const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
+  JSDOM: new (html?: string, options?: { url?: string }) => TestDOM
+}
 let testWindow: TestDOM['window'] | undefined
 
 function stubDom(): void {
-  testWindow = new JSDOM().window
+  testWindow = new JSDOM('', { url: 'https://chain-runner.test' }).window
   vi.stubGlobal('window', testWindow)
   vi.stubGlobal('document', testWindow.document)
   vi.stubGlobal('Event', testWindow.Event)
@@ -316,35 +318,38 @@ describe('clicking the node’s links', () => {
 })
 
 describe('choosing how many times a node runs', () => {
-  it('offers 1 through 5 and writes the picked count back to that node', async () => {
+  it('offers quick counts and writes the pressed count back to that node', async () => {
+    stubDom()
     for (let choice = 0; choice < 5; choice += 1) {
       makeNodes().handleSelection(element({ role: 'run-count' }))
       await flush()
-      expect(lastModal()?.placeholder).toBe('Choose run count')
-      lastModal()?.choose(choice)
+      const buttons = lastModal()?.contentEl?.querySelectorAll<HTMLButtonElement>('button[data-run-count]')
+      expect(Array.from(buttons ?? [], button => button.dataset.runCount)).toEqual(['1', '2', '3', '4', '5'])
+      buttons?.[choice]?.click()
       await flush()
     }
 
     expect(runCountSet.map(one => one.count)).toEqual([1, 2, 3, 4, 5])
   })
 
-  it('offers a number field for a custom count and saves the entered value', async () => {
+  it('opens directly to a focused number field and saves the typed count', async () => {
     stubDom()
     makeNodes().handleSelection(element({ role: 'run-count-box' }))
     await flush()
-    lastModal()?.choose(5)
 
-    const custom = lastModal()
-    expect(custom?.anchor).toEqual({ x: 0, y: 0 })
-    const input = custom?.contentEl?.querySelector('input') as HTMLInputElement | null
-    const form = custom?.contentEl?.querySelector('form') as HTMLFormElement | null
-    const save = custom?.contentEl?.querySelector<HTMLButtonElement>('button[type="submit"]')
+    const picker = lastModal()
+    expect(picker?.anchor).toEqual({ x: 0, y: 0 })
+    const input = picker?.contentEl?.querySelector('input') as HTMLInputElement | null
+    const form = picker?.contentEl?.querySelector('form') as HTMLFormElement | null
+    const save = picker?.contentEl?.querySelector<HTMLButtonElement>('button[type="submit"]')
     expect(input?.type).toBe('number')
     expect(input?.min).toBe('1')
     expect(input?.max).toBe('10')
     expect(input?.step).toBe('1')
+    expect(document.activeElement).toBe(input)
+    expect(picker?.contentEl?.querySelector('input[type="search"]')).toBeNull()
     expect(save?.disabled).toBe(true)
-    expect(custom?.modalEl?.style.width).toBe('300px')
+    expect(picker?.modalEl?.style.width).toBe('320px')
     if (input && form) {
       input.value = '8'
       input.dispatchEvent(new Event('input'))
@@ -356,20 +361,22 @@ describe('choosing how many times a node runs', () => {
     expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 8, on: undefined }])
   })
 
-  it('opens the count menu on the group drill-in gesture', async () => {
+  it('opens the count picker on the group drill-in gesture', async () => {
+    stubDom()
     const nodes = makeNodes()
     nodes.handleDoubleClick()
     nodes.handleSelection(element({ role: 'run-count' }))
     await flush()
 
-    expect(lastModal()?.placeholder).toBe('Choose run count')
+    expect(lastModal()?.contentEl?.querySelector('input[type="number"]')).not.toBeNull()
   })
 
   it('opens the count menu through its linked control too', async () => {
+    stubDom()
     const view = { file: null }
     expect(makeNodes().handleLinkClick(element({ role: 'run-count-box' }), view)).toBe(false)
     await flush()
-    lastModal()?.choose(4)
+    lastModal()?.contentEl?.querySelector<HTMLButtonElement>('button[data-run-count="5"]')?.click()
     await flush()
 
     expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 5, on: view }])
@@ -379,16 +386,15 @@ describe('choosing how many times a node runs', () => {
     stubDom()
     makeNodes().handleSelection(element({ role: 'run-count' }))
     await flush()
-    lastModal()?.choose(5)
 
-    const custom = lastModal()
-    const input = custom?.contentEl?.querySelector('input') as HTMLInputElement | null
-    const form = custom?.contentEl?.querySelector('form') as HTMLFormElement | null
+    const picker = lastModal()
+    const input = picker?.contentEl?.querySelector('input') as HTMLInputElement | null
+    const form = picker?.contentEl?.querySelector('form') as HTMLFormElement | null
     expect(input?.type).toBe('number')
     if (input && form) {
       input.value = '11'
       input.dispatchEvent(new Event('input'))
-      expect(custom?.contentEl?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+      expect(picker?.contentEl?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
       form.dispatchEvent(new Event('submit'))
     }
 
@@ -588,6 +594,7 @@ describe('where the picker opens', () => {
   })
 
   it('anchors the run-count menu at the press that opened it', async () => {
+    stubDom()
     clickSpot = { x: 80, y: 90 }
     makeNodes().handleSelection(element({ role: 'run-count' }))
     await flush()
