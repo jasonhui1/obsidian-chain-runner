@@ -1,9 +1,9 @@
 import { fillLiveOutputs, type LiveOutput, type PlacedPanel } from './liveOutputs'
 import { buildRunPanels, type RunLayout } from '../run/panels'
 import { settleRun, type RunState } from '../run/session'
-import { streamRun } from '../run/stream'
+import { streamRun, type RunEventSource } from '../run/stream'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary, LayoutModel, RunEvent, RunRequest } from '../engine/types'
+import type { ChainSummary, LayoutModel } from '../engine/types'
 
 /**
  * A chain run landing as output notes, for both surfaces that land one: the
@@ -22,9 +22,7 @@ export interface ChainRunOutcome<P> {
   live?: LiveOutput<P>[]
 }
 
-type RunSource = { request: RunRequest; events?: never } | { request?: never; events: AsyncIterable<RunEvent> }
-
-export type RunIntoNotesInput<P extends PlacedPanel> = RunSource & {
+export type RunIntoNotesInput<P extends PlacedPanel> = RunEventSource & {
   engine: EngineClient
   chain: ChainSummary
   signal: AbortSignal
@@ -40,7 +38,7 @@ export type RunIntoNotesInput<P extends PlacedPanel> = RunSource & {
 export async function runIntoNotes<P extends PlacedPanel>(input: RunIntoNotesInput<P>): Promise<ChainRunOutcome<P>> {
   let live: LiveOutput<P>[] | undefined
 
-  const source: { request: RunRequest } | { events: AsyncIterable<RunEvent> } = input.events
+  const source: RunEventSource = input.events
     ? { events: input.events }
     : { request: input.request! }
   const outcome = await streamRun({

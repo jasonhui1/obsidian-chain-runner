@@ -41,8 +41,11 @@ type StreamRunBase = {
   markOffline: () => void
 }
 
-export type StreamRunInput = StreamRunBase &
-  ({ request: RunRequest; events?: never } | { request?: never; events: AsyncIterable<RunEvent> })
+export type RunEventSource =
+  | { request: RunRequest; events?: never }
+  | { request?: never; events: AsyncIterable<RunEvent> }
+
+export type StreamRunInput = StreamRunBase & RunEventSource
 
 /** How a run's stream ended, as the drawing surfaces read it. */
 interface DrawnRun {

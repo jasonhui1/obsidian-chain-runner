@@ -15,7 +15,7 @@ import { onDrawing, readDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { runFailure } from '../run/session'
 import { streamsOutputs, UNSUPPORTED_STREAMING } from '../run/stream'
 import type { EngineClient } from '../engine/client'
-import type { ChainSummary, LayoutModel, RunEvent, VarianceMemberEvent } from '../engine/types'
+import type { ChainSummary, LayoutModel, LayoutPanel, RunEvent, VarianceMemberEvent } from '../engine/types'
 
 /**
  * Running a chain node: the arrows in become the seed, and the outputs become
@@ -412,16 +412,15 @@ export class NodeRun {
 
 /** Panels landed, out of panels declared; the total arrives with the first frame. */
 function progress(model: LayoutModel | undefined): NodeRunStatus {
-  if (!model || model.panels.length === 0) return { kind: 'running', done: 0 }
-  return {
-    kind: 'running',
-    done: model.panels.filter(panel => panel.state !== 'pending').length,
-    total: model.panels.length,
-  }
+  return progressForPanels(model?.panels ?? [])
 }
 
 function varianceProgress(models: readonly (LayoutModel | undefined)[]): NodeRunStatus {
   const panels = models.flatMap(model => model?.panels ?? [])
+  return progressForPanels(panels)
+}
+
+function progressForPanels(panels: readonly LayoutPanel[]): NodeRunStatus {
   if (panels.length === 0) return { kind: 'running', done: 0 }
   return {
     kind: 'running',
