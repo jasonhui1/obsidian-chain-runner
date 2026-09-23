@@ -13,6 +13,7 @@ import {
   parameterEdits,
   parameterLabel,
   reflowEdits,
+  runCountUpgrade,
 } from '@/ui/chainNode'
 import type { ChainNodeElement, NodeEdit } from '@/ui/chainNode'
 import type { ChainSummary } from '@/engine/types'
@@ -44,7 +45,21 @@ function byRole(elements: ChainNodeElement[], role: string): ChainNodeElement {
 
 describe('building a chain node', () => {
   it('holds a box, the title, the moment, the parameter and Run', () => {
-    expect(roles(build())).toEqual(['box', 'chain', 'moment', 'parameter', 'run'])
+    expect(roles(build())).toEqual(['box', 'chain', 'moment', 'parameter', 'run-count-box', 'run-count', 'run'])
+  })
+
+  it('puts an editable run count in a box beside Run', () => {
+    const elements = build()
+    const run = byRole(elements, 'run')
+    const field = byRole(elements, 'run-count')
+    const box = byRole(elements, 'run-count-box')
+
+    expect(field.text).toBe('1')
+    expect(field.link).toBeUndefined()
+    expect(box.shape).toBe('rect')
+    expect(field.x).toBeGreaterThanOrEqual(box.x)
+    expect(field.x + field.width).toBeLessThanOrEqual(box.x + box.width)
+    expect(box.x).toBeGreaterThanOrEqual(run.x + run.width)
   })
 
   it('draws the box first, so every line sits on top of it', () => {
@@ -63,15 +78,21 @@ describe('building a chain node', () => {
   })
 
   it('leaves the moment line out when the chain says neither', () => {
-    expect(roles(build({ moment: undefined, description: undefined }))).toEqual(['box', 'chain', 'parameter', 'run'])
+    expect(roles(build({ moment: undefined, description: undefined }))).toEqual([
+      'box', 'chain', 'parameter', 'run-count-box', 'run-count', 'run',
+    ])
   })
 
   it('leaves the parameter line out when the chain declares no dropdown', () => {
-    expect(roles(build({ parameter: undefined }))).toEqual(['box', 'chain', 'moment', 'run'])
+    expect(roles(build({ parameter: undefined }))).toEqual([
+      'box', 'chain', 'moment', 'run-count-box', 'run-count', 'run',
+    ])
   })
 
   it('leaves it out when the dropdown has no options to choose between', () => {
-    expect(roles(build({ parameter: { name: 'audience', options: [] } }))).toEqual(['box', 'chain', 'moment', 'run'])
+    expect(roles(build({ parameter: { name: 'audience', options: [] } }))).toEqual([
+      'box', 'chain', 'moment', 'run-count-box', 'run-count', 'run',
+    ])
   })
 
   it('reads the parameter as name, marker and value', () => {
@@ -88,6 +109,8 @@ describe('building a chain node', () => {
       ['chain', CHAIN_LINK],
       ['moment', undefined],
       ['parameter', PARAMETER_LINK],
+      ['run-count-box', undefined],
+      ['run-count', undefined],
       ['run', RUN_LINK],
     ])
   })
@@ -110,13 +133,15 @@ describe('building a chain node', () => {
     expect([...tops].sort((a, b) => a - b)).toEqual(tops)
   })
 
-  it('puts Run against the right edge, where the screen puts it', () => {
+  it('puts the count box after Run against the right edge', () => {
     const elements = build()
     const box = byRole(elements, 'box')
     const run = byRole(elements, 'run')
+    const countBox = byRole(elements, 'run-count-box')
     const leftPadding = byRole(elements, 'chain').x - box.x
     expect(run.x).toBeGreaterThan(box.x + box.width / 2)
-    expect(box.x + box.width - (run.x + run.width)).toBeCloseTo(leftPadding, 5)
+    expect(countBox.x).toBeGreaterThan(run.x + run.width)
+    expect(box.x + box.width - (countBox.x + countBox.width)).toBeCloseTo(leftPadding, 5)
   })
 
   it('trims a line too long to fit, rather than letting it wrap out of the box', () => {
@@ -173,6 +198,35 @@ describe('what the node stores on its elements', () => {
   })
 })
 
+describe('adding the count to an older node', () => {
+  it('draws the field beside Run and groups it through the existing node box', () => {
+    const old = build().filter(element => element.role !== 'run-count' && element.role !== 'run-count-box')
+      .map((element, index) => ({
+        ...element,
+        id: `old-${index}`,
+        x: element.x + 100,
+        y: element.y + 40,
+        groupIds: ['old-group'],
+      }))
+
+    const upgrade = runCountUpgrade(old, { nodeId: 'n-1', groupIds: ['old-group'] })
+    const oldRun = old.find(element => element.role === 'run')!
+    const nextRun = upgrade.edits.find(edit => edit.data.role === 'run')!
+    const countBox = byRole(upgrade.additions, 'run-count-box')
+    const count = byRole(upgrade.additions, 'run-count')
+
+    expect(upgrade.edits.some(edit => edit.data.role === 'box')).toBe(true)
+    expect(count.text).toBe('1')
+    expect(countBox.x).toBeGreaterThanOrEqual(nextRun.x! + oldRun.width)
+    expect(countBox.x + countBox.width).toBe(100 + 300 - 14)
+    expect(count.customData.chainRunner.nodeId).toBe('n-1')
+  })
+
+  it('does not add a second count to a node that already has one', () => {
+    expect(runCountUpgrade(build(), { nodeId: 'n-1' })).toEqual({ edits: [], additions: [], removals: [] })
+  })
+})
+
 describe('rewriting the parameter in place', () => {
   const scene = (): ChainNodeElement[] => [
     ...build({}, 'engineers'),
@@ -186,7 +240,7 @@ describe('rewriting the parameter in place', () => {
 
   it('re-stamps every element of that node, so a copy of any of them carries the value', () => {
     const edits = parameterEdits(scene(), { nodeId: 'n-1' }, 'founders')
-    expect(edits).toHaveLength(5)
+    expect(edits).toHaveLength(7)
     for (const edit of edits) expect(edit.data.parameterValue).toBe('founders')
   })
 
@@ -208,7 +262,7 @@ describe('rewriting the parameter in place', () => {
     const copies = [...grouped('n-1', 'g-first'), ...grouped('n-1', 'g-copy')]
 
     const edits = parameterEdits(copies, { nodeId: 'n-1', groupIds: ['g-copy'] }, 'founders')
-    expect(edits).toHaveLength(5)
+    expect(edits).toHaveLength(7)
     for (const edit of edits) expect(edit.element.groupIds).toEqual(['g-copy'])
   })
 
@@ -216,7 +270,7 @@ describe('rewriting the parameter in place', () => {
     const [box, ...rest] = build({}, 'engineers').map(element => ({ ...element, groupIds: ['g-first'] }))
     const loose = { ...(box as ChainNodeElement), groupIds: [] as string[] }
     const edits = parameterEdits([loose, ...rest], { nodeId: 'n-1', groupIds: ['g-first'] }, 'founders')
-    expect(edits).toHaveLength(5)
+    expect(edits).toHaveLength(7)
   })
 
   it('changes the text only on the line that shows the value', () => {
@@ -239,7 +293,7 @@ describe('a node placed before its chain is picked', () => {
   const blank = (): ChainNodeElement[] => buildChainNode(undefined, { nodeId: 'n-blank' })
 
   it('holds only the box, the chain line and Run', () => {
-    expect(roles(blank())).toEqual(['box', 'chain', 'run'])
+    expect(roles(blank())).toEqual(['box', 'chain', 'run-count-box', 'run-count', 'run'])
   })
 
   it('says on the chain line that there is a chain to pick', () => {
@@ -311,6 +365,14 @@ describe('changing which chain a node runs', () => {
   it('carries the value the reader picked for the new chain', () => {
     const reshape = chainEdits(scene(), { nodeId: 'n-1' }, chain({ slug: 'again' }), 'founders')
     expect(editText(reshape, 'parameter')).toBe('audience ▾ founders')
+  })
+
+  it('keeps the current run count when the chain changes', () => {
+    const current = scene().map(element =>
+      element.role === 'run-count' ? { ...element, text: '3', originalText: '3' } : element,
+    )
+    const reshape = chainEdits(current, { nodeId: 'n-1' }, relay)
+    expect(editText(reshape, 'run-count')).toBeUndefined()
   })
 
   it('draws a line the old chain did not have, at its place on the drawing', () => {
@@ -408,10 +470,12 @@ describe('re-cutting a node the reader resized', () => {
     expect(chainLine?.width).toBe(600 - 14 * 2)
   })
 
-  it('keeps ▶ Run against the box’s right edge', () => {
+  it('keeps ▶ Run immediately before the count box when the node is resized', () => {
     const run = edit(resized(600), 'run')
+    const countBox = edit(resized(600), 'run-count-box')
     const width = byRole(resized(600), 'run').width
-    expect(run?.x).toBe(600 - 14 - width)
+    expect(run?.x).toBe(600 - 14 - 30 - 8 - width)
+    expect(countBox?.x).toBe(600 - 14 - 30)
   })
 
   it('leaves the ▶ Run line’s words alone: they belong to the run, not the box', () => {

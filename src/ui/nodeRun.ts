@@ -1,5 +1,3 @@
-import type { App } from 'obsidian'
-import { RunCountPicker } from './chainPicker'
 import { chainIsUnset, type ChainNodeData, type MaybeNodeElement, type NodeRunStatus, type NodeTarget } from './chainNode'
 import type { DrawingView, NodeReading, PlacedOutput, RunDrawing, RunSurface } from './excalidraw'
 import type { Box } from './nodeScene'
@@ -38,12 +36,13 @@ export const PICK_A_CHAIN = 'This node has no chain yet. Click its top line to p
 export const NOTHING_WRITTEN = 'The run did not finish, so nothing was written.'
 
 export const NO_OUTPUTS = 'The run finished without producing any output.'
+export const INVALID_RUN_COUNT = 'Set the run count to a whole number from 1 to 10.'
+export const VARIANCE_UNSUPPORTED = 'This engine does not support multiple runs. Set the count to 1.'
 
 export const NO_FRAME =
   'This Excalidraw cannot make frames, so the outputs were placed loose beside the node. Update it to group them.'
 
 export interface NodeRunDeps {
-  app: App
   store: NoteStore
   engine: EngineClient
   /** Offline is a notice and nothing else. */
@@ -116,14 +115,25 @@ export class NodeRun {
     // The click's own view, or else the tab in front, bound once for the whole run.
     const drawing = readDrawing(() => this.deps.surface.on(view), this.deps.notify)
     if (!drawing) return
+    // Embedded drawings are not workspace leaves, so upgrade on their own gesture.
+    if ((await onDrawing(() => drawing.upgradeRunCounts(), this.deps.notify)) === undefined) return
     const reading = this.read(target, drawing)
     if (!reading) return
+    const count = parseRunCount(reading.runCount ?? '1')
+    if (count === undefined) {
+      this.deps.notify(INVALID_RUN_COUNT)
+      return
+    }
 
     const chains = await this.deps.withEngine(() => this.deps.engine.listChains())
     if (!chains) return
     const capabilities = await this.deps.engine.capabilities()
     if (!streamsOutputs(capabilities)) {
       this.deps.notify(UNSUPPORTED_STREAMING)
+      return
+    }
+    if (count > 1 && capabilities.varianceGroups !== true) {
+      this.deps.notify(VARIANCE_UNSUPPORTED)
       return
     }
     const chain = chains.find(one => one.slug === data.chain)
@@ -153,8 +163,7 @@ export class NodeRun {
       node: reading.box,
       ...(data.parameterValue ? { parameterValue: data.parameterValue } : {}),
     }
-    const count = capabilities.varianceGroups === true ? await this.pickRunCount(controller.signal) : 1
-    if (count !== undefined) await this.launch(plan, controller, count)
+    await this.launch(plan, controller, count)
   }
 
   /** Whether that node has a run going; a chain is not changed underneath one. */
@@ -215,26 +224,6 @@ export class NodeRun {
     if (outcome.aborted) return
 
     await this.finish(outcome, runPlan)
-  }
-
-  private pickRunCount(signal: AbortSignal): Promise<number | undefined> {
-    return new Promise(resolve => {
-      let settled = false
-      const finish = (count: number | undefined): void => {
-        if (settled) return
-        settled = true
-        signal.removeEventListener('abort', abort)
-        resolve(count)
-      }
-      const picker = new RunCountPicker(this.deps.app, finish, () => finish(undefined))
-      const abort = (): void => {
-        finish(undefined)
-        picker.close()
-      }
-      signal.addEventListener('abort', abort, { once: true })
-      if (signal.aborted) abort()
-      else picker.open()
-    })
   }
 
   /** Runs one variance member per stream, keeping each run's output on its own frame. */
@@ -427,6 +416,13 @@ function progressForPanels(panels: readonly LayoutPanel[]): NodeRunStatus {
     done: panels.filter(panel => panel.state !== 'pending').length,
     total: panels.length,
   }
+}
+
+function parseRunCount(value: string): number | undefined {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const count = Number(trimmed)
+  return Number.isInteger(count) && count >= 1 && count <= 10 ? count : undefined
 }
 
 function requestOf(plan: NodeRunPlan): { chainName: string; seedPrompt: string; paramValue?: string } {

@@ -66,6 +66,7 @@ function makeSurface(): NodeSurface {
         reflowedOn.push(view)
         return Promise.resolve(true)
       },
+      upgradeRunCounts: () => Promise.resolve(false),
       place: elements => {
         placed.push(elements)
         placedOn.push(view)
@@ -164,7 +165,9 @@ describe('adding a chain node', () => {
     await flush()
 
     expect(openedModals).toHaveLength(1)
-    expect(placed[0]?.map(one => chainNodeData(one)?.role)).toEqual(['box', 'chain', 'moment', 'run'])
+    expect(placed[0]?.map(one => chainNodeData(one)?.role)).toEqual([
+      'box', 'chain', 'moment', 'run-count-box', 'run-count', 'run',
+    ])
   })
 
   it('says what is missing when Excalidraw is not there, and opens nothing', async () => {

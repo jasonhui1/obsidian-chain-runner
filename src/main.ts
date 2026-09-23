@@ -160,11 +160,16 @@ export default class ChainRunnerPlugin extends Plugin {
     this.register(() => this.quickRun.stop())
 
     const surface = createExcalidrawSurface(this.app)
+    const upgradeOpenRunCounts = (): void => {
+      for (const view of surface.openViews()) {
+        void surface.on(view).upgradeRunCounts().catch(() => {})
+      }
+    }
+    this.registerEvent(this.app.workspace.on('file-open', upgradeOpenRunCounts))
     // A rerun that lands moves the cards on every open drawing on to the run it landed as.
     const onDrawing = new RerunOnDrawing({ surface, notes, ...sharedDeps })
     this.register(reruns.onLanding(landing => onDrawing.land(landing)))
     const nodeRun = new NodeRun({
-      app: this.app,
       store,
       engine: this.engine,
       ...sharedDeps,
@@ -264,6 +269,8 @@ export default class ChainRunnerPlugin extends Plugin {
     })
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return
+      // Older drawings get the editable count the first time they are opened.
+      upgradeOpenRunCounts()
       // Each handler claims its own links and passes on what is not its; a
       // proposal's labels and a chain node's lines never overlap.
       removeLinkHook = registerLinkHook(this.app, (element, view) =>

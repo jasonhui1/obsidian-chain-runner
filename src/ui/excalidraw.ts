@@ -6,6 +6,7 @@ import {
   nodeTargets,
   parameterEdits,
   reflowEdits,
+  runCountUpgrade,
   runEdits,
   type ChainNodeElement,
   type MaybeNodeElement,
@@ -16,6 +17,7 @@ import {
 import {
   blockInput,
   nodeBox,
+  nodeRunCount,
   resolveInputs,
   type Box,
   type ImageNoteLookup,
@@ -202,6 +204,8 @@ export interface DrawingView {
 export interface NodeReading {
   box: Box
   inputs: NodeInputs
+  /** The editable field, defaulting to one on drawings not yet upgraded. */
+  runCount?: string
   /** The drawing's path, which a wiki link on it resolves against. */
   drawing: string
 }
@@ -235,6 +239,11 @@ interface Reachable {
   unavailable(): string | undefined
 }
 
+/** Brings old nodes on the clicked drawing up to the current count control. */
+interface RunCountMigration {
+  upgradeRunCounts(): Promise<boolean>
+}
+
 /**
  * One gesture's drawing: the click's own view, or else the tab in front, bound
  * once. Throws when there is no drawing to bind.
@@ -242,7 +251,7 @@ interface Reachable {
 type BindDrawing<Drawing> = (view?: DrawingView) => Drawing
 
 /** Placing chain nodes and re-shaping them, on one drawing. */
-export interface NodeDrawing {
+export interface NodeDrawing extends RunCountMigration {
   /** Puts a built node on the drawing, at the cursor, and saves. */
   place(elements: ChainNodeElement[]): Promise<void>
   /** Rewrites a node's parameter in place. `false` means the node is no longer there. */
@@ -265,7 +274,7 @@ export interface NodeSurface extends Reachable {
 }
 
 /** Landing a run on one drawing: its node's status line, its frame and its outputs. */
-export interface RunDrawing {
+export interface RunDrawing extends RunCountMigration {
   /** What a node is bound to and where it sits; `undefined` when it is gone. */
   read(target: NodeTarget): NodeReading | undefined
   /** Rewrites the node's `▶ Run` line. `false` means the node is no longer there. */
@@ -430,6 +439,16 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return write(this.emptied(), edits)
   }
 
+  async upgradeRunCounts(): Promise<boolean> {
+    const scene = this.ea.getViewElements()
+    let changed = false
+    for (const target of nodeTargets(scene)) {
+      const upgrade = runCountUpgrade(scene, target)
+      if (await write(this.emptied(), upgrade.edits, upgrade.removals, upgrade.additions)) changed = true
+    }
+    return changed
+  }
+
   selectedNode(): MaybeNodeElement | undefined {
     const selected = selectedElements(this.ea)
     // One element, so a double-click on a rubber-banded group runs nothing.
@@ -441,7 +460,12 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     const scene = this.ea.getViewElements()
     const box = nodeBox(scene, target)
     if (!box) return undefined
-    return { box, inputs: resolveInputs(scene, target, imageNoteLookup(this.ea)), drawing: drawingPath(this.view) }
+    return {
+      box,
+      inputs: resolveInputs(scene, target, imageNoteLookup(this.ea)),
+      runCount: nodeRunCount(scene, target) ?? '1',
+      drawing: drawingPath(this.view),
+    }
   }
 
   setRunStatus(target: NodeTarget, status: NodeRunStatus): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
   ALREADY_RUNNING,
   NO_FRAME,
@@ -8,6 +8,8 @@ import {
   NOTHING_WRITTEN,
   PICK_A_CHAIN,
   SOME_UNBOUND,
+  INVALID_RUN_COUNT,
+  VARIANCE_UNSUPPORTED,
 } from '@/ui/nodeRun'
 import type { ChainNodeData } from '@/ui/chainNode'
 import { MISSING_NOTE } from '@/ui/inputSeed'
@@ -20,10 +22,8 @@ import { OutputNotes } from '@/ui/outputNotes'
 import type { RunFrame } from '@/run/runFrame'
 import type { EngineClient } from '@/engine/client'
 import { EngineOfflineError } from '@/engine/transport'
-import type { App } from 'obsidian'
 import type { Capabilities, ChainSummary, RunEvent, VarianceRequest, VarianceRunEvent } from '@/engine/types'
 import { MemoryNoteStore } from './memoryNoteStore'
-import { lastModal, resetModals } from './obsidian'
 
 /** The order a run happens in. The pure pieces are checked in their own files. */
 
@@ -53,6 +53,8 @@ let launchError: unknown
 let capabilities: Capabilities
 let chains: ChainSummary[]
 let online: boolean
+let upgradedRunCounts: boolean
+let upgradedAtRead: boolean
 
 let launched: { chainName: string; seedPrompt: string; paramValue?: string }[]
 let varianceRequests: VarianceRequest[]
@@ -139,7 +141,14 @@ function makeRun(): NodeRun {
       boundOn.push(view)
       if (unbindable) throw new Error(unbindable)
       return {
-        read: () => reading,
+        read: () => {
+          upgradedAtRead = upgradedRunCounts
+          return reading
+        },
+        upgradeRunCounts: () => {
+          upgradedRunCounts = true
+          return Promise.resolve(false)
+        },
         setRunStatus: (_target, status) => {
           if (closed) return Promise.reject(new Error(closed))
           labels.push(runLabel(status))
@@ -173,7 +182,6 @@ function makeRun(): NodeRun {
 
   const notify = (message: string): void => void notices.push(message)
   return new NodeRun({
-    app: {} as App,
     store,
     engine,
     withEngine: async action => (online ? action() : undefined),
@@ -196,12 +204,14 @@ const finishes = (): RunEvent[] => [
 
 const HOLD = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
 
-const start = (data: ChainNodeData = nodeData): Promise<void> => makeRun().run(data, { groupIds: ['g-1'] })
+const start = (data: ChainNodeData = nodeData, view?: DrawingView): Promise<void> =>
+  makeRun().run(data, { groupIds: ['g-1'] }, view)
 
 beforeEach(() => {
   reading = {
     box: { x: 100, y: 200, width: 300, height: 140 },
     inputs: { inputs: [{ kind: 'text', text: 'a premise' }], unbound: 0 },
+    runCount: '1',
     drawing: 'boards/wall.excalidraw.md',
   }
   events = finishes()
@@ -211,6 +221,8 @@ beforeEach(() => {
   capabilities = { runLayoutFrames: true, runStartEvent: true, runFailureFrame: true }
   chains = [relay]
   online = true
+  upgradedRunCounts = false
+  upgradedAtRead = false
   launched = []
   varianceRequests = []
   notices = []
@@ -226,10 +238,18 @@ beforeEach(() => {
   writes = []
   store.onChange(path => void writes.push(path))
   duringRun = []
-  resetModals()
 })
 
 describe('what the run is given', () => {
+  it('upgrades the clicked view before reading the run count', async () => {
+    const embedded = { file: null } as DrawingView
+    await start(nodeData, embedded)
+
+    expect(upgradedAtRead).toBe(true)
+    expect(boundOn).toContain(embedded)
+    expect(launched).toHaveLength(1)
+  })
+
   it('binds the drawing once, on the click’s own view, for the whole run', async () => {
     const view = { file: null }
     await makeRun().run(nodeData, { groupIds: ['g-1'] }, view)
@@ -437,7 +457,7 @@ describe('what the node says', () => {
     ]
     await start()
     // The notice fades; the node has to keep the reason.
-    expect(labels.at(-1)).toContain('the model refused')
+    expect(labels.at(-1)).toContain('the model refu')
     expect(labels.at(-1)).toBe(runLabel({ kind: 'failed', error: 'the model refused' }))
     expect(notices).toContain('the model refused')
   })
@@ -514,11 +534,8 @@ describe('variance runs', () => {
     ]
   })
 
-  it('asks for a run count when the engine supports variance groups', async () => {
-    const pending = start()
-    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
-    lastModal()?.choose(0)
-    await pending
+  it('runs once by default without opening a count picker', async () => {
+    await start()
 
     expect(launched).toHaveLength(1)
     expect(varianceRequests).toEqual([])
@@ -530,38 +547,11 @@ describe('variance runs', () => {
 
     expect(launched).toHaveLength(1)
     expect(varianceRequests).toEqual([])
-    expect(lastModal()).toBeUndefined()
   })
 
-  it('can dismiss the count picker without leaving the node busy', async () => {
-    const runner = makeRun()
-    const pending = runner.run(nodeData, { groupIds: ['g-1'] })
-    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
-    lastModal()?.close()
-    await pending
-
-    expect(runner.isRunning(nodeData.nodeId)).toBe(false)
-    expect(launched).toEqual([])
-    expect(varianceRequests).toEqual([])
-  })
-
-  it('closes the count picker when the plugin stops', async () => {
-    const runner = makeRun()
-    const pending = runner.run(nodeData, { groupIds: ['g-1'] })
-    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
-    runner.stop()
-    await pending
-
-    expect(runner.isRunning(nodeData.nodeId)).toBe(false)
-    expect(launched).toEqual([])
-    expect(varianceRequests).toEqual([])
-  })
-
-  it('runs the chosen count with the node inputs and dropdown, then places separate frames', async () => {
-    const pending = start({ ...nodeData, parameterValue: 'engineers' })
-    await vi.waitFor(() => expect(lastModal()?.placeholder).toBe('Run how many times?'))
-    lastModal()?.choose(1)
-    await pending
+  it('runs the count stored on the drawing with its inputs and dropdown, then places separate frames', async () => {
+    reading!.runCount = '2'
+    await start({ ...nodeData, parameterValue: 'engineers' })
 
     expect(launched).toEqual([])
     expect(varianceRequests).toEqual([
@@ -577,6 +567,25 @@ describe('variance runs', () => {
     const stacked = [...framed].sort((left, right) => left.frame.box.y - right.frame.box.y)
     expect(stacked[0]?.frame.box.y).toBe(reading?.box.y)
     expect(stacked[0]!.frame.box.y + stacked[0]!.frame.box.height).toBeLessThanOrEqual(stacked[1]!.frame.box.y)
+  })
+
+  it('rejects a count that is not an integer from one through ten', async () => {
+    reading!.runCount = '1.5'
+    await start()
+
+    expect(notices).toEqual([INVALID_RUN_COUNT])
+    expect(launched).toEqual([])
+    expect(varianceRequests).toEqual([])
+  })
+
+  it('refuses a count above one when the engine has no variance support', async () => {
+    capabilities.varianceGroups = false
+    reading!.runCount = '2'
+    await start()
+
+    expect(notices).toEqual([VARIANCE_UNSUPPORTED])
+    expect(launched).toEqual([])
+    expect(varianceRequests).toEqual([])
   })
 })
 

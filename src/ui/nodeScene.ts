@@ -39,6 +39,16 @@ export interface NodeInputs {
   unbound: number
 }
 
+/** The editable count on a node, or `undefined` for a drawing from before it existed. */
+export function nodeRunCount(scene: readonly SceneShape[], target: NodeTarget): string | undefined {
+  for (const element of scene) {
+    if (nodeElementData(element, target)?.role !== 'run-count') continue
+    const text = (element.originalText ?? element.text ?? '').trim()
+    return text === '' ? undefined : text
+  }
+  return undefined
+}
+
 export interface Box {
   x: number
   y: number

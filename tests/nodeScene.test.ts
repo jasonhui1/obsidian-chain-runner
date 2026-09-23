@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { nodeBox, resolveInputs, type SceneShape } from '@/ui/nodeScene'
-import { buildChainNode } from '@/ui/chainNode'
+import { nodeBox, nodeRunCount, resolveInputs, type SceneShape } from '@/ui/nodeScene'
+import { buildChainNode, chainNodeData } from '@/ui/chainNode'
 import type { ChainSummary } from '@/engine/types'
 
 /** What a node reads off its drawing; the scene is the only input. */
@@ -9,7 +9,7 @@ const chain: ChainSummary = { slug: 'relay', name: 'Relay', moment: 'when an ide
 
 const target = { nodeId: 'n-1', groupIds: ['g-1'] }
 
-/** The node as it sits on a scene: its five elements, grouped and given ids. */
+/** The node as it sits on a scene: its elements, grouped and given ids. */
 function nodeElements(): SceneShape[] {
   return buildChainNode(chain, { nodeId: 'n-1' }).map((element, index) => ({
     id: `node-${index}`,
@@ -18,10 +18,28 @@ function nodeElements(): SceneShape[] {
     y: 400 + element.y,
     width: element.width,
     height: element.height,
+    ...(element.text ? { text: element.text, originalText: element.text } : {}),
     groupIds: ['g-1'],
     customData: element.customData,
   }))
 }
+
+describe('the editable run count', () => {
+  it('reads the value shown on the node', () => {
+    const scene = nodeElements().map(element =>
+      chainNodeData(element)?.role === 'run-count' ? { ...element, text: '3', originalText: '3' } : element,
+    )
+    expect(nodeRunCount(scene, target)).toBe('3')
+  })
+
+  it('lets an older node default to one', () => {
+    const scene = nodeElements().filter(element => {
+      const role = chainNodeData(element)?.role
+      return role !== 'run-count' && role !== 'run-count-box'
+    })
+    expect(nodeRunCount(scene, target)).toBeUndefined()
+  })
+})
 
 const arrow = (id: string, from: string | undefined, to: string): SceneShape => ({
   id,

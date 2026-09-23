@@ -36,10 +36,11 @@ off the box.** Excalidraw works those out only for a *drop*; a scripted element
 that does not claim them is loose on the scene, and the node stops moving and
 copying as one thing.
 
-**Only `y` and the box's height are written.** Every line is left-aligned at the
-box's left edge except `run`, which is right-aligned and whose words a chain
-change does not touch — so no `x` moves. A line that gained its own right-edge
-alignment would need `keepRightEdge`, as `parameterEdits` does.
+**The chain-owned lines keep their left edge; only `y` and the box's height
+change.** Since #71, the right-aligned `run` label sits just before the editable
+count box at the box's right edge. Reshaping and reflow update the `x` positions
+of that pair to keep them aligned, while leaving the count's words alone. The
+`run` line's words still belong to the run, not the chain.
 
 ## Consequences
 

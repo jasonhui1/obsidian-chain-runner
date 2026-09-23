@@ -3,23 +3,30 @@ import { momentOf, parameterToAsk, type ChainSummary } from '../engine/types'
 
 /**
  * What a chain node *is*, as pure shapes: one box holding the chain's name, its
- * moment, its dropdown and `▶ Run`. Five elements rather than one boxed text
- * because a click can only be caught on a link (`docs/spike-ea.md`, Q1), and a
- * link needs its own element. `src/ui/excalidraw.ts` puts them on a scene.
+ * moment, its dropdown, a run count and `▶ Run`. Linked actions need their own
+ * elements; `src/ui/excalidraw.ts` puts the shapes on a scene.
  */
 
 /**
  * Which part of the node an element is. Stored on it, so a click knows what was
  * clicked. `title` is a legacy alias for `chain` (ADR-0009).
  */
-export type ChainNodeRole = 'box' | 'chain' | 'moment' | 'parameter' | 'run' | 'title'
+export type ChainNodeRole =
+  | 'box'
+  | 'chain'
+  | 'moment'
+  | 'parameter'
+  | 'run'
+  | 'run-count'
+  | 'run-count-box'
+  | 'title'
 
 /**
- * The node's identity, in each element's `customData`. Stamped on all five so a
- * reader who copies one line still gets something that knows its chain.
+ * The node's identity, in each element's `customData`, so a reader who copies
+ * one line still gets something that knows its chain.
  */
 export interface ChainNodeData {
-  /** Ties the five elements together. Not an element id — those change on copy. */
+  /** Ties the node's elements together. Not an element id — those change on copy. */
   nodeId: string
   role: ChainNodeRole
   /** The chain's slug, which is what the engine is asked for again later. */
@@ -44,7 +51,7 @@ export interface ChainNodeElement extends MaybeNodeElement {
   height: number
   text?: string
   fontSize?: number
-  textAlign?: 'left' | 'right'
+  textAlign?: 'left' | 'right' | 'center'
   strokeColor: string
   /** The two lines a click means something on; absent everywhere else. */
   link?: string
@@ -81,6 +88,10 @@ const DATA_KEY = 'chainRunner'
 const WIDTH = 300
 const PADDING = 14
 const LINE_GAP = 6
+const RUN_COUNT_BOX_WIDTH = 30
+const RUN_COUNT_BOX_HEIGHT = 24
+const RUN_COUNT_GAP = 8
+const RUN_COUNT_TEXT_WIDTH = 18
 const TITLE_SIZE = 20
 const LINE_SIZE = 16
 /** Excalidraw's own line height for its hand-drawn font. */
@@ -159,13 +170,15 @@ export function buildChainNode(chain: ChainSummary | undefined, options: ChainNo
     line('parameter', parameterLabel(parameter.name, options.parameterValue), LINE_SIZE, LINK_BLUE, PARAMETER_LINK)
   }
 
-  // Run sits against the right edge, as the screen in #1 puts it.
+  // The count sits after Run, in an editable box on the same line.
   const runWidth = textWidth(RUN_LABEL, LINE_SIZE)
   const runHeight = Math.round(LINE_SIZE * LINE_HEIGHT)
+  const controls = runControlLayout(0, WIDTH, runWidth)
+  lines.push(...runCountElements(data('run').chainRunner, controls.boxX, y))
   lines.push({
     role: 'run',
     shape: 'text',
-    x: WIDTH - PADDING - runWidth,
+    x: controls.runX,
     y,
     width: runWidth,
     height: runHeight,
@@ -236,7 +249,16 @@ function isRole(role: unknown): role is ChainNodeRole {
   return ROLES.includes(role as ChainNodeRole)
 }
 
-const ROLES: ChainNodeRole[] = ['box', 'chain', 'moment', 'parameter', 'run', 'title']
+const ROLES: ChainNodeRole[] = [
+  'box',
+  'chain',
+  'moment',
+  'parameter',
+  'run',
+  'run-count',
+  'run-count-box',
+  'title',
+]
 
 /** The role a stored one means now, so a node drawn before the chain line was clickable still reads. */
 export function chainNodeRole(role: ChainNodeRole): Exclude<ChainNodeRole, 'title'> {
@@ -263,7 +285,7 @@ export interface NodeEdit<E> {
   element: E
   /** The new label, on the one line whose words change. */
   text?: string
-  /** The `run` line sits against the box's right edge; a grown label moves left. */
+  /** The `run` line sits before the count box; a grown label keeps that right edge. */
   keepRightEdge?: boolean
   /** Where the line sits now, when a re-shaped node moved it. */
   y?: number
@@ -317,8 +339,8 @@ export interface NodeReshape<E> {
 /** An empty reshape: the node is no longer on the drawing. */
 const NOTHING: NodeReshape<never> = { edits: [], additions: [], removals: [] }
 
-/** Only `y` moves: every line but `run` is left-aligned, and `run`'s words do not change (ADR-0009). */
-export function chainEdits<E extends MaybeNodeElement>(
+/** Moves chain-owned lines vertically and keeps the Run/count pair at the right edge (ADR-0009). */
+export function chainEdits<E extends MaybeNodeElement & { width?: number; height?: number }>(
   scene: readonly E[],
   target: NodeTarget,
   chain: ChainSummary,
@@ -333,6 +355,7 @@ export function chainEdits<E extends MaybeNodeElement>(
 
   const x = box.element.x ?? 0
   const y = box.element.y ?? 0
+  const width = box.element.width ?? WIDTH
   const wanted = buildChainNode(chain, {
     nodeId: target.nodeId,
     ...(parameterValue ? { parameterValue } : {}),
@@ -343,14 +366,19 @@ export function chainEdits<E extends MaybeNodeElement>(
   for (const shape of wanted) {
     const found = mine.find(one => one.role === shape.role)
     if (!found) {
-      additions.push({ ...shape, x: x + shape.x, y: y + shape.y })
+      const additionX = runControlX(shape.role, x, width, shape.width) ?? x + shape.x
+      additions.push({ ...shape, x: additionX, y: y + shape.y })
       continue
     }
+    const editX = runControlX(shape.role, x, width, found.element.width ?? shape.width)
     edits.push({
       element: found.element,
+      ...(editX !== undefined ? { x: editX } : {}),
       y: y + shape.y,
       // The `run` line's words are its run's, not its chain's.
-      ...(shape.role === 'run' || shape.role === 'box' ? {} : { text: shape.text ?? '' }),
+      ...(shape.role === 'run' || shape.role === 'run-count' || shape.role === 'box' || shape.role === 'run-count-box'
+        ? {}
+        : { text: shape.text ?? '' }),
       ...(shape.role === 'box' ? { height: shape.height } : {}),
       data: shape.customData.chainRunner,
     })
@@ -394,7 +422,9 @@ function fullText(data: ChainNodeData, shown: string): string {
  * than the size a drag scaled it to (ADR-0010). Empty when the box is still the
  * width its lines were cut for, so a scene that has settled is never written.
  */
-export function reflowEdits<E extends MaybeNodeElement & { text?: string; fontSize?: number; width?: number }>(
+export function reflowEdits<
+  E extends MaybeNodeElement & { text?: string; fontSize?: number; width?: number; height?: number },
+>(
   scene: readonly E[],
   target: NodeTarget,
 ): NodeEdit<E>[] {
@@ -430,22 +460,137 @@ export function reflowEdits<E extends MaybeNodeElement & { text?: string; fontSi
     y += height + LINE_GAP
   }
 
+  const runCountBox = mine.find(one => one.role === 'run-count-box')
+  const runCount = mine.find(one => one.role === 'run-count')
   const run = mine.find(one => one.role === 'run')
   if (run) {
     const height = Math.round(LINE_SIZE * LINE_HEIGHT)
+    const controls = runControlLayout(
+      left,
+      width,
+      run.element.width ?? 0,
+      runCountBox?.element.width ?? 0,
+      runCount?.element.width ?? RUN_COUNT_TEXT_WIDTH,
+    )
     edits.push({
       element: run.element,
       // The words are the run's, not the box's; only where they sit changes.
-      x: left + width - PADDING - (run.element.width ?? 0),
+      x: controls.runX,
       y: top + y,
       fontSize: LINE_SIZE,
       data: { ...run.data, laidOut: width },
     })
+    if (runCountBox) {
+      const boxHeight = runCountBox.element.height ?? RUN_COUNT_BOX_HEIGHT
+      edits.push({
+        element: runCountBox.element,
+        x: controls.boxX,
+        y: top + y + (height - boxHeight) / 2,
+        data: { ...runCountBox.data, laidOut: width },
+      })
+    }
+    if (runCount) {
+      edits.push({
+        element: runCount.element,
+        x: controls.countX,
+        y: top + y,
+        fontSize: LINE_SIZE,
+        data: { ...runCount.data, laidOut: width },
+      })
+    }
     y += height
   }
 
   edits.push({ element: box.element, y: top, height: y + PADDING, data: { ...box.data, laidOut: width } })
   return edits
+}
+
+/** Adds the editable count to nodes already on a drawing before this field existed. */
+export function runCountUpgrade<E extends MaybeNodeElement & { width?: number; height?: number; text?: string }>(
+  scene: readonly E[],
+  target: NodeTarget,
+): NodeReshape<E> {
+  const mine = scene.flatMap(element => {
+    const data = nodeElementData(element, target)
+    return data ? [{ element, data, role: chainNodeRole(data.role) }] : []
+  })
+  const box = mine.find(one => one.role === 'box')
+  const run = mine.find(one => one.role === 'run')
+  if (!box || !run) return NOTHING
+  const existingBox = mine.find(one => one.role === 'run-count-box')
+  const existingCount = mine.find(one => one.role === 'run-count')
+  if (existingBox && existingCount) return NOTHING
+
+  const left = box.element.x ?? 0
+  const top = box.element.y ?? 0
+  const width = box.element.width ?? WIDTH
+  const rowY = run.element.y ?? top + (box.element.height ?? 0) - PADDING - Math.round(LINE_SIZE * LINE_HEIGHT)
+  const runWidth = run.element.width ?? textWidth(run.element.text ?? RUN_LABEL, LINE_SIZE)
+  const controls = runControlLayout(left, width, runWidth)
+  const runEdit: NodeEdit<E> = {
+    element: run.element,
+    x: controls.runX,
+    data: run.data,
+  }
+  const boxEdit: NodeEdit<E> = { element: box.element, data: box.data }
+  const shapes = runCountElements(run.data, controls.boxX, rowY)
+  const existingRoles = new Set<ChainNodeRole>(mine.map(one => one.role))
+  const additions = shapes.filter(shape => !existingRoles.has(shape.role))
+  return { edits: [boxEdit, runEdit], additions, removals: [] }
+}
+
+function runCountElements(data: ChainNodeData, x: number, y: number): ChainNodeElement[] {
+  const height = Math.round(LINE_SIZE * LINE_HEIGHT)
+  const box: ChainNodeElement = {
+    role: 'run-count-box',
+    shape: 'rect',
+    x,
+    y: (height - RUN_COUNT_BOX_HEIGHT) / 2 + y,
+    width: RUN_COUNT_BOX_WIDTH,
+    height: RUN_COUNT_BOX_HEIGHT,
+    strokeColor: INK,
+    customData: { chainRunner: { ...data, role: 'run-count-box' } },
+  }
+  const count: ChainNodeElement = {
+    role: 'run-count',
+    shape: 'text',
+    x: centeredTextX(x, RUN_COUNT_BOX_WIDTH, RUN_COUNT_TEXT_WIDTH),
+    y,
+    width: RUN_COUNT_TEXT_WIDTH,
+    height,
+    text: '1',
+    fontSize: LINE_SIZE,
+    textAlign: 'center',
+    strokeColor: LINK_BLUE,
+    customData: { chainRunner: { ...data, role: 'run-count' } },
+  }
+  return [box, count]
+}
+
+function runControlLayout(
+  left: number,
+  width: number,
+  runWidth: number,
+  boxWidth = RUN_COUNT_BOX_WIDTH,
+  countWidth = RUN_COUNT_TEXT_WIDTH,
+): { runX: number; boxX: number; countX: number } {
+  const boxX = left + width - PADDING - boxWidth
+  return {
+    runX: boxX - RUN_COUNT_GAP - runWidth,
+    boxX,
+    countX: centeredTextX(boxX, boxWidth, countWidth),
+  }
+}
+
+function runControlX(role: ChainNodeRole, left: number, width: number, elementWidth: number): number | undefined {
+  if (role === 'run') return runControlLayout(left, width, elementWidth).runX
+  if (role === 'run-count-box') return runControlLayout(left, width, 0, elementWidth).boxX
+  if (role === 'run-count') return runControlLayout(left, width, 0, RUN_COUNT_BOX_WIDTH, elementWidth).countX
+  return undefined
+}
+
+function centeredTextX(boxX: number, boxWidth: number, textWidth: number): number {
+  return boxX + (boxWidth - textWidth) / 2
 }
 
 /** The one test for "is this element part of that node", used reading and writing. */
@@ -490,10 +635,11 @@ export function runLabel(status: NodeRunStatus): string {
 const NEWLINE = '\n'
 
 /**
- * What is left for the message beside the mark and `▶ Run` — about 19
- * characters. The full text is in the Notice and the run's notes (ADR-0003).
+ * What is left for the message beside the mark, `▶ Run` and the count field.
+ * The full text is in the Notice and the run's notes (ADR-0003).
  */
-const FAILURE_ROOM = WIDTH - PADDING * 2 - textWidth(`✕  · ${RUN_LABEL}`, LINE_SIZE)
+const FAILURE_ROOM =
+  WIDTH - PADDING * 2 - RUN_COUNT_BOX_WIDTH - RUN_COUNT_GAP - textWidth(`✕  · ${RUN_LABEL}`, LINE_SIZE)
 
 function failureWords(error: string | undefined): string {
   const said = (error ?? '').trim().split(NEWLINE)[0] ?? ''
