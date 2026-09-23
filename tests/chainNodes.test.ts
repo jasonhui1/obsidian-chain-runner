@@ -19,6 +19,14 @@ interface TestDOM {
 }
 
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new () => TestDOM }
+let testWindow: TestDOM['window'] | undefined
+
+function stubDom(): void {
+  testWindow = new JSDOM().window
+  vi.stubGlobal('window', testWindow)
+  vi.stubGlobal('document', testWindow.document)
+  vi.stubGlobal('Event', testWindow.Event)
+}
 
 /**
  * The seam between a chain node and the drawing it sits on: what the command
@@ -159,6 +167,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  testWindow?.close()
+  testWindow = undefined
   vi.unstubAllGlobals()
 })
 
@@ -319,10 +329,7 @@ describe('choosing how many times a node runs', () => {
   })
 
   it('offers a number field for a custom count and saves the entered value', async () => {
-    const dom = new JSDOM()
-    vi.stubGlobal('window', dom.window)
-    vi.stubGlobal('document', dom.window.document)
-    vi.stubGlobal('Event', dom.window.Event)
+    stubDom()
     makeNodes().handleSelection(element({ role: 'run-count-box' }))
     await flush()
     lastModal()?.choose(5)
@@ -347,7 +354,6 @@ describe('choosing how many times a node runs', () => {
     await flush()
 
     expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 8, on: undefined }])
-    dom.window.close()
   })
 
   it('opens the count menu on the group drill-in gesture', async () => {
@@ -370,10 +376,7 @@ describe('choosing how many times a node runs', () => {
   })
 
   it('does not save a number field value outside the supported range', async () => {
-    const dom = new JSDOM()
-    vi.stubGlobal('window', dom.window)
-    vi.stubGlobal('document', dom.window.document)
-    vi.stubGlobal('Event', dom.window.Event)
+    stubDom()
     makeNodes().handleSelection(element({ role: 'run-count' }))
     await flush()
     lastModal()?.choose(5)
@@ -390,7 +393,6 @@ describe('choosing how many times a node runs', () => {
     }
 
     expect(runCountSet).toEqual([])
-    dom.window.close()
   })
 })
 

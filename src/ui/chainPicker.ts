@@ -198,7 +198,6 @@ export class NodeRunCountPicker extends FuzzySuggestModal<NodeRunCountChoice> {
   }
 }
 
-/** A small number prompt reached through the node count menu's Custom choice. */
 const CUSTOM_COUNT_SIZE: Size = { width: 300, height: 190 }
 
 /** A number field for counts outside the quick choices. */
