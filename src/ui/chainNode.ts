@@ -95,6 +95,15 @@ const RUN_COUNT_GAP = 8
 const RUN_COUNT_TEXT_WIDTH = 18
 export const MIN_RUN_COUNT = 1
 export const MAX_RUN_COUNT = 10
+
+/** Parses a whole run count from the node's saved or entered value. */
+export function parseRunCount(value: string): number | undefined {
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const count = Number(trimmed)
+  return Number.isInteger(count) && count >= MIN_RUN_COUNT && count <= MAX_RUN_COUNT ? count : undefined
+}
+
 const TITLE_SIZE = 20
 const LINE_SIZE = 16
 /** Excalidraw's own line height for its hand-drawn font. */

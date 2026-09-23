@@ -3,7 +3,7 @@ import { anchorModal } from './anchorModal'
 import { pickerRows, type Matcher, type PickerRow } from './pickerModel'
 import type { Point, Size } from './panelSpot'
 import type { ChainSummary } from '../engine/types'
-import { MAX_RUN_COUNT, MIN_RUN_COUNT } from './chainNode'
+import { MAX_RUN_COUNT, MIN_RUN_COUNT, parseRunCount } from './chainNode'
 
 /**
  * The chain picker: purpose groups, the moment under each name, and a fuzzy
@@ -241,11 +241,4 @@ export class NodeRunCountPicker extends Modal {
     this.close()
     this.onPick(count)
   }
-}
-
-function parseRunCount(value: string): number | undefined {
-  const trimmed = value.trim()
-  if (!/^\d+$/.test(trimmed)) return undefined
-  const count = Number(trimmed)
-  return Number.isInteger(count) && count >= MIN_RUN_COUNT && count <= MAX_RUN_COUNT ? count : undefined
 }
