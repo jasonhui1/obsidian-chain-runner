@@ -14,6 +14,8 @@ export const openedModals: OpenModal[] = []
 export interface OpenModal {
   placeholder: string
   emptyStateText?: string
+  contentEl?: HTMLElement
+  modalEl?: HTMLElement
   /** Where it was told to open, or `undefined` for centre-screen. */
   anchor?: { x: number; y: number }
   getSuggestions?(query: string): unknown[]
@@ -45,6 +47,10 @@ class BaseModal {
     openedModals.push(this as unknown as OpenModal)
   }
 
+  choose(_index: number, _query?: string): void {
+    throw new Error('This modal has no selectable rows')
+  }
+
   close(): void {
     this.onClose()
   }
@@ -56,7 +62,7 @@ class BaseModal {
 }
 
 export class SuggestModal<T> extends BaseModal {
-  choose(index: number, query = ''): void {
+  override choose(index: number, query = ''): void {
     const rows = (this as unknown as { getSuggestions(q: string): T[] }).getSuggestions(query)
     const row = rows[index]
     if (row === undefined) throw new Error(`no suggestion at ${index}`)
@@ -65,12 +71,70 @@ export class SuggestModal<T> extends BaseModal {
 }
 
 export class FuzzySuggestModal<T> extends BaseModal {
-  choose(index: number): void {
+  override choose(index: number): void {
     const items = (this as unknown as { getItems(): T[] }).getItems()
     const item = items[index]
     if (item === undefined) throw new Error(`no item at ${index}`)
     ;(this as unknown as { onChooseItem(item: T, evt: unknown): void }).onChooseItem(item, {})
   }
+}
+
+/** A DOM-backed Modal stub for controls that use native input fields. */
+export class Modal extends BaseModal {
+  containerEl!: HTMLElement
+  modalEl!: HTMLElement
+  titleEl!: HTMLElement
+  contentEl!: HTMLElement
+
+  override open(): void {
+    this.containerEl = testElement('div')
+    this.modalEl = testElement('div')
+    this.titleEl = testElement('div')
+    this.contentEl = testElement('div')
+    this.modalEl.append(this.titleEl, this.contentEl)
+    this.containerEl.append(this.modalEl)
+    openedModals.push(this as unknown as OpenModal)
+    this.onOpen()
+  }
+}
+
+function testElement(tag: string): HTMLElement {
+  const element = document.createElement(tag)
+  element.addClass = (...classes): void => element.classList.add(...classes)
+  element.setText = text => {
+    if (typeof text === 'string') element.textContent = text
+    else element.replaceChildren(text.cloneNode(true))
+  }
+  element.empty = (): void => element.replaceChildren()
+  element.createDiv = ((options?: TestElementOptions): HTMLDivElement => create('div', options) as HTMLDivElement) as
+    HTMLElement['createDiv']
+  element.createEl = ((childTag: string, options?: TestElementOptions): HTMLElement => create(childTag, options)) as
+    HTMLElement['createEl']
+  return element
+
+  function create(childTag: string, options?: TestElementOptions): HTMLElement {
+    const child = testElement(childTag)
+    if (options?.cls) child.className = options.cls
+    if (options?.text) child.textContent = options.text
+    if (options?.type) (child as HTMLInputElement).type = options.type
+    if (options?.value) (child as HTMLInputElement).value = options.value
+    if (options?.placeholder) (child as HTMLInputElement).placeholder = options.placeholder
+    for (const [name, value] of Object.entries(options?.attr ?? {})) {
+      if (value === null || value === false) continue
+      child.setAttribute(name, value === true ? '' : String(value))
+    }
+    element.appendChild(child)
+    return child
+  }
+}
+
+interface TestElementOptions {
+  cls?: string
+  text?: string
+  type?: string
+  value?: string
+  placeholder?: string
+  attr?: Record<string, string | number | boolean | null>
 }
 
 /** The real one scores a match; the picker's own ordering is tested elsewhere. */

@@ -1,4 +1,4 @@
-import { PANEL, panelSpot, type Point } from './panelSpot'
+import { PANEL, panelSpot, type Point, type Size } from './panelSpot'
 
 /**
  * Opening a modal beside what it changes. Obsidian centres a modal in CSS, so
@@ -15,12 +15,12 @@ export interface AnchorableModal {
   modalEl: HTMLElement
 }
 
-export function anchorModal(modal: AnchorableModal, at: Point): void {
+export function anchorModal(modal: AnchorableModal, at: Point, size: Size = PANEL): void {
   const viewport = { width: window.innerWidth, height: window.innerHeight }
-  const spot = panelSpot(at, PANEL, viewport)
+  const spot = panelSpot(at, size, viewport)
   modal.containerEl.addClass(ANCHORED)
   modal.modalEl.style.left = `${spot.left}px`
   modal.modalEl.style.top = `${spot.top}px`
-  modal.modalEl.style.width = `${PANEL.width}px`
-  modal.modalEl.style.maxHeight = `${PANEL.height}px`
+  modal.modalEl.style.width = `${size.width}px`
+  modal.modalEl.style.maxHeight = `${size.height}px`
 }

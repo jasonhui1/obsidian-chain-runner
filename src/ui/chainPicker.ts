@@ -1,7 +1,7 @@
-import { App, FuzzySuggestModal, SuggestModal, prepareFuzzySearch } from 'obsidian'
+import { App, FuzzySuggestModal, Modal, SuggestModal, prepareFuzzySearch } from 'obsidian'
 import { anchorModal } from './anchorModal'
 import { pickerRows, type Matcher, type PickerRow } from './pickerModel'
-import type { Point } from './panelSpot'
+import type { Point, Size } from './panelSpot'
 import type { ChainSummary } from '../engine/types'
 import { MAX_RUN_COUNT, MIN_RUN_COUNT } from './chainNode'
 
@@ -199,33 +199,70 @@ export class NodeRunCountPicker extends FuzzySuggestModal<NodeRunCountChoice> {
 }
 
 /** A small number prompt reached through the node count menu's Custom choice. */
-export class CustomRunCountPicker extends SuggestModal<number> {
+const CUSTOM_COUNT_SIZE: Size = { width: 300, height: 190 }
+
+/** A number field for counts outside the quick choices. */
+export class CustomRunCountModal extends Modal {
   constructor(
     app: App,
     private readonly onPick: (count: number) => void,
     readonly anchor?: Point,
   ) {
     super(app)
-    this.setPlaceholder(`Enter custom run count (${MIN_RUN_COUNT}–${MAX_RUN_COUNT})`)
-    this.emptyStateText = `Type a whole number from ${MIN_RUN_COUNT} to ${MAX_RUN_COUNT}`
   }
 
   override onOpen(): void {
-    super.onOpen()
-    if (this.anchor) anchorModal(this, this.anchor)
-  }
+    this.titleEl.setText('Custom run count')
 
-  getSuggestions(query: string): number[] {
-    const count = parseCustomCount(query)
-    return count === undefined ? [] : [count]
-  }
+    const form = this.contentEl.createEl('form', { cls: 'chain-runner-run-count-form' })
+    const field = form.createDiv({ cls: 'setting-item chain-runner-run-count-field' })
+    const info = field.createDiv({ cls: 'setting-item-info' })
+    info.createEl('label', {
+      cls: 'setting-item-name',
+      text: 'Number of runs',
+      attr: { for: 'chain-runner-custom-run-count' },
+    })
+    info.createDiv({
+      cls: 'setting-item-description',
+      text: `Enter a whole number from ${MIN_RUN_COUNT} to ${MAX_RUN_COUNT}.`,
+    })
+    const control = field.createDiv({ cls: 'setting-item-control' })
+    const input = control.createEl('input', {
+      cls: 'chain-runner-run-count-input',
+      type: 'number',
+      placeholder: `${MIN_RUN_COUNT}–${MAX_RUN_COUNT}`,
+      attr: {
+        id: 'chain-runner-custom-run-count',
+        min: MIN_RUN_COUNT,
+        max: MAX_RUN_COUNT,
+        step: 1,
+        required: true,
+      },
+    })
 
-  renderSuggestion(count: number, el: HTMLElement): void {
-    el.createDiv({ text: count === 1 ? 'Run once' : `Run ${count} times` })
-  }
+    const actions = form.createDiv({ cls: 'chain-runner-run-count-actions' })
+    const cancel = actions.createEl('button', { text: 'Cancel', attr: { type: 'button' } })
+    const save = actions.createEl('button', { cls: 'mod-cta', text: 'Set count', attr: { type: 'submit' } })
+    save.disabled = true
 
-  onChooseSuggestion(count: number): void {
-    this.onPick(count)
+    const enteredCount = (): number | undefined => parseCustomCount(input.value)
+    input.addEventListener('input', () => {
+      save.disabled = enteredCount() === undefined
+    })
+    cancel.addEventListener('click', () => this.close())
+    form.addEventListener('submit', event => {
+      event.preventDefault()
+      const count = enteredCount()
+      if (count === undefined) {
+        input.focus()
+        return
+      }
+      this.close()
+      this.onPick(count)
+    })
+
+    input.focus()
+    if (this.anchor) anchorModal(this, this.anchor, CUSTOM_COUNT_SIZE)
   }
 }
 

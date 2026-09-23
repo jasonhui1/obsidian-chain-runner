@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createRequire } from 'node:module'
 import { CHAIN_GONE, ChainNodes, NODE_GONE, NO_CHAINS, NO_DRAWING, NO_PARAMETER, RUNNING_NOW } from '@/ui/chainNodes'
 import { chainNodeData, type ChainNodeElement } from '@/ui/chainNode'
 import type { NodeSurface } from '@/ui/excalidraw'
@@ -6,6 +7,18 @@ import type { EngineClient } from '@/engine/client'
 import type { ChainSummary } from '@/engine/types'
 import type { App } from 'obsidian'
 import { lastModal, openedModals, resetModals } from './obsidian'
+
+interface TestDOM {
+  window: {
+    document: Document
+    innerWidth: number
+    innerHeight: number
+    Event: typeof Event
+    close(): void
+  }
+}
+
+const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new () => TestDOM }
 
 /**
  * The seam between a chain node and the drawing it sits on: what the command
@@ -143,6 +156,10 @@ beforeEach(() => {
   reflowedOn = []
   clock = 1000
   resetModals()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('adding a chain node', () => {
@@ -301,20 +318,36 @@ describe('choosing how many times a node runs', () => {
     expect(runCountSet.map(one => one.count)).toEqual([1, 2, 3, 4, 5])
   })
 
-  it('offers a custom count and saves a valid entered value', async () => {
+  it('offers a number field for a custom count and saves the entered value', async () => {
+    const dom = new JSDOM()
+    vi.stubGlobal('window', dom.window)
+    vi.stubGlobal('document', dom.window.document)
+    vi.stubGlobal('Event', dom.window.Event)
     makeNodes().handleSelection(element({ role: 'run-count-box' }))
     await flush()
     lastModal()?.choose(5)
 
     const custom = lastModal()
-    expect(custom?.placeholder).toBe('Enter custom run count (1–10)')
     expect(custom?.anchor).toEqual({ x: 0, y: 0 })
-    expect(custom?.getSuggestions?.('7')).toEqual([7])
-    expect(custom?.getSuggestions?.('11')).toEqual([])
-    custom?.choose(0, '7')
+    const input = custom?.contentEl?.querySelector('input') as HTMLInputElement | null
+    const form = custom?.contentEl?.querySelector('form') as HTMLFormElement | null
+    const save = custom?.contentEl?.querySelector<HTMLButtonElement>('button[type="submit"]')
+    expect(input?.type).toBe('number')
+    expect(input?.min).toBe('1')
+    expect(input?.max).toBe('10')
+    expect(input?.step).toBe('1')
+    expect(save?.disabled).toBe(true)
+    expect(custom?.modalEl?.style.width).toBe('300px')
+    if (input && form) {
+      input.value = '8'
+      input.dispatchEvent(new Event('input'))
+      expect(save?.disabled).toBe(false)
+      form.dispatchEvent(new Event('submit'))
+    }
     await flush()
 
-    expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 7, on: undefined }])
+    expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 8, on: undefined }])
+    dom.window.close()
   })
 
   it('opens the count menu on the group drill-in gesture', async () => {
@@ -336,15 +369,28 @@ describe('choosing how many times a node runs', () => {
     expect(runCountSet).toEqual([{ nodeId: 'n-1', count: 5, on: view }])
   })
 
-  it('does not write a custom count outside the supported range', async () => {
+  it('does not save a number field value outside the supported range', async () => {
+    const dom = new JSDOM()
+    vi.stubGlobal('window', dom.window)
+    vi.stubGlobal('document', dom.window.document)
+    vi.stubGlobal('Event', dom.window.Event)
     makeNodes().handleSelection(element({ role: 'run-count' }))
     await flush()
     lastModal()?.choose(5)
 
     const custom = lastModal()
-    expect(custom?.emptyStateText).toBe('Type a whole number from 1 to 10')
+    const input = custom?.contentEl?.querySelector('input') as HTMLInputElement | null
+    const form = custom?.contentEl?.querySelector('form') as HTMLFormElement | null
+    expect(input?.type).toBe('number')
+    if (input && form) {
+      input.value = '11'
+      input.dispatchEvent(new Event('input'))
+      expect(custom?.contentEl?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true)
+      form.dispatchEvent(new Event('submit'))
+    }
 
     expect(runCountSet).toEqual([])
+    dom.window.close()
   })
 })
 

@@ -623,6 +623,27 @@
   margin: 0;
 }
 
+.chain-runner-run-count-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-4);
+}
+
+.chain-runner-run-count-field {
+  border: 0;
+  padding: 0;
+}
+
+.chain-runner-run-count-input {
+  width: 8rem;
+}
+
+.chain-runner-run-count-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+}
+
 /* ── Directing panel ──────────────────────────────────────────────────
    One run's hold in the right sidebar: a one-line header, tabs that stay at
    the top while the body scrolls, and one proposal at a time. */

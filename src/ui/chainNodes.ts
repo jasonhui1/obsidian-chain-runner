@@ -1,5 +1,5 @@
 import type { App } from 'obsidian'
-import { ChainPicker, CustomRunCountPicker, NodeRunCountPicker, ParameterPicker } from './chainPicker'
+import { ChainPicker, CustomRunCountModal, NodeRunCountPicker, ParameterPicker } from './chainPicker'
 import {
   buildChainNode,
   chainNodeData,
@@ -245,7 +245,7 @@ export class ChainNodes {
     new NodeRunCountPicker(
       this.deps.app,
       choice => {
-        if (choice === 'custom') new CustomRunCountPicker(this.deps.app, save, at).open()
+        if (choice === 'custom') new CustomRunCountModal(this.deps.app, save, at).open()
         else save(choice)
       },
       at,
