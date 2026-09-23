@@ -2,18 +2,15 @@ import { holdStamp, type HoldStamp } from './holdColumn'
 import type { DrawingView, SelectionSurface } from './excalidraw'
 import type { Holds } from './holds'
 import { UNREACHABLE_DRAWING } from './onDrawing'
-import type { Point } from './panelSpot'
 
 /** A Continue line uses the same two-click drill-in as a node's Run line. */
 const DOUBLE_CLICK_MS = 1000
-export const DOUBLE_TO_CONTINUE = 'Double-click ▶ Continue to resume this candidate.'
 export const PICK_ALREADY_ANSWERED = 'This hold has already been answered. Another candidate cannot be continued from this drawing yet.'
 
 export interface ContinueFromDrawingDeps {
   surface: SelectionSurface
   holds: Pick<Holds, 'pickCandidate' | 'resume' | 'read'>
   notify: (message: string) => void
-  clickSpot: (settled: (spot: Point | undefined) => void) => void
   now: () => number
   refreshColumn: (runId: string, nodeId: string, view: DrawingView) => Promise<void>
 }
@@ -35,7 +32,6 @@ export class ContinueFromDrawing {
       this.start(stamp, view)
       return
     }
-    this.deps.clickSpot(spot => { if (spot) this.deps.notify(DOUBLE_TO_CONTINUE) })
   }
 
   handleDoubleClick(): void {

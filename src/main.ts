@@ -265,7 +265,6 @@ export default class ChainRunnerPlugin extends Plugin {
       surface,
       holds,
       notify,
-      clickSpot: settled => clicks.onSettled(settled),
       now: () => Date.now(),
       refreshColumn: async (runId, nodeId, view) => {
         const run = await this.engine.getRun(runId)

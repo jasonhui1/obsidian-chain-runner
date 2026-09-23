@@ -339,7 +339,7 @@ None of this is reachable without a vault. Keep the decisions pure — where a
 thing lands, what a stamp means, what an edit changes — and drive them in tests;
 leave `src/ui/excalidraw.ts` as the one untested seam.
 
-A manual pass is therefore not optional. `README.md` keeps the steps and a
-**Last recorded run** table saying which have actually been run, and against
-what. Record the result there, including what a vault found that the tests could
-not.
+A manual pass is still needed for drawing changes. Give the owner a short,
+ticket-specific check in the final response and state what remains unverified.
+Keep vault discoveries about Excalidraw in this document. Edit `README.md`
+when the requested work changes its user-facing setup or usage guidance.

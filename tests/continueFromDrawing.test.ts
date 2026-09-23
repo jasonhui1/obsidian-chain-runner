@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ContinueFromDrawing, DOUBLE_TO_CONTINUE, PICK_ALREADY_ANSWERED } from '@/ui/continueFromDrawing'
+import { ContinueFromDrawing, PICK_ALREADY_ANSWERED } from '@/ui/continueFromDrawing'
 import { stampHold } from '@/ui/holdColumn'
 import type { Holds } from '@/ui/holds'
 
@@ -10,7 +10,7 @@ const element = { customData: stampHold(stamp) }
 const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
 
 describe('Continue on a drawing', () => {
-  it('explains one click and resumes exactly once for two reports of the same double-click', async () => {
+  it('keeps one click quiet and resumes exactly once for two reports of the same double-click', async () => {
     const actions: string[] = []
     let release = (): void => {}
     const gate = new Promise<void>(resolve => { release = resolve })
@@ -30,16 +30,15 @@ describe('Continue on a drawing', () => {
         read: async () => ({ holds: [{ nodeId: 'pick', revision: 2 }] }) as Awaited<ReturnType<Holds['read']>>,
       },
       notify: message => void actions.push(message),
-      clickSpot: callback => callback({ x: 1, y: 2 }),
       now: () => now,
       refreshColumn: async () => {},
     })
     continueFromDrawing.handleSelection(element, view)
-    expect(actions).toEqual([DOUBLE_TO_CONTINUE])
+    expect(actions).toEqual([])
     continueFromDrawing.handleDoubleClick()
     continueFromDrawing.handleTextEdit(element, view)
     await settle()
-    expect(actions).toEqual([DOUBLE_TO_CONTINUE, 'pick', 'resume 2'])
+    expect(actions).toEqual(['pick', 'resume 2'])
     now = 200
     continueFromDrawing.handleDoubleClick()
     await settle()
@@ -58,7 +57,6 @@ describe('Continue on a drawing', () => {
         resume: async (_runId, pick) => { actions.push(`engine ${pick?.revision}`); return undefined },
       },
       notify: message => void actions.push(message),
-      clickSpot: () => {},
       now: () => 100,
       refreshColumn: async () => { actions.push('refreshed') },
     })
@@ -77,7 +75,7 @@ describe('Continue on a drawing', () => {
         pickCandidate: async () => { actions.push('ticked'); return undefined },
         resume: async () => { actions.push('resumed'); return undefined },
       },
-      notify: message => void actions.push(message), clickSpot: () => {}, now: () => 100,
+      notify: message => void actions.push(message), now: () => 100,
       refreshColumn: async () => {},
     })
     continueFromDrawing.handleSelection(element, view)
