@@ -78,6 +78,16 @@ export function beforeHoldRow(frame: RunFrame, pending: readonly number[]): { in
     })
 }
 
+/** Every column remains inside the frame when another hold in the wave is added. */
+export function waitingFrameBox(frame: Box, panels: readonly Box[], columns: readonly Box[]): Box {
+  const all = [...panels, ...columns]
+  return {
+    ...frame,
+    width: Math.max(...all.map(box => box.x + box.width)) + FRAME_PADDING - frame.x,
+    height: Math.max(...all.map(box => box.y + box.height)) + FRAME_PADDING - frame.y,
+  }
+}
+
 const STAMP = 'chainRunnerHold'
 export interface HoldStamp {
   runId: string

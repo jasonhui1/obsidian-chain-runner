@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beforeHoldRow, buildHoldColumn, candidateWords, holdStamp, stampHold } from '@/ui/holdColumn'
+import { beforeHoldRow, buildHoldColumn, candidateWords, holdStamp, stampHold, waitingFrameBox } from '@/ui/holdColumn'
 import type { HoldRecord } from '@/engine/types'
 import type { RunFrame } from '@/run/runFrame'
 
@@ -49,6 +49,15 @@ describe('a waiting hold column', () => {
       { index: 0, box: { x: 132, y: 82, width: 160, height: 240 } },
       { index: 1, box: { x: 316, y: 82, width: 160, height: 240 } },
     ])
+  })
+
+  it('keeps an earlier taller hold column inside the frame after another hold arrives', () => {
+    const frame = { x: 100, y: 50, width: 500, height: 900 }
+    const tall = { x: 200, y: 82, width: 360, height: 800 }
+    const short = { x: 584, y: 82, width: 360, height: 300 }
+    const resized = waitingFrameBox(frame, [], [tall, short])
+    expect(resized.height).toBeGreaterThanOrEqual(tall.y + tall.height - frame.y)
+    expect(resized.width).toBeGreaterThanOrEqual(short.x + short.width - frame.x)
   })
 
   it('keeps the engine heading, run, node and revision in the click stamp', () => {

@@ -109,6 +109,12 @@ describe('rerunScene', () => {
     expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([{ element: scene[0], name: `creative-director · ${NEW}` }])
   })
 
+  it('renames a stamped waiting frame when its run lands elsewhere', () => {
+    const waiting = { ...runFrame('creative-director · waiting'), customData: { chainRunnerFrame: { runId: OLD } } }
+    const scene = [waiting, label(OLD)]
+    expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([{ element: waiting, name: `creative-director · ${NEW}` }])
+  })
+
   it('leaves a frame the reader renamed as it is', () => {
     const scene = [runFrame('my best run'), card('a', 'runs/old/Verdict.md')]
     expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([])

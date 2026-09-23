@@ -43,10 +43,20 @@ function runFrameName(chainName: string, runId: string): string {
   return `${chainName}${NAME_SEPARATOR}${runId}`
 }
 
+/** A waiting run's title names its state without exposing the engine's id on the drawing. */
+export function waitingRunFrameName(name: string, runId: string): string {
+  const suffix = `${NAME_SEPARATOR}${runId}`
+  return name.endsWith(suffix) ? `${name.slice(0, -suffix.length)}${NAME_SEPARATOR}waiting` : name
+}
+
 /** A title `buildRunFrame` wrote for one of `from`, naming `to` instead; `undefined` for a title the reader chose. */
-export function renameRunFrame(name: string, from: readonly string[], to: string): string | undefined {
+export function renameRunFrame(name: string, from: readonly string[], to: string, stampedRunId?: string): string | undefined {
   const old = from.find(runId => name.endsWith(`${NAME_SEPARATOR}${runId}`))
-  return old && runFrameName(name.slice(0, -(NAME_SEPARATOR.length + old.length)), to)
+  if (old) return runFrameName(name.slice(0, -(NAME_SEPARATOR.length + old.length)), to)
+  const waiting = `${NAME_SEPARATOR}waiting`
+  return stampedRunId && from.includes(stampedRunId) && name.endsWith(waiting)
+    ? runFrameName(name.slice(0, -waiting.length), to)
+    : undefined
 }
 
 /** The frame for a run, to the right of the node that produced it and top-aligned with it. */

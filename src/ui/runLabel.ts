@@ -95,6 +95,20 @@ export function relabel(custom: unknown, runId: string): Record<string, unknown>
   return { ...rest, [DATA_KEY]: { runId } }
 }
 
+export function frameRunId(element: { customData?: unknown }): string | undefined {
+  const custom = element.customData
+  if (!custom || typeof custom !== 'object') return undefined
+  const stamp = (custom as Record<string, unknown>).chainRunnerFrame
+  if (!stamp || typeof stamp !== 'object') return undefined
+  const runId = (stamp as Record<string, unknown>).runId
+  return typeof runId === 'string' ? runId : undefined
+}
+
+export function reframe(custom: unknown, runId: string): Record<string, unknown> {
+  const rest = typeof custom === 'object' && custom !== null ? (custom as Record<string, unknown>) : {}
+  return { ...rest, chainRunnerFrame: { runId } }
+}
+
 /** An element as a rerun's landing reads it: a frame has a name, and anything may sit in one. */
 export interface FramedShape extends SceneShape {
   frameId?: string | null
@@ -129,7 +143,7 @@ export function rerunScene<E extends FramedShape>(
   const framed = new Set([...cards.map(card => card.element), ...labels].map(element => element.frameId))
   const frames = scene.flatMap(element => {
     if (element.type !== 'frame' || !framed.has(element.id)) return []
-    const name = element.name && renameRunFrame(element.name, from, to)
+    const name = element.name && renameRunFrame(element.name, from, to, frameRunId(element))
     return name ? [{ element, name }] : []
   })
   return { cards, labels, frames }

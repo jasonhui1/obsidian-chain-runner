@@ -40,13 +40,13 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
-import { buildDirectLabel, cardProposal, directLabelRunId, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
-import { beforeHoldRow, buildHoldColumn, holdStamp, stampHold, type HoldStamp } from './holdColumn'
+import { buildDirectLabel, cardProposal, directLabelRunId, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
+import { beforeHoldRow, buildHoldColumn, holdStamp, stampHold, waitingFrameBox, type HoldStamp } from './holdColumn'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary, HoldRecord } from '../engine/types'
-import { RUN_FRAME_GAP, type FramedPanel, type RunFrame } from '../run/runFrame'
+import { RUN_FRAME_GAP, waitingRunFrameName, type FramedPanel, type RunFrame } from '../run/runFrame'
 
 /**
  * The Excalidraw plugin, as this plugin reaches it (`docs/spike-ea.md`). What is
@@ -494,7 +494,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     // First, so the panels can name it as their container.
     const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
     const madeFrame = frameId ? ea.getElement(frameId) : undefined
-    if (madeFrame) madeFrame.customData = { chainRunnerFrame: { runId: frame.runId } }
+    if (madeFrame) madeFrame.customData = reframe(madeFrame.customData, frame.runId)
 
     for (const { placed, notePath } of outputs) {
       ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
@@ -545,19 +545,18 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       ...prior.map(element => (element.x ?? 0) + (element.width ?? 0)),
     )
     const column = buildHoldColumn(hold, right + 24, frame.box.y + 32)
-    const nextWidth = column.box.x + column.box.width + 32 - frame.box.x
-    const nextHeight = Math.max(
-      column.box.y + column.box.height,
-      ...reached.map(panel => panel.box.y + panel.box.height),
-    ) + 32 - frame.box.y
+    const nextBox = waitingFrameBox(frame.box, reached.map(panel => panel.box), [
+      column.box,
+      ...prior.map(element => ({ x: element.x ?? 0, y: element.y ?? 0, width: element.width ?? 0, height: element.height ?? 0 })),
+    ])
     const ea = this.emptied()
     if (belonging || unreached.length > 0 || directLabel || reachedCards.length > 0) {
       ea.copyViewElementsToEAforEditing([...(belonging ? [belonging] : []), ...unreached, ...reachedCards, ...(directLabel ? [directLabel] : [])])
       const actualFrame = belonging ? ea.getElement(belonging.id) : undefined
       if (actualFrame) {
-        actualFrame.width = nextWidth
-        actualFrame.height = nextHeight
-        actualFrame.name = `${frame.name.slice(0, -frame.runId.length - 3)} · waiting`
+        actualFrame.width = nextBox.width
+        actualFrame.height = nextBox.height
+        actualFrame.name = waitingRunFrameName(frame.name, frame.runId)
       }
       for (const card of unreached) {
         const copy = ea.getElement(card.id)
@@ -575,7 +574,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       if (directLabel) {
         const copy = ea.getElement(directLabel.id)
         if (copy) {
-          const next = buildDirectLabel({ x: frame.box.x, y: frame.box.y, width: nextWidth, height: nextHeight }, frame.runId)
+          const next = buildDirectLabel(nextBox, frame.runId)
           copy.x = next.x
           copy.y = next.y
         }
@@ -691,7 +690,10 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     }
     for (const { element, name } of found.frames) {
       const frame = copy(element)
-      if (frame) frame.name = name
+      if (frame) {
+        frame.name = name
+        if (frameRunId(frame)) frame.customData = reframe(frame.customData, to)
+      }
     }
     await save(ea, false)
     return true
@@ -810,15 +812,6 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return selected.map(element => holdStamp(element)?.runId).find(Boolean)
       ?? selectedRunId(selected, noteFrontmatter(this.app, this.view))
   }
-}
-
-function frameRunId(element: SceneElement): string | undefined {
-  const data = element.customData
-  if (!data || typeof data !== 'object') return undefined
-  const stamp = (data as Record<string, unknown>).chainRunnerFrame
-  if (!stamp || typeof stamp !== 'object') return undefined
-  const runId = (stamp as Record<string, unknown>).runId
-  return typeof runId === 'string' ? runId : undefined
 }
 
 function panelStamp(element: SceneElement): { runId: string; index: number } | undefined {

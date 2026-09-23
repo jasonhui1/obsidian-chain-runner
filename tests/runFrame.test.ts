@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRunFrame } from '@/run/runFrame'
+import { buildRunFrame, waitingRunFrameName } from '@/run/runFrame'
 import type { RunLayout, RunPanel } from '@/run/panels'
 import type { Box } from '@/ui/nodeScene'
 
@@ -24,6 +24,9 @@ const boxes = (frame: ReturnType<typeof buildRunFrame>): Record<string, Box> =>
   Object.fromEntries(frame.panels.map(one => [one.panel.name, one.box]))
 
 describe('buildRunFrame', () => {
+  it('titles a waiting frame without exposing the run id', () => {
+    expect(waitingRunFrameName('Five Personas · run-1', 'run-1')).toBe('Five Personas · waiting')
+  })
   it('titles the frame with the chain and the run', () => {
     expect(frameOf({ kind: 'timeline', panels: [panel('Draft')] }).name).toBe('Five Personas · 2026-09-02-ab12c')
   })
