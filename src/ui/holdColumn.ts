@@ -11,6 +11,9 @@ export interface HoldColumn {
 }
 
 export const HOLD_COLUMN_WIDTH = 360
+export const PICK_CARD_WIDTH = 320
+export const PICK_CARD_HEIGHT = 160
+export const PICK_GAP = 24
 const PANEL_GAP = 24
 const PADDING = 16
 const GAP = 12
@@ -110,4 +113,54 @@ export function holdStamp(element: { customData?: unknown }): HoldStamp | undefi
   if (typeof value.runId !== 'string' || typeof value.nodeId !== 'string' || typeof value.heading !== 'string') return undefined
   if (value.role !== 'candidate' && value.role !== 'continue' && value.role !== 'column') return undefined
   return stamp as HoldStamp
+}
+
+/** The first pick uses the space reserved beside its candidate. */
+export function pickRowBoxes(candidate: Box, count: number): Box[] {
+  return Array.from({ length: count }, (_, index) => ({
+    x: candidate.x + candidate.width + PICK_GAP + index * (PICK_CARD_WIDTH + PICK_GAP),
+    y: candidate.y,
+    width: PICK_CARD_WIDTH,
+    height: PICK_CARD_HEIGHT,
+  }))
+}
+
+/** Everything a first pick places, relative to the candidate's reserved slot. */
+export function buildPickRow(candidate: Box, count: number): {
+  cards: { box: Box; step: { x: number; y: number }; length: { x: number; y: number } }[]
+  heading: { x: number; y: number }
+  tick: { x: number; y: number }
+  direct: { x: number; y: number }
+  right: number
+} {
+  const boxes = pickRowBoxes(candidate, count)
+  const right = (boxes.at(-1)?.x ?? candidate.x + candidate.width) + (boxes.at(-1)?.width ?? 0) + 120
+  return {
+    cards: boxes.map(box => ({
+      box,
+      step: { x: box.x, y: box.y - 24 },
+      length: { x: box.x + box.width - 76, y: box.y + box.height - 22 },
+    })),
+    heading: { x: boxes[0]?.x ?? candidate.x + candidate.width + PICK_GAP, y: candidate.y - 48 },
+    tick: { x: candidate.x + candidate.width - 30, y: candidate.y + 8 },
+    direct: { x: right - 105, y: candidate.y + 4 },
+    right,
+  }
+}
+
+const PICK_STAMP = 'chainRunnerPick'
+export interface PickStamp { runId: string; nodeId: string; heading: string }
+
+export function stampPick(data: PickStamp): Record<string, unknown> {
+  return { [PICK_STAMP]: data }
+}
+
+export function pickStamp(element: { customData?: unknown }): PickStamp | undefined {
+  const data = element.customData
+  if (!data || typeof data !== 'object') return undefined
+  const value = (data as Record<string, unknown>)[PICK_STAMP]
+  if (!value || typeof value !== 'object') return undefined
+  const stamp = value as Record<string, unknown>
+  return typeof stamp.runId === 'string' && typeof stamp.nodeId === 'string' && typeof stamp.heading === 'string'
+    ? stamp as unknown as PickStamp : undefined
 }

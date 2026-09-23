@@ -5,6 +5,7 @@ import type { RerunLanding } from '@/run/rerunWatch'
 import type { RunProvenance } from '@/ui/outputNotes'
 import type { RunPanel } from '@/run/panels'
 import type { LayoutPanel } from '@/engine/types'
+import { started } from './engineFrames'
 
 /** A landed rerun, followed on every drawing open: which notes are filed, and what each drawing is asked to do. */
 
@@ -40,6 +41,9 @@ function makeFollower(): RerunOnDrawing {
       const name = names.get(view as DrawingView) as string
       bound.push(name)
       return {
+        placePickRow: async () => true,
+        updatePickCounts: async () => true,
+        refreshHoldColumn: async () => true,
         followRerun: async (from, to, noteFor) => {
           const shown = drawings[name]
           if (shown === 'unreachable') throw new Error('That drawing went away')
@@ -55,6 +59,7 @@ function makeFollower(): RerunOnDrawing {
   return new RerunOnDrawing({
     surface,
     notes: {
+      open: async (panel, run) => ({ path: `runs/${run.runId}/${panel.name}.md`, write: async () => {} }),
       write: async (panel, run) => {
         written.push({ panel, run })
         if (refused.includes(panel.name)) return undefined
@@ -76,6 +81,43 @@ beforeEach(() => {
 })
 
 describe('RerunOnDrawing', () => {
+  it('files an in-place pick output even when its drawing is closed', async () => {
+    await makeFollower().land({ ...landing, from: [NEW], pick: { nodeId: 'pick', heading: 'Candidate 1', pending: [0] } })
+    expect(written.map(one => one.panel.name)).toEqual(['World'])
+    expect(followed).toEqual([])
+  })
+  it('opens a first pick row at run_start and fills its normal note as tokens arrive', async () => {
+    const pending: LayoutPanel = { name: 'World', node: 'world', text: '', lines: 0, state: 'pending' }
+    const placed: string[] = []
+    const filled: string[] = []
+    const counts: number[] = []
+    const picked = new RerunOnDrawing({
+      surface: {
+        unavailable: () => undefined,
+        openViews: () => [{ file: null }],
+        on: () => ({
+          placePickRow: async (_landing, outputs) => { placed.push(...outputs.map(one => one.notePath)); return true },
+          updatePickCounts: async landing => { counts.push(landing.panels[0]?.lines ?? -1); return true },
+          refreshHoldColumn: async () => true,
+          followRerun: async () => false,
+        }),
+      },
+      notes: {
+        open: async () => ({ path: `runs/${OLD}/World.md`, write: async panel => { filled.push(panel.text) } }),
+        write: async () => { throw new Error('a streamed note must be reused') },
+      },
+      notify: message => void notices.push(message),
+    })
+    const stream = { sourceRunId: OLD, chainName: 'creative-director', pick: { nodeId: 'pick', heading: 'Candidate 1', pending: [0] }, sourcePanels: [pending] }
+    await picked.streamPick({ ...stream, event: started(OLD)[0]! })
+    await picked.streamPick({ ...stream, event: { type: 'token', nodeId: 'world', token: 'First line\nSecond' } })
+    expect(placed).toEqual([`runs/${OLD}/World.md`])
+    expect(filled).toContain('First line\nSecond')
+    expect(counts).toContain(2)
+    await picked.land({ from: [OLD], runId: OLD, chainName: 'creative-director', panels: [{ ...pending, text: 'First line\nSecond line', lines: 2, state: 'filled' }], pick: stream.pick })
+    expect(filled.at(-1)).toBe('First line\nSecond line')
+    expect(notices).toEqual([])
+  })
   it('points each card on an open drawing at its output’s note, filed under the new run', async () => {
     drawings = { board: ['Verdict', 'World'] }
     await makeFollower().land(landing)

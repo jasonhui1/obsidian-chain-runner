@@ -824,16 +824,6 @@
   display: none;
 }
 
-.chain-runner-directing-proposal.is-clamped {
-  max-height: 18em;
-  overflow: hidden;
-}
-
-.chain-runner-directing-proposal.is-clamped.is-overflowing {
-  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent);
-  mask-image: linear-gradient(to bottom, black 70%, transparent);
-}
-
 .chain-runner-directing-markdown {
   font-size: var(--font-ui-small);
 }

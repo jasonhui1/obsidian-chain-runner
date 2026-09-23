@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beforeHoldRow, buildHoldColumn, candidateWords, holdStamp, stampHold, waitingFrameBox } from '@/ui/holdColumn'
+import { beforeHoldRow, buildHoldColumn, buildPickRow, candidateWords, holdStamp, pickRowBoxes, pickStamp, stampHold, stampPick, waitingFrameBox } from '@/ui/holdColumn'
 import type { HoldRecord } from '@/engine/types'
 import type { RunFrame } from '@/run/runFrame'
 
@@ -65,5 +65,21 @@ describe('a waiting hold column', () => {
     expect(holdStamp({ customData: stampHold(stamp) })).toEqual(stamp)
     expect(holdStamp({ customData: stampHold({ ...stamp, role: 'continue' }) })?.role).toBe('continue')
     expect(candidateWords('Candidate 1', 'The Guidebook Lie\nA complete first idea.')).not.toContain('Candidate 1')
+  })
+
+  it('places small output previews beside the chosen slot and stamps their row', () => {
+    const slot = buildHoldColumn(hold, 500, 100).candidates[1]!.box
+    const cards = pickRowBoxes(slot, 2)
+    expect(cards).toEqual([
+      { x: slot.x + slot.width + 24, y: slot.y, width: 320, height: 160 },
+      { x: slot.x + slot.width + 368, y: slot.y, width: 320, height: 160 },
+    ])
+    const stamp = { runId: 'run-1', nodeId: hold.nodeId, heading: 'Echoes of the Fallen' }
+    expect(pickStamp({ customData: stampPick(stamp) })).toEqual(stamp)
+    const row = buildPickRow(slot, 2)
+    expect(row.cards.map(one => one.box)).toEqual(cards)
+    expect(row.cards[0]!.length.y).toBeLessThan(cards[0]!.y + cards[0]!.height)
+    expect(row.direct.x).toBeGreaterThan(cards[1]!.x + cards[1]!.width)
+    expect(row.right).toBeGreaterThan(row.direct.x)
   })
 })

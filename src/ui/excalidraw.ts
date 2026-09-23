@@ -41,12 +41,14 @@ import {
   type ProposalRole,
 } from './proposal'
 import { buildDirectLabel, cardProposal, directLabelRunId, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
-import { beforeHoldRow, buildHoldColumn, holdStamp, stampHold, waitingFrameBox, type HoldStamp } from './holdColumn'
+import { beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, type HoldColumn, type HoldStamp } from './holdColumn'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary, HoldRecord } from '../engine/types'
 import { RUN_FRAME_GAP, waitingRunFrameName, type FramedPanel, type RunFrame } from '../run/runFrame'
+import type { RerunLanding } from '../run/rerunWatch'
+import type { LayoutPanel } from '../engine/types'
 
 /**
  * The Excalidraw plugin, as this plugin reaches it (`docs/spike-ea.md`). What is
@@ -301,6 +303,11 @@ export interface RunSurface extends Reachable {
 
 /** Moving one drawing's cards, labels and frames on to a rerun that landed. */
 export interface RerunDrawing {
+  /** Adds the first in-place answer beside its candidate. */
+  placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean>
+  updatePickCounts(landing: RerunLanding): Promise<boolean>
+  /** Replaces a rerolled candidate set in its reserved column. */
+  refreshHoldColumn(runId: string, nodeId: string, hold: HoldRecord): Promise<boolean>
   /**
    * Moves the drawing on to a landed rerun: each card of the runs `from` to the
    * note `noteFor` files for its output, and the labels and frames to `to`.
@@ -341,6 +348,12 @@ export interface SelectionSurface extends Reachable {
   selectedRun(): string | undefined
   /** The run and proposal a card on the drawing shows, by its output note. */
   cardProposal(element: MaybeNodeElement, on: DrawingView): CardProposal | undefined
+  /** The drilled-in Continue line, when selection did not change on a second click. */
+  on?: BindDrawing<PickDrawing>
+}
+
+export interface PickDrawing {
+  selectedContinue(): MaybeNodeElement | undefined
 }
 
 /** Excalidraw, in every role this plugin gives it. */
@@ -580,18 +593,46 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         }
       }
     }
-    const columnStamp: HoldStamp = {
-      runId: frame.runId,
-      nodeId: hold.nodeId,
-      heading: '',
-      revision: hold.revision,
-      role: 'column',
+    this.drawHoldColumn(ea, column, frame.runId, hold, belonging?.id)
+    await save(ea, false)
+  }
+
+  async refreshHoldColumn(runId: string, nodeId: string, hold: HoldRecord): Promise<boolean> {
+    const scene = this.ea.getViewElements()
+    const column = scene.find(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'column' && stamp.runId === runId && stamp.nodeId === nodeId && element.type === 'rectangle'
+    })
+    if (!column) return false
+    const old = scene.filter(element => {
+      const stamp = holdStamp(element)
+      return stamp?.runId === runId && stamp.nodeId === nodeId
+    })
+    const ea = this.emptied()
+    ea.copyViewElementsToEAforEditing(old)
+    for (const element of old) {
+      const copy = ea.getElement(element.id)
+      if (copy) copy.isDeleted = true
     }
+    const next = buildHoldColumn(hold, column.x ?? 0, column.y ?? 0)
+    const frame = scene.find(element => element.id === column.frameId)
+    if (frame) {
+      ea.copyViewElementsToEAforEditing([frame])
+      const copy = ea.getElement(frame.id)
+      if (copy) copy.height = Math.max(copy.height ?? 0, next.box.y + next.box.height + 32 - (copy.y ?? 0))
+    }
+    this.drawHoldColumn(ea, next, runId, hold, column.frameId ?? undefined)
+    await save(ea, false)
+    return true
+  }
+
+  private drawHoldColumn(ea: ExcalidrawAutomate, column: HoldColumn, runId: string, hold: HoldRecord, frameId?: string): void {
+    const columnStamp: HoldStamp = { runId, nodeId: hold.nodeId, heading: '', revision: hold.revision, role: 'column' }
     ea.style.strokeColor = INK
     const outline = ea.getElement(ea.addRect(column.box.x, column.box.y, column.box.width, column.box.height))
     if (outline) {
       outline.customData = stampHold(columnStamp)
-      if (belonging) outline.frameId = belonging.id
+      if (frameId) outline.frameId = frameId
     }
     ea.style.fontSize = 16
     const prompt = ea.getElement(ea.addText(column.prompt.box.x, column.prompt.box.y, column.prompt.text, {
@@ -599,7 +640,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     }))
     if (prompt) {
       prompt.customData = stampHold(columnStamp)
-      if (belonging) prompt.frameId = belonging.id
+      if (frameId) prompt.frameId = frameId
     }
     for (const candidate of column.candidates) {
       const stamp: HoldStamp = { ...columnStamp, heading: candidate.heading, role: 'candidate' }
@@ -614,7 +655,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         if (!element) continue
         element.customData = stampHold(stamp)
         element.link = 'chain-runner://hold'
-        if (belonging) element.frameId = belonging.id
+        if (frameId) element.frameId = frameId
       }
       if (container) container.height = candidate.box.height - 36
       if (bound) bound.text = bound.originalText = bound.rawText = candidate.text
@@ -623,7 +664,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       const continueText = ea.getElement(ea.addText(candidate.continueAt.x, candidate.continueAt.y, '▶ Continue'))
       if (continueText) {
         continueText.customData = stampHold({ ...stamp, role: 'continue' })
-        if (belonging) continueText.frameId = belonging.id
+        if (frameId) continueText.frameId = frameId
       }
     }
     ea.style.strokeColor = GREY
@@ -634,9 +675,8 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     if (custom) {
       custom.customData = stampHold(columnStamp)
       custom.height = column.custom.height
-      if (belonging) custom.frameId = belonging.id
+      if (frameId) custom.frameId = frameId
     }
-    await save(ea, false)
   }
 
   async stackRuns(runIds: readonly string[]): Promise<void> {
@@ -811,6 +851,95 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     const selected = selectedElements(this.ea)
     return selected.map(element => holdStamp(element)?.runId).find(Boolean)
       ?? selectedRunId(selected, noteFrontmatter(this.app, this.view))
+  }
+
+  selectedContinue(): MaybeNodeElement | undefined {
+    const selected = selectedElements(this.ea)
+    const only = selected.length === 1 ? selected[0] : undefined
+    return only && holdStamp(only)?.role === 'continue' ? only : undefined
+  }
+
+  async placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean> {
+    const pick = landing.pick
+    if (!pick) return false
+    const scene = this.ea.getViewElements()
+    if (scene.some(element => {
+      const stamp = pickStamp(element)
+      return stamp?.runId === landing.runId && stamp.nodeId === pick.nodeId && stamp.heading === pick.heading
+    })) return true
+    const candidate = scene.find(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'candidate' && stamp.runId === landing.runId && stamp.nodeId === pick.nodeId
+        && stamp.heading === pick.heading && element.type !== 'text'
+    })
+    if (!candidate) return false
+    const frame = scene.find(element => element.type === 'frame' && element.id === candidate.frameId)
+    const row = buildPickRow({ x: candidate.x ?? 0, y: candidate.y ?? 0, width: candidate.width ?? 0, height: candidate.height ?? 0 }, outputs.length)
+    const ea = this.emptied()
+    const edited = [candidate, ...(frame ? [frame] : [])]
+    ea.copyViewElementsToEAforEditing(edited)
+    const chosen = ea.getElement(candidate.id)
+    if (chosen) chosen.strokeStyle = 'solid'
+    const enclosing = frame ? ea.getElement(frame.id) : undefined
+    if (enclosing) enclosing.width = Math.max(enclosing.width ?? 0, row.right + 32 - (enclosing.x ?? 0))
+    const stamp = { runId: landing.runId, nodeId: pick.nodeId, heading: pick.heading }
+    const mark = (element: SceneElement | undefined): void => {
+      if (!element) return
+      element.customData = { ...(typeof element.customData === 'object' && element.customData !== null ? element.customData : {}), ...stampPick(stamp) }
+      if (frame) element.frameId = frame.id
+    }
+    ea.style.strokeColor = INK
+    ea.style.strokeStyle = 'solid'
+    ea.style.fontSize = 16
+    mark(ea.getElement(ea.addText(row.tick.x, row.tick.y, '✓')))
+    if (row.cards.length > 0) {
+      ea.style.fontSize = 14
+      mark(ea.getElement(ea.addText(row.heading.x, row.heading.y, pick.heading)))
+      for (const [along, output] of outputs.entries()) {
+        const { box, step, length } = row.cards[along]!
+        const card = embedNote(this.app, ea, box, output.notePath)
+        if (card) {
+          card.customData = { ...stampPick(stamp), chainRunnerPanel: { runId: landing.runId, index: output.index } }
+          if (frame) card.frameId = frame.id
+        }
+        mark(ea.getElement(ea.addText(step.x, step.y, output.panel.name)))
+        const count = ea.getElement(ea.addText(length.x, length.y, `${output.panel.lines} lines`))
+        mark(count)
+        if (count) count.customData = { ...(count.customData as Record<string, unknown>), chainRunnerPickCount: output.index }
+      }
+      ea.style.strokeColor = LINK_BLUE
+      const direct = ea.getElement(ea.addText(row.direct.x, row.direct.y, '✎ Direct'))
+      if (direct) {
+        direct.customData = { ...stampPick(stamp), ...relabel(direct.customData, landing.runId) }
+        direct.link = 'chain-runner://direct'
+        if (frame) direct.frameId = frame.id
+      }
+    }
+    await save(ea, false)
+    return true
+  }
+
+  async updatePickCounts(landing: RerunLanding): Promise<boolean> {
+    const scene = this.ea.getViewElements()
+    const changed = scene.filter(element => {
+      const stamp = pickStamp(element)
+      const index = (element.customData as Record<string, unknown> | undefined)?.chainRunnerPickCount
+      return stamp?.runId === landing.runId && typeof index === 'number'
+        && element.rawText !== `${landing.panels[index]?.lines ?? 0} lines`
+    })
+    if (changed.length === 0) return false
+    const ea = this.emptied()
+    ea.copyViewElementsToEAforEditing(changed)
+    for (const element of changed) {
+      const copy = ea.getElement(element.id)
+      const index = (element.customData as Record<string, unknown>).chainRunnerPickCount as number
+      if (!copy) continue
+      const value = `${landing.panels[index]?.lines ?? 0} lines`
+      copy.text = copy.originalText = copy.rawText = value
+      ea.refreshTextElementSize?.(copy.id)
+    }
+    await save(ea, false)
+    return true
   }
 }
 

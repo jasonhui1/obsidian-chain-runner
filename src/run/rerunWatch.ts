@@ -1,6 +1,7 @@
 import type { RepliedTurn } from './chat'
 import type { RerunProgress } from './rerunProgress'
 import type { LayoutPanel } from '../engine/types'
+import type { RunEvent } from '../engine/types'
 
 /** Every rerun in flight, shared by drawing cards, output headers and the directing panel. */
 
@@ -20,6 +21,16 @@ export interface RerunLanding {
   runId: string
   chainName: string
   panels: LayoutPanel[]
+  /** A resume from a waiting hold fills its own candidate row on the drawing. */
+  pick?: { nodeId: string; heading: string; pending: number[] }
+}
+
+export interface PickStream {
+  sourceRunId: string
+  chainName: string
+  pick: NonNullable<RerunLanding['pick']>
+  sourcePanels: LayoutPanel[]
+  event: RunEvent
 }
 
 /** What a rerun tells the watch as it goes. `end` comes last, whether it landed or not. */
@@ -27,6 +38,7 @@ export interface RerunReport {
   /** Holds the rerun under `runIds` too, unless another rerun is going under one of them; whether it did. */
   widen(runIds: readonly string[]): boolean
   hear(progress: RerunProgress): void
+  stream(pick: PickStream): Promise<void>
   /** Waits for every lander. */
   land(landed: Omit<RerunLanding, 'from'>): Promise<void>
   end(): void
@@ -39,6 +51,7 @@ export class RerunWatch {
   private readonly reruns = new Map<string, GoingRerun>()
   private readonly listeners = new Set<() => void>()
   private readonly landers = new Set<RerunLander>()
+  private readonly streams = new Set<(pick: PickStream) => Promise<void>>()
 
   /** The time each rerun's start is told by. */
   constructor(readonly now: () => number = Date.now) {}
@@ -70,6 +83,9 @@ export class RerunWatch {
         if (ended) return
         rerun = { ...rerun, progress }
         record()
+      },
+      stream: async pick => {
+        for (const listener of [...this.streams]) await listener(pick)
       },
       land: async landed => {
         for (const lander of [...this.landers]) await lander({ from: runs, ...landed })
@@ -108,6 +124,11 @@ export class RerunWatch {
   onLanding(lander: RerunLander): () => void {
     this.landers.add(lander)
     return () => this.landers.delete(lander)
+  }
+
+  onPickStream(listener: (pick: PickStream) => Promise<void>): () => void {
+    this.streams.add(listener)
+    return () => this.streams.delete(listener)
   }
 
   private changed(): void {

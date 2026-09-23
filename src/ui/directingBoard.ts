@@ -29,8 +29,6 @@ export interface DirectingBoardDeps {
   openEditor: (text: string, changed: () => void) => ProposalEditor
   openMenu: (event: MouseEvent, items: MenuItem[]) => void
   clock: Clock
-  /** Reports whether `frame` cuts its content off, now and whenever that changes; returns what stops it. */
-  watchOverflow: (frame: HTMLElement, changed: (overflowing: boolean) => void) => () => void
 }
 
 export interface MenuItem {
@@ -55,7 +53,6 @@ export class DirectingBoard {
   private state: DirectingState = { kind: 'idle' }
   /** The proposal whose tab is open; `undefined` is the Run tab. */
   private tab: string | undefined
-  private readonly unclamped = new Set<string>()
   private readonly boxes = new TypingBoxes(() => this.redraw())
   /** What the panel holds for each run beyond its note, moved on with the hold when it lands elsewhere. */
   private readonly runs = new Map<string, RunShown>()
@@ -84,7 +81,6 @@ export class DirectingBoard {
 
   /** Shows a run afresh, on the named proposal's tab or else the Run tab; `hold` is what the hold module answered for it. */
   show(runId: string, hold: Hold | undefined, proposal?: string, holdId?: string): void {
-    this.unclamped.clear()
     this.tab = proposal
     this.focusHoldId = holdId
     this.draw(stateOf(hold, runId))
@@ -514,13 +510,10 @@ export class DirectingBoard {
   /** A `stale` proposal is being written again, so it is shown greyed. */
   private proposalText(el: HTMLElement, hold: Hold, name: string, text: string, stale: boolean): void {
     const { runId } = hold
-    const { el: shown, fresh } = this.tree.place(el, 'div', `${CLS}-proposal`)
+    const { el: shown } = this.tree.place(el, 'div', `${CLS}-proposal`)
     shown.classList.toggle('is-stale', stale)
     this.markdown(shown, text || '*This proposal is empty.*')
-    const whole = this.unclamped.has(name)
-    shown.classList.toggle('is-clamped', !whole)
     const actions = this.add(el, 'div', `${CLS}-proposal-actions`)
-    const toggle = this.button(actions, whole ? 'Show less' : 'Show the whole proposal', `${CLS}-quiet`)
     const edit = this.button(actions, '✎ Edit', `${CLS}-quiet`)
     edit.disabled = this.rewriting(hold, name)
     edit.onclick = (): void => {
@@ -528,21 +521,6 @@ export class DirectingBoard {
       this.shownFor(runId).edits.set(name, open)
       this.redraw()
     }
-    toggle.onclick = (): void => {
-      if (whole) this.unclamped.delete(name)
-      else this.unclamped.add(name)
-      this.redraw()
-    }
-    // Shown whole, the toggle is always there to clamp it again.
-    const offer = this.tree.latest(shown, () => void (toggle.hidden = !this.unclamped.has(name) && !shown.classList.contains('is-overflowing')))
-    if (fresh) {
-      const watching = this.deps.watchOverflow(shown, overflowing => {
-        shown.classList.toggle('is-overflowing', overflowing)
-        offer()
-      })
-      this.tree.bind(shown, watching)
-    }
-    offer()
   }
 
   /** The editor's frame is kept by the edit, so the editor is never moved while it is open (ADR-0012). */

@@ -1088,6 +1088,55 @@ describe('resume', () => {
     expect(notes[PATH]).toContain(`## Resumed\n- [run ${RUN}](${ENGINE_URL}/history/${RUN})\n`)
   })
 
+  it('sends an old card’s stamped answer even after its heading was replaced', async () => {
+    const current: HoldRecord = {
+      nodeId: 'pick', input: '## Candidate 1\nNew alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'New alpha' }], reachedAt: 'then', revision: 3,
+    }
+    waitingAt = [current]
+    notes[PATH] = noteWaitingAt(current)
+    resumeThrown = new EngineHttpError(409, '/resume', '{"error":"Candidates of hold pick are at revision 3, not 2"}')
+    resumeConflictHolds = [current]
+    await makeHolds().resume(RUN, { nodeId: 'pick', heading: 'Old heading', revision: 2 })
+    expect(resumes[0]?.request).toMatchObject({ holdId: 'pick', chosen: 'Old heading', revision: 2 })
+    expect(notices.at(-1)).toContain('revision 3')
+  })
+
+  it('reports the first picked candidate as a landing and streams its output events', async () => {
+    const candidate: HoldRecord = {
+      nodeId: 'pick', input: '## Candidate 1\nOld alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'Old alpha' }], reachedAt: 'then', revision: 2,
+    }
+    waitingAt = [candidate]
+    notes[PATH] = noteWaitingAt(candidate, 'Candidate 1')
+    const streamed: string[] = []
+    const landed: string[] = []
+    reruns.onPickStream(async pick => void streamed.push(pick.event.type))
+    reruns.onLanding(async one => void landed.push(`${one.runId}:${one.pick?.heading}:${one.pick?.nodeId}`))
+    await makeHolds().resume(RUN, { nodeId: 'pick', heading: 'Candidate 1', revision: 2 })
+    expect(resumes[0]?.request).toMatchObject({ chosen: 'Candidate 1', revision: 2 })
+    expect(streamed).toContain('run_start')
+    expect(landed).toEqual([`${RUN}:Candidate 1:pick`])
+  })
+
+  it('sends a drawing pick with Direction and the hold note’s ticked canon', async () => {
+    const candidate: HoldRecord = {
+      nodeId: 'pick', input: '## Candidate 1\nOld alpha',
+      candidates: [{ heading: 'Candidate 1', body: 'Old alpha' }], reachedAt: 'then', revision: 2,
+    }
+    waitingAt = [candidate]
+    notes[PATH] = noteWaitingAt(candidate).replace('## Direction\n', '## Direction\nCHANGE: Keep the old world\n')
+    notes[CANON] = '## LOCKED\n- already settled\n'
+    const holds = makeHolds()
+    await holds.pickCandidate(RUN, 'pick', 'Candidate 1', true)
+    await holds.resume(RUN, { nodeId: 'pick', heading: 'Candidate 1', revision: 2 })
+    expect(resumes[0]?.request).toMatchObject({
+      chosen: 'Candidate 1', revision: 2,
+      direction: expect.stringContaining('CHANGE: Keep the old world') as string,
+      context: { 'canon-anime-game': '## LOCKED\n- already settled\n' },
+    })
+  })
+
   it('writes a fork its own hold, refreshes the one it forked from, and answers the fork’s', async () => {
     resumeFrames = started(RESUMED)
     const resumed = await makeHolds().resume(RUN)

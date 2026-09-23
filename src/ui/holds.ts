@@ -56,7 +56,7 @@ import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type 
 import type { EngineClient } from '../engine/client'
 import { engineFailureMessage, engineSaid } from '../engine/guard'
 import { EngineHttpError } from '../engine/transport'
-import { waitingHolds, type HoldRecord, type LayoutModel, type LayoutPanel, type RunMeta } from '../engine/types'
+import { waitingHolds, type HoldRecord, type LayoutModel, type LayoutPanel, type RunEvent, type RunMeta } from '../engine/types'
 
 /**
  * The hold module: reads a hold note, calls the engine, writes the note and
@@ -112,6 +112,9 @@ export interface Landing {
 export type CanonOutcome = 'written' | 'held-back' | 'none'
 
 export type Resumed = Landing & { canon: CanonOutcome }
+
+/** A card's stamped answer, even when a reroll has since replaced its heading. */
+export interface DrawingPick { nodeId: string; heading: string; revision?: number }
 
 /** Whether a send made a revise and landed, rather than answering under its line. */
 export function isLanding(sent: Hold | Landing): sent is Landing {
@@ -321,8 +324,8 @@ export class Holds {
   }
 
   /** The hold answered and the run carried on: ticks locked, the run linked back, a fork given its own hold. */
-  resume(runId: string): Promise<Resumed | undefined> {
-    return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report))
+  resume(runId: string, pick?: DrawingPick): Promise<Resumed | undefined> {
+    return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report, pick))
   }
 
   /** Re-runs the decider for one open hold; an omitted id means the engine's last open hold. */
@@ -606,14 +609,37 @@ export class Holds {
     })
   }
 
-  private async resumed(found: Located, report: RerunReport): Promise<Resumed | undefined> {
+  private async resumed(found: Located, report: RerunReport, pick?: DrawingPick): Promise<Resumed | undefined> {
     const { content, heading } = found
     const direction = directionBlock(content) ?? ''
     const canon = await this.canon()
-    const request = resumeRequest({ direction, said: directionLines(direction), holds: waitingHoldsIn(content), ...(canon !== undefined ? { canon } : {}) })
+    const waiting = waitingHoldsIn(content)
+    const request = resumeRequest({ direction, said: directionLines(direction), holds: waiting, ...(canon !== undefined ? { canon } : {}) })
+    if (pick) {
+      request.chosen = pick.heading
+      request.holdId = pick.nodeId
+      delete request.custom
+      if (pick.revision !== undefined) request.revision = pick.revision
+    }
+    const before = request.chosen ? await this.deps.withEngine(() => this.deps.engine.getLayout(heading.runId)) : undefined
+    const picked = request.chosen ? {
+      nodeId: request.holdId ?? waiting.find(one => one.chosen)?.nodeId ?? waiting.at(-1)?.nodeId ?? '',
+      heading: request.chosen,
+      pending: before?.panels.flatMap((panel, index) => panel.state === 'pending' ? [index] : []) ?? [],
+    } : undefined
 
     let stale = false
-    const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, progressTo(report), () => (stale = true)))
+    const progress = progressTo(report)
+    const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, async event => {
+      progress(event)
+      if (picked && before) await report.stream({
+        sourceRunId: heading.runId,
+        chainName: heading.chainName,
+        pick: picked,
+        sourcePanels: before.panels,
+        event: event as RunEvent,
+      })
+    }, () => (stale = true)))
     if (!resumed) return undefined
     if (resumed.kind === 'refused') {
       if (stale) await this.refresh(heading.runId)
@@ -626,6 +652,15 @@ export class Holds {
     const url = this.deps.runUrl(runId)
     await this.rewrite(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
     const hold = forked ? await this.fork(heading, runId, report) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
+    if (hold && !forked) {
+      const layout = await this.deps.withEngine(() => this.deps.engine.getLayout(runId))
+      if (layout) await report.land({
+        runId,
+        chainName: heading.chainName,
+        panels: layout.panels,
+        ...(picked ? { pick: picked } : {}),
+      })
+    }
     return hold && { hold, forked, ...(error !== undefined ? { error } : {}), canon: locked }
   }
 

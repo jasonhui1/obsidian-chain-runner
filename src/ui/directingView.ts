@@ -33,12 +33,6 @@ export class DirectingView extends ItemView {
           return () => win.clearInterval(id)
         },
       },
-      watchOverflow: (frame, changed) => {
-        const observer = new ResizeObserver(() => changed(frame.scrollHeight > frame.clientHeight + 1))
-        observer.observe(frame)
-        if (frame.firstElementChild) observer.observe(frame.firstElementChild)
-        return () => observer.disconnect()
-      },
     })
   }
 

@@ -136,7 +136,6 @@ let holds: Holds
 let notices: string[]
 let online: boolean
 let released: number
-let overflowing: boolean
 let chainNames: string[]
 let chainsAsked: number
 let menus: MenuItem[][]
@@ -271,10 +270,6 @@ function board(): DirectingBoard {
         return () => void timers.delete(tick)
       },
     },
-    watchOverflow: (_frame, changed) => {
-      changed(overflowing)
-      return () => {}
-    },
   })
 }
 
@@ -344,7 +339,6 @@ beforeEach(() => {
   notices = []
   online = true
   released = 0
-  overflowing = false
   chainNames = []
   chainsAsked = 0
   menus = []
@@ -519,20 +513,10 @@ describe('a proposal tab', () => {
     expect(text()).toContain('A controlled test.')
   })
 
-  it('offers the whole proposal once its text is cut off, and shows all of it when asked', () => {
-    overflowing = true
-    open(hold(), 'gameplay')
-    expect(root.querySelector('.is-clamped')).not.toBeNull()
-    expect(button('Show the whole proposal').hidden).toBe(false)
-    button('Show the whole proposal').click()
-    expect(root.querySelector('.is-clamped')).toBeNull()
-    expect(button('Show less').hidden).toBe(false)
-  })
-
-  it('offers nothing when none of the text is cut off', () => {
+  it('shows the whole proposal on its tab', () => {
     open(hold(), 'world')
-    expect(button('Show the whole proposal').hidden).toBe(true)
-    expect(root.querySelector('.is-overflowing')).toBeNull()
+    expect(root.querySelector('.is-clamped')).toBeNull()
+    expect(text()).toContain('A controlled test.')
   })
 
   it('lists only that proposal’s canon lines, and ticks one in the note', async () => {
