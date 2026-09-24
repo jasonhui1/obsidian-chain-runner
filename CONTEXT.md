@@ -151,11 +151,12 @@ _Avoid_: verb bar, proposal buttons
 
 **Hold column**:
 A waiting hold as the drawing shows it: its prompt, its candidates one under
-another, and a card for the human's own words. Picking one resumes the hold.
+another, and a card for the human's own words. Picking one starts an independent
+run and leaves the other candidates available.
 _Avoid_: idea list, options
 
 **Pick row**:
 What one answered candidate ran into, drawn to its right on the drawing: the
-panels after the hold, one card tall. The first pick fills the run's own row;
-a pick that forks gets a row of its own.
+panels after the hold, one card tall. Each pick from the drawing forks a run
+and gets a row of its own.
 _Avoid_: branch (that is the engine's older fork), lane

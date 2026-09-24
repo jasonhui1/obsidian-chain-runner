@@ -18,10 +18,6 @@ describe('Continue on a drawing', () => {
     const continueFromDrawing = new ContinueFromDrawing({
       surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
       holds: {
-        pickCandidate: async () => {
-          actions.push('pick')
-          return { holds: [{ nodeId: 'pick', chosen: 'Candidate 1' }] } as Awaited<ReturnType<Holds['pickCandidate']>>
-        },
         resume: async (_runId, pick) => {
           actions.push(`resume ${pick?.revision}`)
           await gate
@@ -38,11 +34,11 @@ describe('Continue on a drawing', () => {
     continueFromDrawing.handleDoubleClick()
     continueFromDrawing.handleTextEdit(element, view)
     await settle()
-    expect(actions).toEqual(['pick', 'resume 2'])
+    expect(actions).toEqual(['resume 2'])
     now = 200
     continueFromDrawing.handleDoubleClick()
     await settle()
-    expect(actions.filter(action => action === 'pick')).toHaveLength(1)
+    expect(actions.filter(action => action === 'resume 2')).toHaveLength(1)
     release()
     await settle()
   })
@@ -53,7 +49,6 @@ describe('Continue on a drawing', () => {
       surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
       holds: {
         read: async () => ({ holds: [{ nodeId: 'pick', revision: 3 }] }) as Awaited<ReturnType<Holds['read']>>,
-        pickCandidate: async () => { actions.push('ticked'); return undefined },
         resume: async (_runId, pick) => { actions.push(`engine ${pick?.revision}`); return undefined },
       },
       notify: message => void actions.push(message),
@@ -72,7 +67,6 @@ describe('Continue on a drawing', () => {
       surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
       holds: {
         read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
-        pickCandidate: async () => { actions.push('ticked'); return undefined },
         resume: async () => { actions.push('resumed'); return undefined },
       },
       notify: message => void actions.push(message), now: () => 100,
@@ -82,5 +76,31 @@ describe('Continue on a drawing', () => {
     continueFromDrawing.handleDoubleClick()
     await settle()
     expect(actions).toEqual(['resumed'])
+  })
+
+  it('starts different candidates before either continuation finishes', async () => {
+    const calls: string[] = []
+    let release = (): void => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let now = 100
+    const continueFromDrawing = new ContinueFromDrawing({
+      surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
+      holds: {
+        read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
+        resume: async (_runId, pick) => { calls.push(pick!.heading); await gate; return undefined },
+      },
+      notify: message => void calls.push(message), now: () => now,
+      refreshColumn: async () => {},
+    })
+    for (const heading of ['Candidate 1', 'Candidate 2', 'Candidate 3']) {
+      const candidate = { customData: stampHold({ ...stamp, heading }) }
+      continueFromDrawing.handleSelection(candidate, view)
+      continueFromDrawing.handleDoubleClick()
+      now += 100
+    }
+    await settle()
+    expect(calls).toEqual(['Candidate 1', 'Candidate 2', 'Candidate 3'])
+    release()
+    await settle()
   })
 })

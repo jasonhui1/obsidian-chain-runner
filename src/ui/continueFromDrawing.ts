@@ -8,7 +8,7 @@ const DOUBLE_CLICK_MS = 1000
 
 export interface ContinueFromDrawingDeps {
   surface: SelectionSurface
-  holds: Pick<Holds, 'pickCandidate' | 'resume' | 'read'>
+  holds: Pick<Holds, 'resume' | 'read'>
   notify: (message: string) => void
   now: () => number
   refreshColumn: (runId: string, nodeId: string, view: DrawingView) => Promise<void>
@@ -59,13 +59,9 @@ export class ContinueFromDrawing {
   }
 
   private start(stamp: HoldStamp, view: DrawingView): void {
-    const key = `${stamp.runId}:${stamp.nodeId}`
+    const key = `${stamp.runId}:${stamp.nodeId}:${stamp.heading}`
     const now = this.deps.now()
-    const active = this.going.get(key)
-    if (active) {
-      if (active !== stamp.heading) this.deps.notify(`${active} is still continuing. Wait for it to finish.`)
-      return
-    }
+    if (this.going.has(key)) return
     if (now - (this.startedAt.get(key) ?? -Infinity) < DOUBLE_CLICK_MS) return
     this.going.set(key, stamp.heading)
     this.startedAt.set(key, now)
@@ -74,13 +70,6 @@ export class ContinueFromDrawing {
 
   private async pick(stamp: HoldStamp, view: DrawingView): Promise<void> {
     try {
-      const current = await this.deps.holds.read(stamp.runId)
-      if (!current) return
-      const open = current.holds.find(hold => hold.nodeId === stamp.nodeId)
-      if (open?.revision === stamp.revision) {
-        const picked = await this.deps.holds.pickCandidate(stamp.runId, stamp.nodeId, stamp.heading, true)
-        if (!picked) return
-      }
       const resumed = await this.deps.holds.resume(stamp.runId, { nodeId: stamp.nodeId, heading: stamp.heading, revision: stamp.revision })
       if (!resumed) {
         const refreshed = await this.deps.holds.read(stamp.runId)

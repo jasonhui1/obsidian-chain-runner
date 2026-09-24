@@ -1,6 +1,6 @@
 # ADR-0016: A hold on the drawing is a fork point
 
-Date: 2026-09-23 · Status: accepted
+Date: 2026-09-23 · Amended: 2026-09-24 · Status: accepted
 
 ## Context
 
@@ -46,9 +46,9 @@ candidate that produced it. The step names are written once above the rows,
 because every pick row runs the same recorded graph. Reading down a column
 compares one step across candidates.
 
-**A continuation from the hold column adds a row. It never re-points one.** The
-first pick fills the run's own row. A pick that forks gets a row of its own and
-its own `✎ Direct`. The engine decides which it is, and the run of record is the
+**A continuation from the hold column adds a row. It never re-points one.** Each
+pick starts a separate run and gets its own row and `✎ Direct`. The source hold
+stays open so other candidates can start immediately. The run of record is the
 stream's first `run_start` (ADR-0013).
 
 **A pick on the drawing is the panel's Resume.** It ticks the candidate in the
@@ -135,9 +135,10 @@ found by its stamp.
 so the column's `⟳ Reroll` goes away once a candidate is answered. Rerolling an
 answered hold needs an engine change (maestro-playground #147).
 
-**One continuation at a time per run.** The engine refuses a resume while the
-run is running, so the other candidates' `▶ Continue` wait and say which pick
-is still going.
+**Different candidates can continue together.** Each drawing pick forks from
+the waiting hold, including the first. Live notes and drawing writes stay
+separate by picked run, while writes to the shared source note and drawing are
+serialized. A repeated double-click on the same candidate starts only one run.
 
 **A candidate card is stamped with its run id, hold node id, heading and
 candidate revision.** A pick from a set a reroll replaced is refused by the

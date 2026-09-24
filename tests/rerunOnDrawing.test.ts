@@ -110,7 +110,7 @@ describe('RerunOnDrawing', () => {
       },
       notify: message => void notices.push(message),
     })
-    const stream = { sourceRunId: OLD, chainName: 'creative-director', pick: { nodeId: 'pick', heading: 'Candidate 1', pending: [0] }, sourcePanels: [pending] }
+    const stream = { sourceRunId: OLD, runId: OLD, chainName: 'creative-director', pick: { nodeId: 'pick', heading: 'Candidate 1', pending: [0] }, sourcePanels: [pending] }
     await picked.streamPick({ ...stream, event: started(OLD)[0]! })
     await picked.streamPick({ ...stream, event: { type: 'token', nodeId: 'world', token: 'First line\nSecond' } })
     expect(placed).toEqual([`runs/${OLD}/World.md`])
@@ -145,12 +145,83 @@ describe('RerunOnDrawing', () => {
       notify: message => void notices.push(message),
     })
     const pick = { nodeId: 'pick', heading: 'Candidate 2', pending: [0] }
-    const stream = { sourceRunId: OLD, chainName: 'creative-director', pick, sourcePanels: [pending] }
+    const stream = { sourceRunId: OLD, runId: NEW, chainName: 'creative-director', pick, sourcePanels: [pending] }
     await picked.streamPick({ ...stream, event: started(NEW)[0]! })
     await picked.streamPick({ ...stream, event: { type: 'token', nodeId: 'world', token: 'New route' } })
     await picked.land({ from: [OLD], runId: NEW, chainName: 'creative-director', panels: [{ ...pending, state: 'filled', text: 'New route', lines: 1 }], pick })
     expect(rows).toEqual([`${NEW}:Candidate 2:runs/${NEW}/World.md`])
     expect(writes).toContain('New route')
+    expect(notices).toEqual([])
+  })
+
+  it('keeps interleaved candidates in separate rows and output notes', async () => {
+    const rows: string[] = []
+    const writes: string[] = []
+    const view: DrawingView = { file: null }
+    const pending: LayoutPanel = { name: 'World', node: 'world', text: '', lines: 0, state: 'pending' }
+    const picked = new RerunOnDrawing({
+      surface: {
+        unavailable: () => undefined, openViews: () => [view],
+        on: () => ({
+          pickSources: () => [],
+          placePickRow: async one => { if (!rows.includes(one.runId)) rows.push(one.runId); return true },
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+        }),
+      },
+      notes: {
+        open: async (_panel, run) => ({ path: `runs/${run.runId}/World.md`, write: async panel => { writes.push(`${run.runId}:${panel.text}`) } }),
+        write: async () => { throw new Error('streamed notes must be reused') },
+      },
+      notify: message => void notices.push(message),
+    })
+    for (const [runId, heading] of [[NEW, 'Candidate 1'], ['other-fork', 'Candidate 2']]) {
+      await picked.streamPick({ sourceRunId: OLD, runId, chainName: 'creative-director',
+        pick: { nodeId: 'pick', heading, pending: [0] }, sourcePanels: [pending], event: started(runId)[0]! })
+    }
+    for (const [runId, heading, token] of [[NEW, 'Candidate 1', 'Alpha\nnext'], ['other-fork', 'Candidate 2', 'Beta\nnext']]) {
+      await picked.streamPick({ sourceRunId: OLD, runId, chainName: 'creative-director',
+        pick: { nodeId: 'pick', heading, pending: [0] }, sourcePanels: [pending], event: { type: 'token', nodeId: 'world', token } })
+    }
+    expect(rows).toEqual([NEW, 'other-fork'])
+    expect(writes).toContain(`${NEW}:Alpha\nnext`)
+    expect(writes).toContain('other-fork:Beta\nnext')
+    expect(writes).not.toContain(`${NEW}:Beta\nnext`)
+    expect(notices).toEqual([])
+  })
+
+  it('serializes writes to one open drawing while two picks start', async () => {
+    let active = 0
+    let mostActive = 0
+    const view: DrawingView = { file: null }
+    const picked = new RerunOnDrawing({
+      surface: {
+        unavailable: () => undefined, openViews: () => [view],
+        on: () => ({
+          pickSources: () => [],
+          placePickRow: async () => {
+            active++
+            mostActive = Math.max(mostActive, active)
+            await new Promise(resolve => setTimeout(resolve, 0))
+            active--
+            return true
+          },
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+        }),
+      },
+      notes: {
+        open: async (_panel, run) => ({ path: `runs/${run.runId}/World.md`, write: async () => {} }),
+        write: async () => undefined,
+      },
+      notify: message => void notices.push(message),
+    })
+    const start = (runId: string, heading: string) => picked.streamPick({
+      sourceRunId: OLD, runId, chainName: 'creative-director',
+      pick: { nodeId: 'pick', heading, pending: [0] },
+      sourcePanels: [{ name: 'World', node: 'world', text: '', lines: 0, state: 'pending' }],
+      event: started(runId)[0]!,
+    })
+    await Promise.all([start(NEW, 'Candidate 1'), start('other-fork', 'Candidate 2')])
+    expect(mostActive).toBe(1)
     expect(notices).toEqual([])
   })
 

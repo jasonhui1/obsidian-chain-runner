@@ -233,6 +233,8 @@ export interface Capabilities {
   runHolds?: boolean
   /** `POST /api/runs/:id/resume` answers a hold and carries the run on (#54). */
   runResume?: boolean
+  /** Resume a picked hold into a new run while leaving the source open (#76). */
+  resumeFork?: boolean
   /** `POST /api/runs/:id/nodes/:nodeId/promote` makes a chat reply the node's output (#54). */
   nodePromote?: boolean
   /** `POST /api/runs/:id/fork` reruns descendants of revised outputs (#67). */
@@ -288,6 +290,8 @@ export interface ResumeRequest {
   holdId?: string
   /** The candidate set version the human picked from. */
   revision?: number
+  /** Start an independent run, including for a hold not yet answered. */
+  fork?: boolean
   /** Overrides a `context` node's file, keyed by the node's declared `file`. */
   context?: Record<string, string>
 }

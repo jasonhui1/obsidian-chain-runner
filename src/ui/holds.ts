@@ -58,7 +58,7 @@ import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type 
 import type { EngineClient } from '../engine/client'
 import { engineFailureMessage, engineSaid } from '../engine/guard'
 import { EngineHttpError } from '../engine/transport'
-import { waitingHolds, type HoldRecord, type LayoutModel, type LayoutPanel, type RunEvent, type RunMeta } from '../engine/types'
+import { runIdOf, waitingHolds, type HoldRecord, type LayoutModel, type LayoutPanel, type RunEvent, type RunMeta } from '../engine/types'
 
 /**
  * The hold module: reads a hold note, calls the engine, writes the note and
@@ -89,6 +89,7 @@ export const NO_EDITED_PROPOSAL = 'Edit a proposal in this hold note first'
 export const ALREADY_GOING = 'This hold is already rerunning or resuming — wait for it to land'
 export const NO_OPEN_HOLD = 'This run has no open hold to reroll'
 export const UNSUPPORTED_FEEDBACK = 'This engine cannot save hold feedback. Update maestro-playground.'
+export const UNSUPPORTED_INDEPENDENT_PICK = 'This engine cannot run candidates independently. Update maestro-playground.'
 
 /** A trigger line in the Conversation with no answer under it yet. */
 export type PendingTrigger =
@@ -192,6 +193,7 @@ interface LandingOptions {
 }
 
 export class Holds {
+  private readonly noteWrites = new Map<string, Promise<void>>()
   private readonly panels: RunPanels
 
   constructor(private readonly deps: HoldsDeps) {
@@ -326,8 +328,14 @@ export class Holds {
   }
 
   /** The hold answered and the run carried on: ticks locked, the run linked back, a fork given its own hold. */
-  resume(runId: string, pick?: DrawingPick): Promise<Resumed | undefined> {
-    return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report, pick))
+  async resume(runId: string, pick?: DrawingPick): Promise<Resumed | undefined> {
+    if (pick) {
+      const capabilities = await this.deps.engine.capabilities()
+      if (!capabilities.resumeFork) return this.refuse(UNSUPPORTED_INDEPENDENT_PICK)
+      const found = await this.locateOrRefuse(runId)
+      return found && this.resumed(found, this.deps.reruns.independent(found.runIds), pick)
+    }
+    return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report))
   }
 
   /** Re-runs the decider for one open hold; an omitted id means the engine's last open hold. */
@@ -410,7 +418,7 @@ export class Holds {
   }
 
   private async rewrite(found: Located, change: (content: string) => string): Promise<boolean> {
-    return (await this.guarded('the hold note', () => this.deps.store.process(found.path, change))) !== undefined
+    return (await this.guarded('the hold note', () => this.queueNoteWrite(found.path, () => this.deps.store.process(found.path, change)))) !== undefined
   }
 
   /** A vault write the reader's setup can refuse: `undefined`, once a notice has said why. */
@@ -620,6 +628,7 @@ export class Holds {
     if (pick) {
       request.chosen = pick.heading
       request.holdId = pick.nodeId
+      request.fork = true
       delete request.custom
       if (pick.revision !== undefined) request.revision = pick.revision
     }
@@ -632,10 +641,13 @@ export class Holds {
 
     let stale = false
     const progress = progressTo(report)
+    let streamRunId: string | undefined
     const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, async event => {
       progress(event)
-      if (picked && before) await report.stream({
+      streamRunId = runIdOf(event as RunEvent) ?? streamRunId
+      if (picked && before && streamRunId) await report.stream({
         sourceRunId: heading.runId,
+        runId: streamRunId,
         chainName: heading.chainName,
         pick: picked,
         sourcePanels: before.layout.panels,
@@ -769,14 +781,23 @@ export class Holds {
   /** A note created, or rewritten from what it held, folders and all; whether the vault took it. */
   private async writeNote(path: string, what: string, content: (previous: string | undefined) => string): Promise<boolean> {
     const { store } = this.deps
-    const wrote = await this.guarded(what, async () => {
+    const wrote = await this.guarded(what, () => this.queueNoteWrite(path, async () => {
       await ensureFolder(store, folderOf(path))
       const previous = await store.read(path)
       const next = content(previous)
       if (previous === undefined) await store.create(path, next)
       else if (next !== previous) await store.modify(path, next)
-    })
+    }))
     return wrote !== undefined
+  }
+
+  private async queueNoteWrite(path: string, write: () => Promise<void>): Promise<void> {
+    const previous = this.noteWrites.get(path) ?? Promise.resolve()
+    const current = previous.catch(() => {}).then(write)
+    this.noteWrites.set(path, current)
+    try { await current } finally {
+      if (this.noteWrites.get(path) === current) this.noteWrites.delete(path)
+    }
   }
 
   private canon(): Promise<string | undefined> {

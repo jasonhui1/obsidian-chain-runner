@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   ALREADY_GOING,
   Holds,
@@ -181,6 +181,7 @@ let resumeThrown: unknown
 let feedbackThrown: unknown
 let rerollConflictHolds: HoldRecord[] | undefined
 let resumeConflictHolds: HoldRecord[] | undefined
+let resumeFramesFor: ((request: ResumeRequest) => RunEvent[]) | undefined
 let feedbackConflictHolds: HoldRecord[] | undefined
 /** Holds each streaming call until the test lets it go. */
 let gate: Promise<void> | undefined
@@ -242,7 +243,7 @@ function makeHolds(): Holds {
         throw resumeThrown
       }
       await gate
-      yield* resumeFrames
+      yield* resumeFramesFor?.(request) ?? resumeFrames
     },
     updateHoldFeedback: (runId: string, holdId: string, feedback: string) => {
       feedbackPatches.push({ runId, holdId, feedback })
@@ -314,7 +315,7 @@ beforeEach(() => {
   promotes = []
   online = true
   layoutsOf = []
-  capabilities = { runFork: true }
+  capabilities = { runFork: true, resumeFork: true }
   chatFrames = undefined
   chats = []
   conversations = {}
@@ -325,6 +326,7 @@ beforeEach(() => {
   feedbackThrown = undefined
   rerollConflictHolds = undefined
   resumeConflictHolds = undefined
+  resumeFramesFor = undefined
   feedbackConflictHolds = undefined
   gate = undefined
   reruns = new RerunWatch()
@@ -1107,6 +1109,13 @@ describe('resume', () => {
     expect(notices.at(-1)).toContain('revision 3')
   })
 
+  it('does not start an independent pick on an older engine', async () => {
+    capabilities = { runResume: true }
+    expect(await makeHolds().resume(RUN, { nodeId: 'pick', heading: 'Candidate 1', revision: 2 })).toBeUndefined()
+    expect(resumes).toEqual([])
+    expect(notices).toEqual(['This engine cannot run candidates independently. Update maestro-playground.'])
+  })
+
   it('reports the first picked candidate as a landing and streams its output events', async () => {
     const candidate: HoldRecord = {
       nodeId: 'pick', input: '## Candidate 1\nOld alpha',
@@ -1134,6 +1143,37 @@ describe('resume', () => {
     expect(resumes[0]?.request).toMatchObject({ holdId: 'pick', chosen: 'Candidate 2', revision: 2 })
     expect(landed).toEqual([{ runId: RESUMED, heading: 'Candidate 2' }])
     expect(pending).toContainEqual([2])
+  })
+
+  it('runs two drawing picks together and lands both rows', async () => {
+    const candidate: HoldRecord = {
+      nodeId: 'pick', input: '## Candidate 1\nAlpha\n\n## Candidate 2\nBeta',
+      candidates: [{ heading: 'Candidate 1', body: 'Alpha' }, { heading: 'Candidate 2', body: 'Beta' }],
+      reachedAt: 'then', revision: 2,
+    }
+    waitingAt = [candidate]
+    notes[PATH] = noteWaitingAt(candidate)
+    let release = (): void => {}
+    gate = new Promise<void>(resolve => { release = resolve })
+    resumeFramesFor = request => {
+      const runId = request.chosen === 'Candidate 1' ? NEW : RESUMED
+      return [...started(runId), { type: 'run_complete', runId }]
+    }
+    const landed: string[] = []
+    reruns.onLanding(async one => void landed.push(`${one.runId}:${one.pick?.heading}`))
+    const holds = makeHolds()
+    const first = holds.resume(RUN, { nodeId: 'pick', heading: 'Candidate 1', revision: 2 })
+    const second = holds.resume(RUN, { nodeId: 'pick', heading: 'Candidate 2', revision: 2 })
+    await vi.waitFor(() => expect(resumes).toHaveLength(2))
+    expect(resumes.map(one => one.request)).toEqual([
+      expect.objectContaining({ chosen: 'Candidate 1', fork: true }),
+      expect.objectContaining({ chosen: 'Candidate 2', fork: true }),
+    ])
+    release()
+    await Promise.all([first, second])
+    expect(landed.sort()).toEqual([`${NEW}:Candidate 1`, `${RESUMED}:Candidate 2`].sort())
+    expect(notes[PATH]).toContain(`run ${NEW}`)
+    expect(notes[PATH]).toContain(`run ${RESUMED}`)
   })
 
   it('places a panel-started fork by the candidate recorded on the engine', async () => {

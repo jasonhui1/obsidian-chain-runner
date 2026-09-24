@@ -27,6 +27,7 @@ export interface RerunLanding {
 
 export interface PickStream {
   sourceRunId: string
+  runId: string
   chainName: string
   pick: NonNullable<RerunLanding['pick']>
   sourcePanels: LayoutPanel[]
@@ -55,6 +56,21 @@ export class RerunWatch {
 
   /** The time each rerun's start is told by. */
   constructor(readonly now: () => number = Date.now) {}
+
+  /** Report an independent pick without reserving its source run (#76). */
+  independent(from: readonly string[]): RerunReport {
+    return {
+      widen: () => true,
+      hear: () => {},
+      stream: async pick => {
+        for (const listener of [...this.streams]) await listener(pick)
+      },
+      land: async landed => {
+        for (const lander of [...this.landers]) await lander({ from, ...landed })
+      },
+      end: () => {},
+    }
+  }
 
   /**
    * A rerun of the hold under `from`: the run it branches from, then the runs that
