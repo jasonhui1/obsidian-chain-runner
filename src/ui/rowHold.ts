@@ -4,9 +4,12 @@ import { FRAME_PADDING } from '../run/runFrame'
 import { pickPanelIndexes } from '../run/pickPanels'
 import type { RerunLanding } from '../run/rerunWatch'
 import { directLabelRunId } from './runLabel'
-import { buildHoldColumn, buildPickRow, holdStamp, pickRowBoxes, pickStamp, PICK_COUNT, PICK_GAP, PICK_STEP, type HoldColumn } from './holdColumn'
+import {
+  buildHoldColumn, buildPickRow, holdStamp, nextOwnWordsCard, ownWordsHeight, pickRowBoxes, pickStamp, typedWords,
+  PICK_COUNT, PICK_GAP, PICK_STEP, type HoldColumn, type HoldStamp, type OwnWordsCard,
+} from './holdColumn'
 
-/** A hold reached inside a pick row: its column at the end of the row, and the room made below it (ADR-0016). */
+/** Pick rows on the scene: where a first pick lands, and a hold reached inside one (ADR-0016). */
 
 export interface SceneBlock {
   id: string
@@ -18,6 +21,9 @@ export interface SceneBlock {
   frameId?: string | null
   customData?: unknown
   isDeleted?: boolean
+  text?: string
+  originalText?: string
+  containerId?: string | null
 }
 
 export interface SceneEdits {
@@ -57,6 +63,7 @@ const bottom = (element: SceneBlock): number => top(element) + (element.height ?
 const left = (element: SceneBlock): number => element.x ?? 0
 const right = (element: SceneBlock): number => left(element) + (element.width ?? 0)
 const slotKey = (runId: string, nodeId: string, heading: string): string => `${runId}\n${nodeId}\n${heading}`
+export const boxOf = (element: SceneBlock): Box => ({ x: left(element), y: top(element), width: element.width ?? 0, height: element.height ?? 0 })
 
 export function heldInRow(run: RunMeta, pick: Pick, panels: readonly LayoutPanel[]): HeldInRow | undefined {
   if (run.status !== 'waiting') return undefined
@@ -170,7 +177,7 @@ export function rowHold(scene: readonly SceneBlock[], request: RowHoldRequest): 
   const unreached = new Set(held.unreached)
   const edits = blankEdits(row.filter(element => unreached.has(rowIndex(element) ?? -1)).map(element => element.id))
 
-  const box = { x: left(candidate), y: top(candidate), width: candidate.width ?? 0, height: candidate.height ?? 0 }
+  const box = boxOf(candidate)
   const cards = row.filter(element => element.type === 'embeddable' && !edits.removed.includes(element.id))
     .sort((one, other) => left(one) - left(other))
   const cardBoxes = pickRowBoxes(box, cards.length)
@@ -199,4 +206,95 @@ export function rowHold(scene: readonly SceneBlock[], request: RowHoldRequest): 
   const frameId = candidate.frameId ?? undefined
   roomBelow(live, { frameId, from: box.y, clear, stays: element => inRow(element) || ofSlot(element) }, edits)
   return { ...edits, columns, ...(frameId ? { frameId } : {}) }
+}
+
+/** The element of one hold, in one role, that `match` also accepts. */
+export function findHeld<Element extends SceneBlock>(
+  scene: readonly Element[],
+  role: HoldStamp['role'],
+  runId: string,
+  nodeId: string,
+  match: (element: Element, stamp: HoldStamp) => boolean = () => true,
+): Element | undefined {
+  return scene.find(element => {
+    const stamp = holdStamp(element)
+    return stamp?.role === role && stamp.runId === runId && stamp.nodeId === nodeId && match(element, stamp)
+  })
+}
+
+export interface PickRowRequest {
+  runId: string
+  /** The runs the landing reran; the first is the one whose candidate the row sits beside. */
+  from: readonly string[]
+  pick: Pick
+  count: number
+}
+
+/** A first pick's row beside its card: what it changes on the scene, and where its own elements go. */
+export interface PickRow extends SceneEdits {
+  /** The card the row sits beside, drawn solid once picked. */
+  candidate: string
+  /** Every scene element the row changes, in the order to copy them. */
+  touched: string[]
+  frameId?: string
+  row: ReturnType<typeof buildPickRow>
+  /** A used own-words card: its words, their new text when it changes, and the empty card that waits below. */
+  ownWords?: { wordsId?: string; text?: string; next: OwnWordsCard }
+}
+
+/** Whether the landing's row is already on the scene. */
+export function pickRowDrawn(scene: readonly SceneBlock[], runId: string, pick: Pick): boolean {
+  return scene.some(element => {
+    const stamp = pickStamp(element)
+    return stamp?.runId === runId && stamp.nodeId === pick.nodeId && stamp.heading === pick.heading
+  })
+}
+
+/** Where a first pick's row goes, or `undefined` when its card is not on the scene. */
+export function pickRow(scene: readonly SceneBlock[], request: PickRowRequest): PickRow | undefined {
+  const { runId, from, pick, count } = request
+  const sourceRunId = from[0] ?? runId
+  const card = (role: HoldStamp['role'], heading: string): SceneBlock | undefined =>
+    findHeld(scene, role, sourceRunId, pick.nodeId, (element, stamp) => element.type !== 'text' && stamp.heading === heading)
+  // Only the empty own-words card is free; a used one already has its row.
+  const candidate = pick.words === undefined ? card('candidate', pick.heading) : card('custom', '')
+  if (!candidate) return undefined
+  const frame = scene.find(element => element.type === 'frame' && element.id === candidate.frameId)
+  const reroll = scene.find(element => {
+    const stamp = holdStamp(element)
+    return stamp?.role === 'reroll' && (stamp.runId === runId || from.includes(stamp.runId)) && stamp.nodeId === pick.nodeId
+  })
+  const row = buildPickRow(boxOf(candidate), count)
+  const edits = blankEdits(reroll ? [reroll.id] : [])
+  const touched = [candidate, frame, reroll]
+  let frameHeight: number | undefined
+  let ownWords: PickRow['ownWords']
+  if (holdStamp(candidate)?.role === 'custom') {
+    const words = scene.find(element => element.type === 'text' && element.containerId === candidate.id)
+    const continueLine = findHeld(scene, 'continue', sourceRunId, pick.nodeId, (_, stamp) => stamp.custom === true)
+    const column = findHeld(scene, 'column', sourceRunId, pick.nodeId, element => element.type === 'rectangle')
+    touched.push(words, continueLine, column)
+    if (continueLine) edits.removed.push(continueLine.id)
+    // A rebuilt row finds the card still empty; typed words can still start with the placeholder.
+    const text = words && (typedWords(words.originalText ?? words.text ?? '') || (pick.words ?? pick.heading))
+    const changed = text !== undefined && text !== words?.originalText
+    const used = changed ? { ...boxOf(candidate), height: ownWordsHeight(boxOf(candidate), text) } : boxOf(candidate)
+    if (changed) edits.resized.set(candidate.id, { height: used.height })
+    const next = nextOwnWordsCard(used)
+    if (column) edits.resized.set(column.id, { height: Math.max(column.height ?? 0, next.columnBottom - top(column)) })
+    if (frame) frameHeight = Math.max(frame.height ?? 0, next.columnBottom + FRAME_PADDING - top(frame))
+    ownWords = { ...(words ? { wordsId: words.id } : {}), ...(changed ? { text } : {}), next }
+  }
+  if (frame) {
+    const width = Math.max(frame.width ?? 0, row.right + 32 - left(frame))
+    edits.resized.set(frame.id, { width, ...(frameHeight === undefined ? {} : { height: frameHeight }) })
+  }
+  return {
+    ...edits,
+    candidate: candidate.id,
+    touched: touched.filter(element => element !== undefined).map(element => element.id),
+    ...(frame ? { frameId: frame.id } : {}),
+    row,
+    ...(ownWords ? { ownWords } : {}),
+  }
 }

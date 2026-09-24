@@ -5,6 +5,15 @@ behavior that the API alone does not make clear. User steps belong in
 [README.md](../../README.md); product decisions belong in [the ADRs](../adr/).
 [docs/spike-ea.md](../spike-ea.md) holds the original live probes.
 
+## Where the code is
+
+`src/ui/excalidraw.ts` reaches the plugin, installs the hooks and binds a
+drawing for one gesture. `src/ui/excalidrawApi.ts` types the slice of EA it
+calls. Each role draws in its own module over `src/ui/boundDrawing.ts`:
+`nodeDrawing.ts`, `runFrameDrawing.ts`, `holdDrawing.ts` (hold columns and
+pick rows) and `proposalDrawing.ts`. Where a hold or pick row lands is worked
+out without EA in `holdColumn.ts` and `rowHold.ts`.
+
 ## Evidence boundary
 
 The code requires Excalidraw 2.0.0 or newer. Most live observations below came
@@ -32,7 +41,7 @@ before treating that path as verified.
 - `setView` silently retains an old binding if given something other than an
   `ExcalidrawView`. A tab Obsidian has not loaded is not a usable view.
 - `addElementsToView` can return `false` when its view has unloaded, without
-  throwing. Check the return value. `src/ui/excalidraw.ts` does this in `save()`.
+  throwing. Check the return value. `src/ui/boundDrawing.ts` does this in `save()`.
 - Install link and scene hooks on the shared `plugin.ea`: that is where a
   normal drawing looks for them. Chain any previous hook and restore it on
   unload; each handler should pass through elements it does not own.
