@@ -11,6 +11,7 @@ import { runName, runNameFromMeta } from '../run/runName'
 import { pickPanelIndexes } from '../run/pickPanels'
 import type { EngineClient } from '../engine/client'
 import type { RunMeta } from '../engine/types'
+import { heldInRow } from './rowHold'
 
 /** Live pick rows and rerun cards on open drawings; later opens rebuild missing pick rows. */
 
@@ -55,23 +56,30 @@ export class RerunOnDrawing {
           run.branchedFromRunId === source.runId && run.branchedFromNode === source.nodeId,
         )]
         for (const run of runs) {
-          if (source.placed.includes(run.runId) || run.status === 'running') continue
+          // A placed row can still be missing the hold its run reached after the drawing closed.
+          const placed = source.placed.includes(run.runId)
+          if (run.status === 'running' || (placed && run.status !== 'waiting')) continue
           const heading = chosenAt(run, source.nodeId)
           if (!heading) continue
           const layout = await engine.getLayout(run.runId)
           const pending = source.outputIndexes.length > 0 ? source.outputIndexes : pickPanelIndexes(origin, source.nodeId, layout.panels)
           if (pending.length === 0) continue
-          const outputs: { index: number; panel: LayoutPanel; notePath: string }[] = []
-          for (const index of pending) {
-            const panel = layout.panels[index]
-            if (!panel) continue
-            const notePath = await notes.write(panel, { runId: run.runId, chainName: run.chainName })
-            if (notePath) outputs.push({ index, panel, notePath })
-          }
-          await this.writeDrawing(view, () => surface.on(view).placePickRow({
+          const landing = {
             from: [source.runId], runId: run.runId, chainName: run.chainName,
             panels: layout.panels, pick: { nodeId: source.nodeId, heading, pending },
-          }, outputs))
+          }
+          if (!placed) {
+            const outputs: { index: number; panel: LayoutPanel; notePath: string }[] = []
+            for (const index of pending) {
+              const panel = layout.panels[index]
+              if (!panel) continue
+              const notePath = await notes.write(panel, { runId: run.runId, chainName: run.chainName })
+              if (notePath) outputs.push({ index, panel, notePath })
+            }
+            await this.writeDrawing(view, () => surface.on(view).placePickRow(landing, outputs))
+          }
+          const held = heldInRow(run, landing.pick, layout.panels)
+          if (held) await this.writeDrawing(view, () => surface.on(view).placeRowHold(landing, held))
         }
       } catch (error) {
         notify(error instanceof Error ? error.message : 'Could not rebuild pick rows')
@@ -167,12 +175,14 @@ export class RerunOnDrawing {
       for (const panel of landing.panels) await noteFor(panel.name)
     }
     if (surface.unavailable()) return
-    const run = landing.pick ? undefined : await this.deps.engine?.getRun(landing.runId).catch(() => undefined)
+    const run = await this.deps.engine?.getRun(landing.runId).catch(() => undefined)
     const toTitle = run ? runNameFromMeta(run) : runName({ chainName: landing.chainName, startTime: Date.now() })
+    const held = landing.pick && run ? heldInRow(run, landing.pick, landing.panels) : undefined
     for (const view of surface.openViews()) {
       if (landing.pick) {
         await this.writeDrawing(view, () => surface.on(view).placePickRow(landing, pickOutputs))
         await this.writeDrawing(view, () => surface.on(view).updatePickCounts(landing))
+        if (held) await this.writeDrawing(view, () => surface.on(view).placeRowHold(landing, held))
       } else {
         await this.writeDrawing(view, () => surface.on(view).followRerun(landing.from, landing.runId, noteFor, toTitle))
       }
@@ -190,3 +200,4 @@ function chosenAt(run: RunMeta, nodeId: string): string | undefined {
   const hold = [...(run.holds ?? [])].reverse().find(one => one.nodeId === nodeId && (one.chosen || one.custom))
   return hold?.chosen ?? (hold?.custom ? firstLine(hold.custom) || 'Your own words' : undefined)
 }
+

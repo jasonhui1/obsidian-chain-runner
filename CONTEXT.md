@@ -158,5 +158,6 @@ _Avoid_: idea list, options
 **Pick row**:
 What one answered candidate ran into, drawn to its right on the drawing: the
 panels after the hold, one card tall. Each pick from the drawing forks a run
-and gets a row of its own.
+and gets a row of its own. A row whose run stops at another hold ends in that
+hold's column.
 _Avoid_: branch (that is the engine's older fork), lane
