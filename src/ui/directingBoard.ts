@@ -23,6 +23,7 @@ export interface DirectingBoardDeps {
   chains: () => Promise<string[]>
   /** Where a run is shown on the engine, as it is set now (ADR-0004). */
   runUrl: (runId: string) => string | undefined
+  openUrl: (url: string) => void
   /** Renders markdown into an empty element, returning what releases the render. */
   renderMarkdown: (text: string, into: HTMLElement) => () => void
   /** Opens an editor on a proposal's words, which reports every change. */
@@ -196,12 +197,25 @@ export class DirectingBoard {
     const title = this.add(header, 'div', `${CLS}-title`)
     const runId = runIdOf(this.state)
     this.add(title, 'span', '', this.state.kind === 'hold' ? this.state.hold.chainName : 'Directing')
-    if (runId) this.add(title, 'span', `${CLS}-faint`, ` · ${shortId(runId)}`).title = `run ${runId}`
+    titled(title, runId ? `run ${runId}` : undefined)
     if (this.state.kind !== 'hold') return
     const more = this.button(header, '⋯', `${CLS}-more`)
     more.setAttribute('aria-label', 'More')
-    const { runId: shown } = this.state.hold
-    more.onclick = (event): void => this.deps.openMenu(event, [{ title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(shown) }])
+    const { runId: activeRunId } = this.state.hold
+    more.onclick = (event): void => {
+      const items: MenuItem[] = [
+        { title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(activeRunId) },
+      ]
+      const url = this.deps.runUrl(activeRunId)
+      if (url) {
+        items.push({
+          title: 'Open this run on the engine',
+          icon: 'external-link',
+          click: () => this.deps.openUrl(url),
+        })
+      }
+      this.deps.openMenu(event, items)
+    }
   }
 
   private missing(body: HTMLElement, runId: string): void {

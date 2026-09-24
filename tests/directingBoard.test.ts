@@ -139,6 +139,8 @@ let released: number
 let chainNames: string[]
 let chainsAsked: number
 let menus: MenuItem[][]
+let engineUrlValid: boolean
+let openedUrls: string[]
 /** Every editor the board has opened, in the order it opened them. */
 let editors: FakeEditor[]
 let clock: number
@@ -257,7 +259,8 @@ function board(): DirectingBoard {
       chainsAsked++
       return Promise.resolve(chainNames)
     },
-    runUrl: runId => `http://engine/history/${runId}`,
+    runUrl: runId => (engineUrlValid ? `http://engine/history/${runId}` : undefined),
+    openUrl: url => void openedUrls.push(url),
     renderMarkdown: (text, into) => {
       into.append(document.createTextNode(text))
       return () => void released++
@@ -313,6 +316,8 @@ const selectedTab = (): string | null | undefined => root.querySelector('[role="
 const boxes = (): HTMLInputElement[] => Array.from(root.querySelectorAll('input[type="checkbox"]'))
 const text = (): string => root.textContent ?? ''
 const header = (): string => root.querySelector('.chain-runner-directing-header')?.textContent ?? ''
+const headerTitle = (): HTMLElement | null => root.querySelector('.chain-runner-directing-title')
+const headerTooltip = (): string => headerTitle()?.title ?? ''
 const turns = (): string[] => Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent ?? '')
 const composer = (placeholder: string): HTMLTextAreaElement => {
   const found = Array.from(root.querySelectorAll('textarea')).find(box => box.placeholder === placeholder)
@@ -342,6 +347,8 @@ beforeEach(() => {
   chainNames = []
   chainsAsked = 0
   menus = []
+  engineUrlValid = true
+  openedUrls = []
   editors = []
   clock = 0
   timers = new Set()
@@ -371,10 +378,11 @@ it('draws the hold the note reads as, which every other test draws by hand', asy
 })
 
 describe('header', () => {
-  it('names the chain and the run’s short id', () => {
+  it('names the chain and carries the run id in its tooltip', () => {
     open()
     expect(header()).toContain('creative-director')
-    expect(header()).toContain('ubqPU2')
+    expect(header()).not.toContain('ubqPU2')
+    expect(headerTooltip()).toBe(`run ${RUN}`)
   })
 
   it('offers the hold note in a tab from the ⋯ menu', async () => {
@@ -383,6 +391,22 @@ describe('header', () => {
     menus[0]![0]!.click()
     await settled()
     expect(store.opened).toEqual([PATH])
+  })
+
+  it('offers opening the run on the engine from the ⋯ menu', () => {
+    open()
+    root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
+    const engineItem = menus[0]?.find(item => item.title === 'Open this run on the engine')
+    expect(engineItem?.icon).toBe('external-link')
+    engineItem?.click()
+    expect(openedUrls).toEqual([`http://engine/history/${RUN}`])
+  })
+
+  it('omits opening the run on the engine when the run has no url', () => {
+    engineUrlValid = false
+    open()
+    root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
+    expect(menus[0]!.some(item => item.title === 'Open this run on the engine')).toBe(false)
   })
 })
 
@@ -656,7 +680,7 @@ describe('rerunning downstream', () => {
     expect(forks).toEqual([{ runId: RUN, request: { revisions: { gameplay: 'Rotate stances.' } } }])
     release()
     await settled()
-    expect(header()).toContain('Xy9zW2')
+    expect(headerTooltip()).toContain('Xy9zW2')
     expect(has('Rerunning…')).toBe(false)
     expect(selectedTab()).toBe('world')
     expect(notes[`Maestro/holds/${NEW}.md`]).toBeDefined()
@@ -746,7 +770,7 @@ describe('a rerun going', () => {
     type(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')!, 'A theme park.')
     feed!.end(complete(NEW))
     await settled()
-    expect(header()).toContain('Xy9zW2')
+    expect(headerTooltip()).toContain('Xy9zW2')
     expect(root.querySelector<HTMLTextAreaElement>('.chain-runner-directing-editor textarea')?.value).toBe('A theme park.')
     expect(editors[0]!.destroyed).toBe(false)
   })
@@ -758,7 +782,7 @@ describe('a rerun going', () => {
     button('Save').click()
     feed!.end(complete(NEW))
     await settled()
-    expect(header()).toContain('Xy9zW2')
+    expect(headerTooltip()).toContain('Xy9zW2')
     expect(root.querySelector('.chain-runner-directing-editor')).toBeNull()
   })
 
@@ -786,7 +810,7 @@ describe('a rerun going', () => {
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
     expect(timers.size).toBe(0)
     expect(button('⟳ Rerun downstream').disabled).toBe(false)
-    expect(header()).toContain('ubqPU2')
+    expect(headerTooltip()).toContain('ubqPU2')
   })
 
   it('shows a rerun the palette started, as the drawing and the header read it, and lets go when it lands', async () => {
@@ -807,21 +831,21 @@ describe('a rerun going', () => {
     await settled()
     expect(reruns.going(RUN)).toBeUndefined()
     expect(progress()).toEqual([])
-    expect(header()).toContain('Xy9zW2')
+    expect(headerTooltip()).toContain('Xy9zW2')
   })
 
   it('starts nothing else on the run a rerun is landing on, until it has landed', async () => {
     const resume = (): HTMLButtonElement | null => root.querySelector('.chain-runner-directing-footer button')
-    let whileLanding: { header: string; resume: boolean | undefined } | undefined
+    let whileLanding: { tooltip: string; resume: boolean | undefined } | undefined
     reruns.onLanding(async () => {
       await settled()
-      whileLanding = { header: header(), resume: resume()?.disabled }
+      whileLanding = { tooltip: headerTooltip(), resume: resume()?.disabled }
     })
     await openNote()
     button('⟳ Rerun downstream').click()
     await settled()
     await settled()
-    expect(whileLanding).toEqual({ header: expect.stringContaining('Xy9zW2'), resume: true })
+    expect(whileLanding).toEqual({ tooltip: expect.stringContaining('Xy9zW2'), resume: true })
     expect(resume()?.disabled).toBe(false)
   })
 
@@ -1015,7 +1039,7 @@ describe('a proposal tab, chatting', () => {
     expect(promoted).toEqual([{ nodeId: 'world', turn: 2 }])
     release()
     await settled()
-    expect(header()).toContain('Xy9zW2')
+    expect(headerTooltip()).toContain('Xy9zW2')
     expect(text()).toContain('Used as the revision · run Xy9zW2')
   })
 
@@ -1380,7 +1404,7 @@ describe('resume', () => {
     open(hold(), 'gameplay')
     button(RESUME).click()
     await settled()
-    expect(header()).toContain('Rs1Kq4')
+    expect(headerTooltip()).toContain('Rs1Kq4')
     expect(selectedTab()).toBe('gameplay')
     expect(root.querySelector<HTMLAnchorElement>('.chain-runner-directing-run-link')?.href).toBe(`http://engine/history/${RESUMED}`)
     expect(footer()).toContain('Resumed')

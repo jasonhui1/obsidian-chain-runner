@@ -26,6 +26,7 @@ export class DirectingView extends ItemView {
         for (const one of items) menu.addItem(item => item.setTitle(one.title).setIcon(one.icon).onClick(one.click))
         menu.showAtMouseEvent(event)
       },
+      openUrl: url => void (this.contentEl.win ?? window).open(url, '_blank'),
       clock: {
         every: (ms, tick) => {
           const win = this.contentEl.win
