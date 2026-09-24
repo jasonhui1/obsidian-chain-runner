@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beforeHoldRow, buildHoldColumn, buildPickRow, candidateWords, freshCustomCard, holdStamp, pickRowBoxes, pickStamp, stampHold, stampPick, waitingFrameBox } from '@/ui/holdColumn'
+import { answeredWith, beforeHoldRow, buildHoldColumn, buildPickRow, candidateWords, holdStamp, nextOwnWordsCard, pickRowBoxes, pickStamp, stampHold, stampPick, typedWords, waitingFrameBox } from '@/ui/holdColumn'
 import type { HoldRecord } from '@/engine/types'
 import type { RunFrame } from '@/run/runFrame'
 
@@ -25,15 +25,15 @@ describe('a waiting hold column', () => {
     ])
     expect(column.candidates.every(candidate => candidate.box.height >= 160)).toBe(true)
     expect(column.candidates[1]!.box.y).toBeGreaterThan(column.candidates[0]!.box.y + column.candidates[0]!.box.height)
-    expect(column.custom.y).toBeGreaterThan(column.candidates[1]!.box.y + column.candidates[1]!.box.height)
-    expect(column.custom.continueAt.y).toBeGreaterThan(column.custom.y)
+    expect(column.ownWords.box.y).toBeGreaterThan(column.candidates[1]!.box.y + column.candidates[1]!.box.height)
+    expect(column.ownWords.continueAt.y).toBe(column.ownWords.box.y + column.ownWords.box.height)
   })
 
   it('gives long text a taller fixed slot before any pick is drawn', () => {
     const long = { ...hold, candidates: [{ heading: 'Candidate 1', body: 'a long idea '.repeat(100) }] }
     const column = buildHoldColumn(long, 0, 0)
     expect(column.candidates[0]!.box.height).toBeGreaterThan(160)
-    expect(column.box.height).toBeGreaterThan(column.custom.height + column.candidates[0]!.box.height)
+    expect(column.box.height).toBeGreaterThan(column.ownWords.box.height + column.candidates[0]!.box.height)
   })
 
   it('keeps reached panels in their engine order as one row ahead of the column', () => {
@@ -90,8 +90,8 @@ describe('a waiting hold column', () => {
 
     const columnWith = buildHoldColumn(hold, 500, 100, { canReroll: true })
     expect(columnWith.rerollAt).toBeDefined()
-    expect(columnWith.rerollAt!.x).toBe(columnWith.custom.x)
-    expect(columnWith.rerollAt!.y).toBeGreaterThan(columnWith.custom.y + columnWith.custom.height)
+    expect(columnWith.rerollAt!.x).toBe(columnWith.ownWords.box.x)
+    expect(columnWith.rerollAt!.y).toBeGreaterThan(columnWith.ownWords.bottom)
     expect(columnWith.box.height).toBeGreaterThan(columnWithout.box.height)
 
     const answered = { ...hold, chosen: 'Candidate 1' }
@@ -104,15 +104,33 @@ describe('a waiting hold column', () => {
     expect(holdStamp({ customData: stampHold(stamp) })).toEqual(stamp)
   })
 
-  it('places a fresh empty custom card below the picked candidate with its own continue line', () => {
-    const candidate = { x: 200, y: 300, width: 320, height: 124 }
-    const fresh = freshCustomCard(candidate)
-    expect(fresh.box.x).toBe(candidate.x)
-    expect(fresh.box.y).toBe(candidate.y + 160 + 12)
-    expect(fresh.box.width).toBe(candidate.width)
-    expect(fresh.containerHeight).toBe(124)
-    expect(fresh.continueAt).toEqual({ x: candidate.x + 16, y: fresh.box.y + 124 })
-    expect(fresh.columnBottom).toBe(fresh.continueAt.y + 28 + 16)
+  it('places the next own-words card below the used one and its pick row, with its own continue line', () => {
+    const used = { x: 200, y: 300, width: 328, height: 124 }
+    const next = nextOwnWordsCard(used)
+    expect(next.box).toEqual({ x: used.x, y: used.y + 160 + 12, width: used.width, height: 124 })
+    expect(next.continueAt).toEqual({ x: used.x + 16, y: next.box.y + 124 })
+    expect(next.columnBottom).toBe(next.bottom + 16)
+  })
+
+  it('lays out the column’s own-words card the same way as the next one', () => {
+    const { ownWords } = buildHoldColumn(hold, 500, 100)
+    const next = nextOwnWordsCard(ownWords.box)
+    expect(next.box.height).toBe(ownWords.box.height)
+    expect(next.bottom - next.box.y).toBe(ownWords.bottom - ownWords.box.y)
+  })
+
+  it('reads the reader’s words without the placeholder they may have typed after', () => {
+    expect(typedWords('✎ Your own')).toBe('')
+    expect(typedWords('  ✎ Your own  \n A theme park. ')).toBe('A theme park.')
+    expect(typedWords('A theme park.\nWith rollercoasters.')).toBe('A theme park.\nWith rollercoasters.')
+  })
+
+  it('names a pick row by the candidate, or by the first line of the reader’s own words', () => {
+    expect(answeredWith({ chosen: 'Candidate 2' })).toEqual({ heading: 'Candidate 2' })
+    expect(answeredWith({ custom: 'A theme park.\nWith rollercoasters.' }))
+      .toEqual({ heading: 'A theme park.', words: 'A theme park.\nWith rollercoasters.' })
+    expect(answeredWith({ custom: '   ' })).toEqual({ heading: 'Your own words', words: '   ' })
+    expect(answeredWith({})).toBeUndefined()
   })
 })
 

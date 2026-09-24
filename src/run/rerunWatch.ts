@@ -22,7 +22,7 @@ export interface RerunLanding {
   chainName: string
   panels: LayoutPanel[]
   /** A resume from a waiting hold fills its own candidate row on the drawing. */
-  pick?: { nodeId: string; heading: string; pending: number[] }
+  pick?: { nodeId: string; heading: string; pending: number[]; words?: string }
 }
 
 /** A drawing candidate running from a waiting source hold. */

@@ -52,7 +52,7 @@ function columnElements(column: HoldColumn, runId: string, nodeId: string, frame
       { id: id('continue'), type: 'text', ...candidate.continueAt, width: 90, height: 20, frameId, customData: stampHold({ ...stamp, role: 'continue' }) },
     )
   }
-  elements.push({ id: id('custom'), type: 'rectangle', ...column.custom, frameId, customData: stampHold({ ...base, role: 'column' }) })
+  elements.push({ id: id('custom'), type: 'rectangle', ...column.ownWords.box, frameId, customData: stampHold({ ...base, role: 'column' }) })
   return elements
 }
 

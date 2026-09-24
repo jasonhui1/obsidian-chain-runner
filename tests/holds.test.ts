@@ -1149,13 +1149,29 @@ describe('resume', () => {
   })
 
   it('resumes with custom candidate words, sending custom instead of chosen and labelling with the first line', async () => {
-    const landed: { runId: string; heading?: string }[] = []
-    reruns.onLanding(async one => void landed.push({ runId: one.runId, heading: one.pick?.heading }))
+    const landed: { runId: string; heading?: string; words?: string }[] = []
+    reruns.onLanding(async one => void landed.push({ runId: one.runId, heading: one.pick?.heading, words: one.pick?.words }))
     resumeFrames = [...started(RESUMED), { type: 'run_complete', runId: RESUMED }]
     await makeHolds().resume(RUN, { nodeId: 'pick', custom: 'A theme park.\nWith rollercoasters.', revision: 2 })
     expect(resumes[0]?.request).toMatchObject({ holdId: 'pick', custom: 'A theme park.\nWith rollercoasters.', fork: true, revision: 2 })
     expect(resumes[0]?.request.chosen).toBeUndefined()
-    expect(landed).toEqual([{ runId: RESUMED, heading: 'A theme park.' }])
+    expect(landed).toEqual([{ runId: RESUMED, heading: 'A theme park.', words: 'A theme park.\nWith rollercoasters.' }])
+  })
+
+  it('names the row of a panel Resume with nothing ticked by the first line of the reader’s own words', async () => {
+    const candidate: HoldRecord = {
+      nodeId: 'pick', input: '## Candidate 1\nAlpha',
+      candidates: [{ heading: 'Candidate 1', body: 'Alpha' }], reachedAt: 'then', revision: 2,
+    }
+    waitingAt = [candidate]
+    notes[PATH] = noteWaitingAt(candidate).replace('## Direction\n', '## Direction\nA theme park instead\n')
+    const landed: { heading?: string; words?: string }[] = []
+    reruns.onLanding(async one => void landed.push({ heading: one.pick?.heading, words: one.pick?.words }))
+    await makeHolds().resume(RUN)
+    const custom = resumes[0]?.request.custom
+    expect(custom).toContain('A theme park instead')
+    expect(resumes[0]?.request.chosen).toBeUndefined()
+    expect(landed).toEqual([{ heading: 'A theme park instead', words: custom }])
   })
 
   it('runs two drawing picks together and lands both rows', async () => {

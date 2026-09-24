@@ -1,5 +1,5 @@
 import type { DrawingView, RerunSurface } from './excalidraw'
-import { firstLine } from './holdColumn'
+import { answeredWith } from './holdColumn'
 import { onDrawing } from './onDrawing'
 import type { OutputNotes } from './outputNotes'
 import { fillLiveOutputs, type LiveOutput } from './liveOutputs'
@@ -59,14 +59,14 @@ export class RerunOnDrawing {
           // A placed row can still be missing the hold its run reached after the drawing closed.
           const placed = source.placed.includes(run.runId)
           if (run.status === 'running' || (placed && run.status !== 'waiting')) continue
-          const heading = chosenAt(run, source.nodeId)
-          if (!heading) continue
+          const answer = answerAt(run, source.nodeId)
+          if (!answer) continue
           const layout = await engine.getLayout(run.runId)
           const pending = source.outputIndexes.length > 0 ? source.outputIndexes : pickPanelIndexes(origin, source.nodeId, layout.panels)
           if (pending.length === 0) continue
           const landing = {
             from: [source.runId], runId: run.runId, chainName: run.chainName,
-            panels: layout.panels, pick: { nodeId: source.nodeId, heading, pending },
+            panels: layout.panels, pick: { nodeId: source.nodeId, ...answer, pending },
           }
           if (!placed) {
             const outputs: { index: number; panel: LayoutPanel; notePath: string }[] = []
@@ -196,8 +196,8 @@ export class RerunOnDrawing {
   }
 }
 
-function chosenAt(run: RunMeta, nodeId: string): string | undefined {
+function answerAt(run: RunMeta, nodeId: string): ReturnType<typeof answeredWith> {
   const hold = [...(run.holds ?? [])].reverse().find(one => one.nodeId === nodeId && (one.chosen || one.custom))
-  return hold?.chosen ?? (hold?.custom ? firstLine(hold.custom) || 'Your own words' : undefined)
+  return hold && answeredWith(hold)
 }
 

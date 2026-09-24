@@ -1,6 +1,6 @@
-import { firstLine, holdStamp, type HoldStamp } from './holdColumn'
+import { holdStamp, type HoldStamp } from './holdColumn'
 import type { DrawingView, SelectionSurface } from './excalidraw'
-import type { Holds } from './holds'
+import type { DrawingPick, Holds } from './holds'
 import { UNREACHABLE_DRAWING } from './onDrawing'
 export const TYPE_FIRST = 'Type something first'
 
@@ -18,7 +18,7 @@ export interface ContinueFromDrawingDeps {
 export class ContinueFromDrawing {
   private last: { stamp: HoldStamp; view: DrawingView; at: number } | undefined
   private doubleAt: number | undefined
-  private going = new Map<string, string>()
+  private going = new Set<string>()
   private startedAt = new Map<string, number>()
 
   constructor(private readonly deps: ContinueFromDrawingDeps) {}
@@ -59,46 +59,36 @@ export class ContinueFromDrawing {
     if (stamp?.role === 'continue') this.start(stamp, view)
   }
 
+  /** Each candidate, and each different set of the reader's own words, continues on its own. */
   private start(stamp: HoldStamp, view: DrawingView): void {
-    const key = `${stamp.runId}:${stamp.nodeId}:${stamp.custom ? 'custom' : stamp.heading}`
+    let pick: DrawingPick = { nodeId: stamp.nodeId, heading: stamp.heading, revision: stamp.revision }
+    if (stamp.custom) {
+      try {
+        pick = { nodeId: stamp.nodeId, custom: this.deps.surface.on?.(view).ownWords(stamp.runId, stamp.nodeId) ?? '', revision: stamp.revision }
+      } catch (error) {
+        this.deps.notify(error instanceof Error ? error.message : UNREACHABLE_DRAWING)
+        return
+      }
+    }
+    const key = `${stamp.runId}:${stamp.nodeId}:${pick.custom === undefined ? `candidate:${pick.heading}` : `words:${pick.custom}`}`
     const now = this.deps.now()
     if (this.going.has(key)) return
     if (now - (this.startedAt.get(key) ?? -Infinity) < DOUBLE_CLICK_MS) return
-    this.going.set(key, stamp.heading)
     this.startedAt.set(key, now)
-    void this.pick(stamp, view).finally(() => this.going.delete(key))
+    if (pick.custom === '') {
+      this.deps.notify(TYPE_FIRST)
+      return
+    }
+    this.going.add(key)
+    void this.pick(stamp, pick, view).finally(() => this.going.delete(key))
   }
 
-  private async pick(stamp: HoldStamp, view: DrawingView): Promise<void> {
+  private async pick(stamp: HoldStamp, pick: DrawingPick, view: DrawingView): Promise<void> {
     try {
-      if (stamp.custom) {
-        const text = this.deps.surface.on?.(view).customCandidate?.(stamp.runId, stamp.nodeId)
-        const clean = text?.trim()
-        if (!clean || clean === '✎ Your own') {
-          this.deps.notify(TYPE_FIRST)
-          return
-        }
-        const heading = firstLine(clean)
-        const resumed = await this.deps.holds.resume(stamp.runId, {
-          nodeId: stamp.nodeId,
-          heading,
-          custom: clean,
-          revision: stamp.revision,
-        })
-        if (!resumed) {
-          const refreshed = await this.deps.holds.read(stamp.runId)
-          if (refreshed?.holds.find(hold => hold.nodeId === stamp.nodeId)?.revision !== stamp.revision) {
-            await this.deps.refreshColumn(stamp.runId, stamp.nodeId, view)
-          }
-        }
-        return
-      }
-      const resumed = await this.deps.holds.resume(stamp.runId, { nodeId: stamp.nodeId, heading: stamp.heading, revision: stamp.revision })
-      if (!resumed) {
-        const refreshed = await this.deps.holds.read(stamp.runId)
-        if (refreshed?.holds.find(hold => hold.nodeId === stamp.nodeId)?.revision !== stamp.revision) {
-          await this.deps.refreshColumn(stamp.runId, stamp.nodeId, view)
-        }
+      if (await this.deps.holds.resume(stamp.runId, pick)) return
+      const refreshed = await this.deps.holds.read(stamp.runId)
+      if (refreshed?.holds.find(hold => hold.nodeId === stamp.nodeId)?.revision !== stamp.revision) {
+        await this.deps.refreshColumn(stamp.runId, stamp.nodeId, view)
       }
     } catch (error) {
       this.deps.notify(error instanceof Error ? error.message : UNREACHABLE_DRAWING)

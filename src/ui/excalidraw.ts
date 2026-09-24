@@ -41,13 +41,16 @@ import {
   type ProposalRole,
 } from './proposal'
 import { buildDirectLabel, cardProposal, directLabelRunId, frameGeneratedName, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
-import { beforeHoldRow, buildHoldColumn, buildPickRow, freshCustomCard, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, PICK_COUNT, PICK_STEP, type HoldColumn, type HoldStamp } from './holdColumn'
+import {
+  beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, nextOwnWordsCard, ownWordsHeight, pickStamp, stampHold, stampPick, typedWords, waitingFrameBox,
+  OWN_WORDS_PLACEHOLDER, PICK_COUNT, PICK_STEP, type HoldColumn, type HoldStamp, type OwnWordsCard,
+} from './holdColumn'
 import { roomBelow, rowHold, type HeldInRow, type SceneEdits } from './rowHold'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary, HoldRecord } from '../engine/types'
-import { RUN_FRAME_GAP, uniqueRunFrameName, waitingRunFrameName, type FramedPanel, type RunFrame } from '../run/runFrame'
+import { FRAME_PADDING, RUN_FRAME_GAP, uniqueRunFrameName, waitingRunFrameName, type FramedPanel, type RunFrame } from '../run/runFrame'
 import type { RerunLanding } from '../run/rerunWatch'
 import type { LayoutPanel } from '../engine/types'
 
@@ -361,7 +364,8 @@ export interface SelectionSurface extends Reachable {
 export interface PickDrawing {
   selectedContinue(): MaybeNodeElement | undefined
   selectedReroll(): MaybeNodeElement | undefined
-  customCandidate?(runId: string, nodeId: string): string | undefined
+  /** What the reader typed on the hold's empty own-words card; `''` when nothing yet. */
+  ownWords(runId: string, nodeId: string): string
 }
 
 /** Excalidraw, in every role this plugin gives it. */
@@ -639,16 +643,11 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return true
   }
 
-  private drawCustomCard(
-    ea: ExcalidrawAutomate,
-    box: { x: number; y: number; width: number; height: number },
-    continueAt: { x: number; y: number },
-    stamp: HoldStamp,
-    frameId?: string,
-  ): void {
+  private drawOwnWordsCard(ea: ExcalidrawAutomate, card: OwnWordsCard, stamp: HoldStamp, frameId?: string): void {
+    const { box, continueAt } = card
     ea.style.strokeColor = GREY
     ea.style.strokeStyle = 'dashed'
-    const id = ea.addText(box.x, box.y, '✎ Your own', {
+    const id = ea.addText(box.x, box.y, OWN_WORDS_PLACEHOLDER, {
       box: 'box', boxPadding: 12, width: box.width, textAlign: 'left',
     })
     const container = ea.getElement(id)
@@ -660,7 +659,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       if (frameId) element.frameId = frameId
     }
     if (container) container.height = box.height
-    if (bound) bound.text = bound.originalText = bound.rawText = '✎ Your own'
+    if (bound) bound.text = bound.originalText = bound.rawText = OWN_WORDS_PLACEHOLDER
     ea.style.strokeColor = LINK_BLUE
     ea.style.strokeStyle = 'solid'
     const continueText = ea.getElement(ea.addText(continueAt.x, continueAt.y, '▶ Continue'))
@@ -711,13 +710,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         if (frameId) continueText.frameId = frameId
       }
     }
-    this.drawCustomCard(
-      ea,
-      { x: column.custom.x, y: column.custom.y, width: column.custom.width, height: column.custom.height - 36 },
-      column.custom.continueAt,
-      { ...columnStamp, role: 'custom' },
-      frameId,
-    )
+    this.drawOwnWordsCard(ea, column.ownWords, { ...columnStamp, role: 'custom' }, frameId)
     if (column.rerollAt) {
       ea.style.strokeColor = LINK_BLUE
       ea.style.strokeStyle = 'solid'
@@ -926,15 +919,9 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return this.selectedHoldRole('reroll')
   }
 
-  customCandidate(runId: string, nodeId: string): string | undefined {
-    const scene = this.ea.getViewElements()
-    const found = scene.find(element => {
-      const stamp = holdStamp(element)
-      return stamp?.role === 'custom' && stamp.runId === runId && stamp.nodeId === nodeId && element.type === 'text' && !stamp.heading
-    })
-    return (found as { rawText?: string; originalText?: string; text?: string })?.rawText
-      ?? (found as { rawText?: string; originalText?: string; text?: string })?.originalText
-      ?? (found as { rawText?: string; originalText?: string; text?: string })?.text
+  ownWords(runId: string, nodeId: string): string {
+    const typed = findHeld(this.ea.getViewElements(), 'custom', runId, nodeId, (element, stamp) => element.type === 'text' && !stamp.heading)
+    return typedWords(typed?.originalText ?? typed?.text ?? '')
   }
 
   pickSources(): { runId: string; nodeId: string; outputIndexes: number[]; placed: string[] }[] {
@@ -965,98 +952,29 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       return stamp?.runId === landing.runId && stamp.nodeId === pick.nodeId && stamp.heading === pick.heading
     })) return true
     const sourceRunId = landing.from[0] ?? landing.runId
-    const candidate = scene.find(element => {
-      const stamp = holdStamp(element)
-      return stamp?.role === 'candidate' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
-        && stamp.heading === pick.heading && element.type !== 'text'
-    }) ?? scene.find(element => {
-      const stamp = holdStamp(element)
-      return stamp?.role === 'custom' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
-        && !stamp.heading && element.type !== 'text'
-    }) ?? scene.find(element => {
-      const stamp = holdStamp(element)
-      return stamp?.role === 'custom' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
-        && stamp.heading === pick.heading && element.type !== 'text'
-    })
+    const card = (role: HoldStamp['role'], heading: string): SceneElement | undefined =>
+      findHeld(scene, role, sourceRunId, pick.nodeId, (element, stamp) => element.type !== 'text' && stamp.heading === heading)
+    // Only the empty own-words card is free; a used one already has its row.
+    const candidate = pick.words === undefined ? card('candidate', pick.heading) : card('custom', '')
     if (!candidate) return false
-    const isCustom = holdStamp(candidate)?.role === 'custom'
     const frame = scene.find(element => element.type === 'frame' && element.id === candidate.frameId)
     const reroll = scene.find(element => {
       const stamp = holdStamp(element)
       return stamp?.role === 'reroll' && (stamp.runId === landing.runId || landing.from.includes(stamp.runId)) && stamp.nodeId === pick.nodeId
     })
-    const candidateBound = isCustom
-      ? scene.find(element => element.type === 'text' && element.containerId === candidate.id)
-      : undefined
-    const customContinue = isCustom
-      ? scene.find(element => {
-          const stamp = holdStamp(element)
-          return stamp?.role === 'continue' && stamp.custom && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
-        })
-      : undefined
-    const columnRect = isCustom
-      ? scene.find(element => {
-          const stamp = holdStamp(element)
-          return stamp?.role === 'column' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId && element.type === 'rectangle'
-        })
-      : undefined
-    const row = buildPickRow({ x: candidate.x ?? 0, y: candidate.y ?? 0, width: candidate.width ?? 0, height: candidate.height ?? 0 }, outputs.length)
+    const used = holdStamp(candidate)?.role === 'custom' ? usedOwnWordsParts(scene, candidate, sourceRunId, pick.nodeId) : undefined
+    const row = buildPickRow(boxOf(candidate), outputs.length)
     const ea = this.emptied()
-    const edited = [
-      candidate,
-      ...(candidateBound ? [candidateBound] : []),
-      ...(frame ? [frame] : []),
-      ...(reroll ? [reroll] : []),
-      ...(customContinue ? [customContinue] : []),
-      ...(columnRect ? [columnRect] : []),
-    ]
-    ea.copyViewElementsToEAforEditing(edited)
+    ea.copyViewElementsToEAforEditing([candidate, ...[frame, reroll, used?.words, used?.continueLine, used?.column].filter(isElement)])
     if (reroll) {
       const copy = ea.getElement(reroll.id)
       if (copy) copy.isDeleted = true
     }
-    if (customContinue) {
-      const copy = ea.getElement(customContinue.id)
-      if (copy) copy.isDeleted = true
-    }
     const chosen = ea.getElement(candidate.id)
-    if (chosen) {
-      chosen.strokeStyle = 'solid'
-      if (isCustom) {
-        const stamp = holdStamp(candidate)
-        if (stamp) chosen.customData = stampHold({ ...stamp, heading: pick.heading })
-      }
-    }
-    if (candidateBound) {
-      const boundCopy = ea.getElement(candidateBound.id)
-      const stamp = holdStamp(candidateBound)
-      if (boundCopy && stamp) {
-        boundCopy.customData = stampHold({ ...stamp, heading: pick.heading })
-        if (!boundCopy.rawText || boundCopy.rawText === '✎ Your own') {
-          boundCopy.text = boundCopy.originalText = boundCopy.rawText = pick.heading
-        }
-      }
-    }
+    if (chosen) chosen.strokeStyle = 'solid'
     const enclosing = frame ? ea.getElement(frame.id) : undefined
     if (enclosing) enclosing.width = Math.max(enclosing.width ?? 0, row.right + 32 - (enclosing.x ?? 0))
-    if (isCustom) {
-      const fresh = freshCustomCard({ x: candidate.x ?? 0, y: candidate.y ?? 0, width: candidate.width ?? 0, height: candidate.height ?? 0 })
-      const columnStamp = holdStamp(candidate)
-      const freshStamp: HoldStamp = {
-        runId: sourceRunId,
-        nodeId: pick.nodeId,
-        heading: '',
-        revision: columnStamp?.revision,
-        outputIndexes: columnStamp?.outputIndexes,
-        role: 'custom',
-      }
-      this.drawCustomCard(ea, { ...fresh.box, height: fresh.containerHeight }, fresh.continueAt, freshStamp, frame?.id)
-      if (columnRect) {
-        const copy = ea.getElement(columnRect.id)
-        if (copy) copy.height = Math.max(copy.height ?? 0, fresh.columnBottom - (copy.y ?? 0))
-      }
-      if (enclosing) enclosing.height = Math.max(enclosing.height ?? 0, fresh.columnBottom + 32 - (enclosing.y ?? 0))
-    }
+    if (used) this.useOwnWordsCard(ea, candidate.id, used, pick, enclosing)
     const stamp = { runId: landing.runId, nodeId: pick.nodeId, heading: pick.heading, from: sourceRunId }
     const mark = (element: SceneElement | undefined): void => {
       if (!element) return
@@ -1094,6 +1012,38 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     }
     await save(ea, false)
     return true
+  }
+
+  /** A used own-words card keeps the words it ran with; a fresh empty card waits below it and its row. */
+  private useOwnWordsCard(
+    ea: ExcalidrawAutomate,
+    cardId: string,
+    used: UsedOwnWords,
+    pick: NonNullable<RerunLanding['pick']>,
+    enclosing: SceneElement | undefined,
+  ): void {
+    const card = ea.getElement(cardId)
+    const stamp = card && holdStamp(card)
+    if (!card || !stamp) return
+    card.customData = stampHold({ ...stamp, heading: pick.heading })
+    const words = used.words && ea.getElement(used.words.id)
+    if (words) {
+      words.customData = stampHold({ ...stamp, heading: pick.heading })
+      // A rebuilt row finds the card still empty; typed words can still start with the placeholder.
+      const text = typedWords(words.originalText ?? words.text ?? '') || (pick.words ?? pick.heading)
+      if (text !== words.originalText) {
+        words.text = words.originalText = words.rawText = text
+        card.height = ownWordsHeight(boxOf(card), text)
+        ea.refreshTextElementSize?.(words.id)
+      }
+    }
+    const continueLine = used.continueLine && ea.getElement(used.continueLine.id)
+    if (continueLine) continueLine.isDeleted = true
+    const next = nextOwnWordsCard(boxOf(card))
+    this.drawOwnWordsCard(ea, next, { ...stamp, heading: '' }, enclosing?.id)
+    const column = used.column && ea.getElement(used.column.id)
+    if (column) column.height = Math.max(column.height ?? 0, next.columnBottom - (column.y ?? 0))
+    if (enclosing) enclosing.height = Math.max(enclosing.height ?? 0, next.columnBottom + FRAME_PADDING - (enclosing.y ?? 0))
   }
 
   async placeRowHold(landing: RerunLanding, held: HeldInRow): Promise<boolean> {
@@ -1210,6 +1160,39 @@ function imageNoteLookup(ea: ExcalidrawAutomate): ImageNoteLookup {
     if (!ea.getViewFileForImageElement) throw new Error(OLD_EXCALIDRAW)
     const note = ea.getViewFileForImageElement(element)
     return note && note.extension === 'md' ? note.path : undefined
+  }
+}
+
+function boxOf(element: SceneElement): Box {
+  return { x: element.x ?? 0, y: element.y ?? 0, width: element.width ?? 0, height: element.height ?? 0 }
+}
+
+function isElement(element: SceneElement | undefined): element is SceneElement {
+  return element !== undefined
+}
+
+/** The element of one hold, in one role, that `match` also accepts. */
+function findHeld(
+  scene: readonly SceneElement[],
+  role: HoldStamp['role'],
+  runId: string,
+  nodeId: string,
+  match: (element: SceneElement, stamp: HoldStamp) => boolean = () => true,
+): SceneElement | undefined {
+  return scene.find(element => {
+    const stamp = holdStamp(element)
+    return stamp?.role === role && stamp.runId === runId && stamp.nodeId === nodeId && match(element, stamp)
+  })
+}
+
+/** What else changes when an own-words card is used: its words, its `▶ Continue`, and the column around it. */
+interface UsedOwnWords { words?: SceneElement; continueLine?: SceneElement; column?: SceneElement }
+
+function usedOwnWordsParts(scene: readonly SceneElement[], card: SceneElement, runId: string, nodeId: string): UsedOwnWords {
+  return {
+    words: scene.find(element => element.type === 'text' && element.containerId === card.id),
+    continueLine: findHeld(scene, 'continue', runId, nodeId, (_, stamp) => stamp.custom === true),
+    column: findHeld(scene, 'column', runId, nodeId, element => element.type === 'rectangle'),
   }
 }
 

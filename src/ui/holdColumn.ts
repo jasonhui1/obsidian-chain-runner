@@ -7,7 +7,7 @@ export interface HoldColumn {
   box: Box
   prompt: { text: string; box: Box }
   candidates: { heading: string; text: string; box: Box; continueAt: { x: number; y: number } }[]
-  custom: Box & { continueAt: { x: number; y: number } }
+  ownWords: OwnWordsCard
   rerollAt?: { x: number; y: number }
 }
 
@@ -33,6 +33,39 @@ function wrappedLines(text: string, width: number): number {
 /** The first line of candidate text labels its pick row and reports. */
 export function firstLine(text: string): string {
   return text.trim().split('\n')[0]?.trim() ?? ''
+}
+
+/** What an empty card for the reader's own words shows until they type. */
+export const OWN_WORDS_PLACEHOLDER = '✎ Your own'
+
+/** The reader's words on their card, without the placeholder they may have typed after. */
+export function typedWords(text: string): string {
+  const words = text.trim()
+  return (words.startsWith(OWN_WORDS_PLACEHOLDER) ? words.slice(OWN_WORDS_PLACEHOLDER.length) : words).trim()
+}
+
+/** How a pick row names a hold's answer: the candidate's heading, or the first line of the reader's own words. */
+export function answeredWith(answer: { chosen?: string; custom?: string }): { heading: string; words?: string } | undefined {
+  if (answer.chosen) return { heading: answer.chosen }
+  if (answer.custom) return { heading: firstLine(answer.custom) || 'Your own words', words: answer.custom }
+  return undefined
+}
+
+/** A card for the reader's own words: the box they type in, its `▶ Continue` beneath. */
+export interface OwnWordsCard {
+  box: Box
+  continueAt: { x: number; y: number }
+  /** The bottom of the card's slot. */
+  bottom: number
+}
+
+function ownWordsCard(x: number, y: number, width: number, words = ''): OwnWordsCard {
+  const height = Math.max(OUTPUT_HEIGHT - CONTINUE_HEIGHT - PADDING / 2, wrappedLines(words, width - PADDING * 2) * LINE_HEIGHT + PADDING * 2)
+  return {
+    box: { x, y, width, height },
+    continueAt: { x: x + PADDING, y: y + height },
+    bottom: y + height + CONTINUE_HEIGHT + PADDING / 2,
+  }
 }
 
 /** A generic numbered heading gives way to the candidate's first line. */
@@ -65,21 +98,15 @@ export function buildHoldColumn(hold: HoldRecord, x: number, y: number, options?
       continueAt: { x: box.x + PADDING, y: box.y + height - CONTINUE_HEIGHT - PADDING / 2 },
     }
   })
-  const custom = {
-    x: x + PADDING,
-    y: top,
-    width: HOLD_COLUMN_WIDTH - PADDING * 2,
-    height: OUTPUT_HEIGHT,
-    continueAt: { x: x + PADDING * 2, y: top + OUTPUT_HEIGHT - CONTINUE_HEIGHT - PADDING / 2 },
-  }
+  const ownWords = ownWordsCard(x + PADDING, top, HOLD_COLUMN_WIDTH - PADDING * 2)
   const canReroll = options?.canReroll === true && !hold.resolvedAt && !hold.chosen && !hold.custom
-  const rerollAt = canReroll ? { x: x + PADDING, y: custom.y + custom.height + GAP } : undefined
-  const bottom = rerollAt ? rerollAt.y + CONTINUE_HEIGHT : custom.y + custom.height
+  const rerollAt = canReroll ? { x: x + PADDING, y: ownWords.bottom + GAP } : undefined
+  const bottom = rerollAt ? rerollAt.y + CONTINUE_HEIGHT : ownWords.bottom
   return {
     box: { x, y, width: HOLD_COLUMN_WIDTH, height: bottom + PADDING - y },
     prompt: { text: promptText, box: promptBox },
     candidates,
-    custom,
+    ownWords,
     ...(rerollAt ? { rerollAt } : {}),
   }
 }
@@ -167,22 +194,16 @@ export function buildPickRow(candidate: Box, count: number): {
   }
 }
 
-/** A fresh empty "Your own" card added below a picked custom card. */
-export function freshCustomCard(candidate: Box): {
-  box: Box
-  containerHeight: number
-  continueAt: { x: number; y: number }
-  columnBottom: number
-} {
-  const y = candidate.y + Math.max(candidate.height, PICK_CARD_HEIGHT) + GAP
-  const containerHeight = OUTPUT_HEIGHT - CONTINUE_HEIGHT - PADDING / 2
-  const continueAt = { x: candidate.x + PADDING, y: y + containerHeight }
-  return {
-    box: { x: candidate.x, y, width: candidate.width, height: OUTPUT_HEIGHT },
-    containerHeight,
-    continueAt,
-    columnBottom: continueAt.y + CONTINUE_HEIGHT + PADDING,
-  }
+/** The height a used own-words card needs to show `words` whole. */
+export function ownWordsHeight(box: Box, words: string): number {
+  return Math.max(box.height, ownWordsCard(box.x, box.y, box.width, words).box.height)
+}
+
+/** The empty card a used own-words card leaves below itself and its pick row; its column now ends at `columnBottom`. */
+export function nextOwnWordsCard(used: Box): OwnWordsCard & { columnBottom: number } {
+  const y = used.y + Math.max(used.height + CONTINUE_HEIGHT + PADDING / 2, PICK_CARD_HEIGHT) + GAP
+  const card = ownWordsCard(used.x, y, used.width)
+  return { ...card, columnBottom: card.bottom + PADDING }
 }
 
 const PICK_STAMP = 'chainRunnerPick'

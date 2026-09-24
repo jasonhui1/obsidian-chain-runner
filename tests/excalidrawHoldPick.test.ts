@@ -21,8 +21,9 @@ interface FakeElement {
   isDeleted?: boolean
 }
 
-function drawing(elements: FakeElement[] = []): { app: App; elements: FakeElement[]; view: DrawingView } {
+function drawing(elements: FakeElement[] = []): { app: App; elements: FakeElement[]; view: DrawingView; refreshed: string[] } {
   let nextId = 0
+  const refreshed: string[] = []
   let workbench: FakeElement[] = []
   const style = { strokeColor: '', backgroundColor: '', strokeWidth: 1, strokeStyle: 'solid', fontSize: 16, textAlign: 'left' }
   const api = {
@@ -80,6 +81,7 @@ function drawing(elements: FakeElement[] = []): { app: App; elements: FakeElemen
     },
     getElement: (id: string) => workbench.find(element => element.id === id) ?? elements.find(element => element.id === id),
     getElements: () => [...workbench],
+    refreshTextElementSize: (id: string) => void refreshed.push(id),
     getViewElements: () => elements.filter(element => !element.isDeleted),
     copyViewElementsToEAforEditing: (copies: FakeElement[]) => {
       for (const copy of copies) {
@@ -103,7 +105,7 @@ function drawing(elements: FakeElement[] = []): { app: App; elements: FakeElemen
     workspace: { getMostRecentLeaf: () => undefined },
   } as unknown as App
   const view = { file: null } as DrawingView
-  return { app, elements, view }
+  return { app, elements, view, refreshed }
 }
 
 const hold: HoldRecord = {
@@ -117,7 +119,7 @@ const hold: HoldRecord = {
   ],
 }
 
-describe('custom candidate on the Excalidraw drawing', () => {
+describe('the reader’s own words on the Excalidraw drawing', () => {
   it('draws ✎ Your own, reads typed text, places pick row, and adds fresh empty card', async () => {
     const runId = 'run-123'
     const nodeId = 'hold-1'
@@ -159,7 +161,7 @@ describe('custom candidate on the Excalidraw drawing', () => {
     customBound.originalText = customBound.text
 
     const pickDrawing = surface.on(view) as unknown as PickDrawing
-    expect(pickDrawing.customCandidate!(runId, nodeId)).toBe('Player-driven economy\nTrading with dynamic tariffs')
+    expect(pickDrawing.ownWords(runId, nodeId)).toBe('Player-driven economy\nTrading with dynamic tariffs')
 
     const heading = 'Player-driven economy'
     const landing = {
@@ -167,7 +169,7 @@ describe('custom candidate on the Excalidraw drawing', () => {
       runId: 'run-456',
       chainName: 'econ',
       panels: [],
-      pick: { nodeId, heading, pending: [] },
+      pick: { nodeId, heading, words: customBound.text, pending: [] },
     }
     const placed = await (surface as unknown as RerunSurface).on(view).placePickRow(landing, [])
     expect(placed).toBe(true)
@@ -189,7 +191,7 @@ describe('custom candidate on the Excalidraw drawing', () => {
     const freshText = freshCards.find(element => element.type === 'text')!
     expect(freshText.text).toBe('✎ Your own')
 
-    expect(pickDrawing.customCandidate!(runId, nodeId)).toBe('✎ Your own')
+    expect(pickDrawing.ownWords(runId, nodeId)).toBe('')
 
     const activeContinues = elements.filter(element => {
       const stamp = holdStamp(element)
@@ -202,7 +204,7 @@ describe('custom candidate on the Excalidraw drawing', () => {
     freshText.rawText = freshText.text
     freshText.originalText = freshText.text
 
-    expect(pickDrawing.customCandidate!(runId, nodeId)).toBe('Faction reputation system\nBounties and territory wars')
+    expect(pickDrawing.ownWords(runId, nodeId)).toBe('Faction reputation system\nBounties and territory wars')
 
     const secondHeading = 'Faction reputation system'
     const secondLanding = {
@@ -210,7 +212,7 @@ describe('custom candidate on the Excalidraw drawing', () => {
       runId: 'run-789',
       chainName: 'econ',
       panels: [],
-      pick: { nodeId, heading: secondHeading, pending: [] },
+      pick: { nodeId, heading: secondHeading, words: freshText.text, pending: [] },
     }
     const secondPlaced = await (surface as unknown as RerunSurface).on(view).placePickRow(secondLanding, [])
     expect(secondPlaced).toBe(true)
@@ -221,54 +223,75 @@ describe('custom candidate on the Excalidraw drawing', () => {
     expect(holdStamp(secondContainer)?.heading).toBe(secondHeading)
     expect(holdStamp(updatedSecondBound)?.heading).toBe(secondHeading)
 
-    expect(pickDrawing.customCandidate!(runId, nodeId)).toBe('✎ Your own')
+    expect(pickDrawing.ownWords(runId, nodeId)).toBe('')
   })
 
-  it('updates placeholder text to candidate heading on rebuild and picks unpicked card on duplicate heading', async () => {
-    const runId = 'run-dup'
-    const nodeId = hold.nodeId
-    const initialElements: FakeElement[] = [
-      {
-        id: 'column-rect',
-        type: 'rectangle',
-        x: 100,
-        y: 100,
-        width: 360,
-        height: 400,
-        customData: stampHold({ runId, nodeId, heading: '', role: 'column' }),
-      },
-    ]
-    const { app, elements, view } = drawing(initialElements)
+  it('reads only what follows the placeholder when the reader typed after it', async () => {
+    const runId = 'run-typed-after'
+    const { app, elements, view } = drawing([{
+      id: 'column-rect', type: 'rectangle', x: 100, y: 100, width: 360, height: 400,
+      customData: stampHold({ runId, nodeId: hold.nodeId, heading: '', role: 'column' }),
+    }])
     const surface = createExcalidrawSurface(app)
+    await (surface as unknown as RerunSurface).on(view).refreshHoldColumn(runId, hold.nodeId, hold)
+    const typed = elements.find(element => element.type === 'text' && element.text === '✎ Your own')!
+    typed.originalText = '✎ Your own\nA theme park.'
+    expect((surface.on(view) as unknown as PickDrawing).ownWords(runId, hold.nodeId)).toBe('A theme park.')
 
+    await (surface as unknown as RerunSurface).on(view).placePickRow({
+      from: [runId], runId: 'run-typed-after-1', chainName: 'test', panels: [],
+      pick: { nodeId: hold.nodeId, heading: 'A theme park.', words: 'A theme park.', pending: [] },
+    }, [])
+    expect(elements.find(element => element.id === typed.id)!.rawText).toBe('A theme park.')
+  })
+
+  it('writes the whole words into an empty card when a row is rebuilt, and leaves the next card below it', async () => {
+    const runId = 'run-rebuilt'
+    const nodeId = hold.nodeId
+    const { app, elements, view, refreshed } = drawing([{
+      id: 'column-rect', type: 'rectangle', x: 100, y: 100, width: 360, height: 400,
+      customData: stampHold({ runId, nodeId, heading: '', role: 'column' }),
+    }])
+    const surface = createExcalidrawSurface(app)
+    await (surface as unknown as RerunSurface).on(view).refreshHoldColumn(runId, nodeId, hold)
+    const words = `A theme park.\n${'With rollercoasters and a very long description. '.repeat(12)}`
+    const card = elements.find(element => element.type === 'rectangle' && holdStamp(element)?.role === 'custom')!
+    const before = card.height
+
+    await (surface as unknown as RerunSurface).on(view).placePickRow({
+      from: [runId], runId: 'run-rebuilt-1', chainName: 'test', panels: [],
+      pick: { nodeId, heading: 'A theme park.', words, pending: [] },
+    }, [])
+
+    const used = elements.find(element => element.id === card.id)!
+    const usedWords = elements.find(element => element.containerId === card.id)!
+    expect(usedWords.rawText).toBe(words)
+    expect(usedWords.originalText).toBe(words)
+    expect(refreshed).toContain(usedWords.id)
+    expect(used.height).toBeGreaterThan(before)
+    const next = elements.find(element => element.type === 'rectangle' && !element.isDeleted
+      && holdStamp(element)?.role === 'custom' && !holdStamp(element)?.heading)!
+    expect(next.y).toBeGreaterThan(used.y + used.height)
+  })
+
+  it('never puts the reader’s own words on a candidate card that shares their first line', async () => {
+    const runId = 'run-shared-line'
+    const nodeId = hold.nodeId
+    const { app, elements, view } = drawing([{
+      id: 'column-rect', type: 'rectangle', x: 100, y: 100, width: 360, height: 400,
+      customData: stampHold({ runId, nodeId, heading: '', role: 'column' }),
+    }])
+    const surface = createExcalidrawSurface(app)
     await (surface as unknown as RerunSurface).on(view).refreshHoldColumn(runId, nodeId, hold)
 
-    const heading = 'Same heading'
-    const landing1 = {
-      from: [runId],
-      runId: 'run-dup-1',
-      chainName: 'test',
-      panels: [],
-      pick: { nodeId, heading, pending: [] },
-    }
-    await (surface as unknown as RerunSurface).on(view).placePickRow(landing1, [])
+    await (surface as unknown as RerunSurface).on(view).placePickRow({
+      from: [runId], runId: 'run-shared-1', chainName: 'test', panels: [],
+      pick: { nodeId, heading: 'Candidate 1', words: 'Candidate 1\nbut my own take', pending: [] },
+    }, [])
 
-    const firstCardText = elements.find(element => element.type === 'text' && holdStamp(element)?.heading === heading)!
-    expect(firstCardText.text).toBe(heading)
-
-    const landing2 = {
-      from: [runId],
-      runId: 'run-dup-2',
-      chainName: 'test',
-      panels: [],
-      pick: { nodeId, heading, pending: [] },
-    }
-    await (surface as unknown as RerunSurface).on(view).placePickRow(landing2, [])
-
-    const pickedCards = elements.filter(element => {
-      const stamp = holdStamp(element)
-      return element.type === 'rectangle' && stamp?.role === 'custom' && stamp.heading === heading
-    })
-    expect(pickedCards).toHaveLength(2)
+    const candidate = elements.find(element => element.type === 'rectangle' && holdStamp(element)?.role === 'candidate')!
+    expect(candidate.strokeStyle).toBe('dashed')
+    const used = elements.filter(element => element.type === 'rectangle' && holdStamp(element)?.role === 'custom' && holdStamp(element)?.heading === 'Candidate 1')
+    expect(used).toHaveLength(1)
   })
 })

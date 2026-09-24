@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { ContinueFromDrawing } from '@/ui/continueFromDrawing'
+import { ContinueFromDrawing, TYPE_FIRST } from '@/ui/continueFromDrawing'
 import { stampHold } from '@/ui/holdColumn'
 import type { Holds } from '@/ui/holds'
+import type { SelectionSurface } from '@/ui/excalidraw'
 
 const RUN = 'run-1'
 const view = { file: null }
 const stamp = { runId: RUN, nodeId: 'pick', heading: 'Candidate 1', revision: 2, role: 'continue' as const }
 const element = { customData: stampHold(stamp) }
 const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0))
+const ownWordsContinue = { customData: stampHold({ runId: RUN, nodeId: 'pick', heading: '', revision: 2, role: 'continue', custom: true }) }
+const ownWordsSurface = (ownWords: () => string): SelectionSurface => ({
+  unavailable: () => undefined,
+  selectedRun: () => undefined,
+  cardProposal: () => undefined,
+  on: () => ({ selectedContinue: () => undefined, selectedReroll: () => undefined, ownWords }),
+})
 
 describe('Continue on a drawing', () => {
   it('keeps one click quiet and resumes exactly once for two reports of the same double-click', async () => {
@@ -104,23 +112,11 @@ describe('Continue on a drawing', () => {
     await settle()
   })
 
-  it('notifies to type something first when the custom card is empty or unchanged', async () => {
+  it('asks once to type something first when the own-words card is empty', async () => {
     const actions: string[] = []
     let now = 100
-    let customText: string | undefined = '✎ Your own'
-    const customStamp = { runId: RUN, nodeId: 'pick', heading: '', revision: 2, role: 'continue' as const, custom: true }
-    const customElement = { customData: stampHold(customStamp) }
     const continueFromDrawing = new ContinueFromDrawing({
-      surface: {
-        unavailable: () => undefined,
-        selectedRun: () => undefined,
-        cardProposal: () => undefined,
-        on: () => ({
-          selectedContinue: () => undefined,
-          selectedReroll: () => undefined,
-          customCandidate: () => customText,
-        }),
-      },
+      surface: ownWordsSurface(() => ''),
       holds: {
         read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
         resume: async () => { actions.push('resumed'); return undefined },
@@ -130,34 +126,24 @@ describe('Continue on a drawing', () => {
       refreshColumn: async () => {},
     })
 
-    continueFromDrawing.handleSelection(customElement, view)
+    continueFromDrawing.handleSelection(ownWordsContinue, view)
     continueFromDrawing.handleDoubleClick()
+    continueFromDrawing.handleTextEdit(ownWordsContinue, view)
     await settle()
-    expect(actions).toEqual(['Type something first'])
+    expect(actions).toEqual([TYPE_FIRST])
 
     now += 1500
-    customText = '   '
-    continueFromDrawing.handleSelection(customElement, view)
+    continueFromDrawing.handleSelection(ownWordsContinue, view)
     continueFromDrawing.handleDoubleClick()
     await settle()
-    expect(actions).toEqual(['Type something first', 'Type something first'])
+    expect(actions).toEqual([TYPE_FIRST, TYPE_FIRST])
   })
 
-  it('continues a custom card with typed words and sends them as custom', async () => {
+  it('sends the words on the card when Continue is clicked, as custom', async () => {
     const resumed: unknown[] = []
-    const customStamp = { runId: RUN, nodeId: 'pick', heading: '', revision: 2, role: 'continue' as const, custom: true }
-    const customElement = { customData: stampHold(customStamp) }
+    let typed = 'A first draft.'
     const continueFromDrawing = new ContinueFromDrawing({
-      surface: {
-        unavailable: () => undefined,
-        selectedRun: () => undefined,
-        cardProposal: () => undefined,
-        on: () => ({
-          selectedContinue: () => undefined,
-          selectedReroll: () => undefined,
-          customCandidate: () => 'A theme park.\nWith rollercoasters.',
-        }),
-      },
+      surface: ownWordsSurface(() => typed),
       holds: {
         read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
         resume: async (_runId, pick) => { resumed.push(pick); return undefined },
@@ -167,18 +153,60 @@ describe('Continue on a drawing', () => {
       refreshColumn: async () => {},
     })
 
-    continueFromDrawing.handleSelection(customElement, view)
+    typed = 'A theme park.\nWith rollercoasters.'
+    continueFromDrawing.handleSelection(ownWordsContinue, view)
     continueFromDrawing.handleDoubleClick()
     await settle()
-    expect(resumed).toEqual([{
-      nodeId: 'pick',
-      heading: 'A theme park.',
-      custom: 'A theme park.\nWith rollercoasters.',
-      revision: 2,
-    }])
+    expect(resumed).toEqual([{ nodeId: 'pick', custom: 'A theme park.\nWith rollercoasters.', revision: 2 }])
   })
 
-  it('does not resume when editing the custom card’s text', async () => {
+  it('starts a second idea of the reader’s own while the first is still going, but the same idea once', async () => {
+    const calls: string[] = []
+    let release = (): void => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let now = 100
+    let typed = 'A theme park.'
+    const continueFromDrawing = new ContinueFromDrawing({
+      surface: ownWordsSurface(() => typed),
+      holds: {
+        read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
+        resume: async (_runId, pick) => { calls.push(pick?.custom ?? ''); await gate; return undefined },
+      },
+      notify: message => void calls.push(message),
+      now: () => now,
+      refreshColumn: async () => {},
+    })
+    for (const words of ['A theme park.', 'A theme park.', 'A floating city.']) {
+      typed = words
+      continueFromDrawing.handleSelection(ownWordsContinue, view)
+      continueFromDrawing.handleDoubleClick()
+      now += 1500
+    }
+    await settle()
+    expect(calls).toEqual(['A theme park.', 'A floating city.'])
+    release()
+    await settle()
+  })
+
+  it('says why when the drawing cannot be read', async () => {
+    const actions: string[] = []
+    const continueFromDrawing = new ContinueFromDrawing({
+      surface: ownWordsSurface(() => { throw new Error('The drawing closed') }),
+      holds: {
+        read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
+        resume: async () => { actions.push('resumed'); return undefined },
+      },
+      notify: message => void actions.push(message),
+      now: () => 100,
+      refreshColumn: async () => {},
+    })
+    continueFromDrawing.handleSelection(ownWordsContinue, view)
+    continueFromDrawing.handleDoubleClick()
+    await settle()
+    expect(actions).toEqual(['The drawing closed'])
+  })
+
+  it('does not resume when editing the own-words card’s text', async () => {
     const actions: string[] = []
     const customCardElement = { customData: stampHold({ runId: RUN, nodeId: 'pick', heading: '', role: 'custom' as const }) }
     const continueFromDrawing = new ContinueFromDrawing({
