@@ -170,7 +170,10 @@ export default class ChainRunnerPlugin extends Plugin {
     }
     this.registerEvent(this.app.workspace.on('file-open', upgradeOpenRunCounts))
     // A rerun that lands moves the cards on every open drawing on to the run it landed as.
-    const onDrawing = new RerunOnDrawing({ surface, notes, ...sharedDeps })
+    const onDrawing = new RerunOnDrawing({ surface, notes, engine: this.engine, ...sharedDeps })
+    this.registerEvent(this.app.workspace.on('file-open', () => {
+      for (const view of surface.openViews()) void onDrawing.rebuild(view)
+    }))
     this.register(reruns.onLanding(landing => onDrawing.land(landing)))
     this.register(reruns.onPickStream(stream => onDrawing.streamPick(stream)))
     const nodeRun = new NodeRun({
@@ -295,6 +298,7 @@ export default class ChainRunnerPlugin extends Plugin {
     })
     this.app.workspace.onLayoutReady(() => {
       if (unloaded) return
+      for (const view of surface.openViews()) void onDrawing.rebuild(view)
       // Older drawings get run-count data the first time they are opened.
       upgradeOpenRunCounts()
       // Each handler claims its own links and passes on what is not its; a

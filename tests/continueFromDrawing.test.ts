@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ContinueFromDrawing, PICK_ALREADY_ANSWERED } from '@/ui/continueFromDrawing'
+import { ContinueFromDrawing } from '@/ui/continueFromDrawing'
 import { stampHold } from '@/ui/holdColumn'
 import type { Holds } from '@/ui/holds'
 
@@ -66,7 +66,7 @@ describe('Continue on a drawing', () => {
     expect(actions).toEqual(['engine 2', 'refreshed'])
   })
 
-  it('does not replace the first row with a second pick before fork rows exist', async () => {
+  it('resumes an answered hold again to let the engine fork a second pick', async () => {
     const actions: string[] = []
     const continueFromDrawing = new ContinueFromDrawing({
       surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
@@ -81,6 +81,6 @@ describe('Continue on a drawing', () => {
     continueFromDrawing.handleSelection(element, view)
     continueFromDrawing.handleDoubleClick()
     await settle()
-    expect(actions).toEqual([PICK_ALREADY_ANSWERED])
+    expect(actions).toEqual(['resumed'])
   })
 })

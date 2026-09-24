@@ -5,7 +5,6 @@ import { UNREACHABLE_DRAWING } from './onDrawing'
 
 /** A Continue line uses the same two-click drill-in as a node's Run line. */
 const DOUBLE_CLICK_MS = 1000
-export const PICK_ALREADY_ANSWERED = 'This hold has already been answered. Another candidate cannot be continued from this drawing yet.'
 
 export interface ContinueFromDrawingDeps {
   surface: SelectionSurface
@@ -18,7 +17,7 @@ export interface ContinueFromDrawingDeps {
 export class ContinueFromDrawing {
   private last: { stamp: HoldStamp; view: DrawingView; at: number } | undefined
   private doubleAt: number | undefined
-  private going = new Set<string>()
+  private going = new Map<string, string>()
   private startedAt = new Map<string, number>()
 
   constructor(private readonly deps: ContinueFromDrawingDeps) {}
@@ -62,8 +61,13 @@ export class ContinueFromDrawing {
   private start(stamp: HoldStamp, view: DrawingView): void {
     const key = `${stamp.runId}:${stamp.nodeId}`
     const now = this.deps.now()
-    if (this.going.has(key) || now - (this.startedAt.get(key) ?? -Infinity) < DOUBLE_CLICK_MS) return
-    this.going.add(key)
+    const active = this.going.get(key)
+    if (active) {
+      if (active !== stamp.heading) this.deps.notify(`${active} is still continuing. Wait for it to finish.`)
+      return
+    }
+    if (now - (this.startedAt.get(key) ?? -Infinity) < DOUBLE_CLICK_MS) return
+    this.going.set(key, stamp.heading)
     this.startedAt.set(key, now)
     void this.pick(stamp, view).finally(() => this.going.delete(key))
   }
@@ -73,11 +77,7 @@ export class ContinueFromDrawing {
       const current = await this.deps.holds.read(stamp.runId)
       if (!current) return
       const open = current.holds.find(hold => hold.nodeId === stamp.nodeId)
-      if (!open) {
-        this.deps.notify(PICK_ALREADY_ANSWERED)
-        return
-      }
-      if (open.revision === stamp.revision) {
+      if (open?.revision === stamp.revision) {
         const picked = await this.deps.holds.pickCandidate(stamp.runId, stamp.nodeId, stamp.heading, true)
         if (!picked) return
       }

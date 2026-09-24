@@ -303,6 +303,8 @@ export interface RunSurface extends Reachable {
 
 /** Moving one drawing's cards, labels and frames on to a rerun that landed. */
 export interface RerunDrawing {
+  /** Hold columns and pick rows already stored in this drawing. */
+  pickSources(): { runId: string; nodeId: string; outputIndexes: number[]; placed: string[] }[]
   /** Adds the first in-place answer beside its candidate. */
   placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean>
   updatePickCounts(landing: RerunLanding): Promise<boolean>
@@ -600,7 +602,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         }
       }
     }
-    this.drawHoldColumn(ea, column, frame.runId, hold, belonging?.id)
+    this.drawHoldColumn(ea, column, frame.runId, hold, belonging?.id, [...pending])
     await save(ea, false)
   }
 
@@ -630,13 +632,13 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       const copy = ea.getElement(frame.id)
       if (copy) copy.height = Math.max(copy.height ?? 0, next.box.y + next.box.height + 32 - (copy.y ?? 0))
     }
-    this.drawHoldColumn(ea, next, runId, hold, column.frameId ?? undefined)
+    this.drawHoldColumn(ea, next, runId, hold, column.frameId ?? undefined, holdStamp(column)?.outputIndexes)
     await save(ea, false)
     return true
   }
 
-  private drawHoldColumn(ea: ExcalidrawAutomate, column: HoldColumn, runId: string, hold: HoldRecord, frameId?: string): void {
-    const columnStamp: HoldStamp = { runId, nodeId: hold.nodeId, heading: '', revision: hold.revision, role: 'column' }
+  private drawHoldColumn(ea: ExcalidrawAutomate, column: HoldColumn, runId: string, hold: HoldRecord, frameId?: string, outputIndexes?: number[]): void {
+    const columnStamp: HoldStamp = { runId, nodeId: hold.nodeId, heading: '', revision: hold.revision, outputIndexes, role: 'column' }
     ea.style.strokeColor = INK
     const outline = ea.getElement(ea.addRect(column.box.x, column.box.y, column.box.width, column.box.height))
     if (outline) {
@@ -885,6 +887,25 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return this.selectedHoldRole('reroll')
   }
 
+  pickSources(): { runId: string; nodeId: string; outputIndexes: number[]; placed: string[] }[] {
+    const scene = this.ea.getViewElements()
+    const placed = new Map<string, Set<string>>()
+    for (const element of scene) {
+      const stamp = pickStamp(element)
+      if (!stamp) continue
+      const runs = placed.get(stamp.nodeId) ?? new Set<string>()
+      runs.add(stamp.runId)
+      placed.set(stamp.nodeId, runs)
+    }
+    return scene.flatMap(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'column' && element.type === 'rectangle'
+        ? [{ runId: stamp.runId, nodeId: stamp.nodeId, outputIndexes: stamp.outputIndexes ?? [],
+          placed: [...(placed.get(stamp.nodeId) ?? [])] }]
+        : []
+    })
+  }
+
   async placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean> {
     const pick = landing.pick
     if (!pick) return false
@@ -893,9 +914,10 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       const stamp = pickStamp(element)
       return stamp?.runId === landing.runId && stamp.nodeId === pick.nodeId && stamp.heading === pick.heading
     })) return true
+    const sourceRunId = landing.from[0] ?? landing.runId
     const candidate = scene.find(element => {
       const stamp = holdStamp(element)
-      return stamp?.role === 'candidate' && stamp.runId === landing.runId && stamp.nodeId === pick.nodeId
+      return stamp?.role === 'candidate' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
         && stamp.heading === pick.heading && element.type !== 'text'
     })
     if (!candidate) return false

@@ -175,6 +175,7 @@ let chats: { nodeId: string; message: string; noteThen: string | undefined }[]
 let conversations: Record<string, ChatMessage[]>
 /** The holds the engine has the run waiting at. */
 let waitingAt: HoldRecord[]
+let forkRecord: HoldRecord | undefined
 let rerollThrown: unknown
 let resumeThrown: unknown
 let feedbackThrown: unknown
@@ -203,6 +204,7 @@ const theRun = (runId: string): RunMeta => {
       edges: [
         { fromNode: 'gameplay', toNode: 'creative-director' },
         { fromNode: 'world', toNode: 'creative-director' },
+        { fromNode: 'pick', toNode: 'creative-director' },
       ],
     },
     ...(waitingAt.length > 0 ? { holds: waitingAt } : {}),
@@ -213,7 +215,9 @@ function makeHolds(): Holds {
   const offline = (): Promise<never> => Promise.reject(new EngineOfflineError(ENGINE_URL))
   const engine = stubEngine({
     capabilities: () => Promise.resolve(capabilities),
-    getRun: (runId: string) => (online ? Promise.resolve(runId === QUEST ? questRun : theRun(runId)) : offline()),
+    getRun: (runId: string) => (online ? Promise.resolve(runId === QUEST ? questRun : runId === RESUMED && forkRecord
+      ? { ...theRun(runId), branchedFromRunId: RUN, branchedFromNode: forkRecord.nodeId, holds: [forkRecord] }
+      : theRun(runId)) : offline()),
     getLayout: (runId: string): Promise<LayoutModel> => {
       if (!online) return offline()
       layoutsOf.push(runId)
@@ -315,6 +319,7 @@ beforeEach(() => {
   chats = []
   conversations = {}
   waitingAt = []
+  forkRecord = undefined
   rerollThrown = undefined
   resumeThrown = undefined
   feedbackThrown = undefined
@@ -1117,6 +1122,28 @@ describe('resume', () => {
     expect(resumes[0]?.request).toMatchObject({ chosen: 'Candidate 1', revision: 2 })
     expect(streamed).toContain('run_start')
     expect(landed).toEqual([`${RUN}:Candidate 1:pick`])
+  })
+
+  it('reports a second drawing pick as a fork row under its own run id', async () => {
+    const landed: { runId: string; heading?: string }[] = []
+    const pending: number[][] = []
+    reruns.onPickStream(async one => void pending.push(one.pick.pending))
+    reruns.onLanding(async one => void landed.push({ runId: one.runId, heading: one.pick?.heading }))
+    resumeFrames = [...started(RESUMED), { type: 'run_complete', runId: RESUMED }]
+    await makeHolds().resume(RUN, { nodeId: 'pick', heading: 'Candidate 2', revision: 2 })
+    expect(resumes[0]?.request).toMatchObject({ holdId: 'pick', chosen: 'Candidate 2', revision: 2 })
+    expect(landed).toEqual([{ runId: RESUMED, heading: 'Candidate 2' }])
+    expect(pending).toContainEqual([2])
+  })
+
+  it('places a panel-started fork by the candidate recorded on the engine', async () => {
+    forkRecord = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'then', chosen: 'Candidate 2', resolvedAt: 'now' }
+    resumeFrames = started(RESUMED)
+    const landed: { runId: string; heading?: string; pending?: number[] }[] = []
+    reruns.onLanding(async one => void landed.push({ runId: one.runId, heading: one.pick?.heading, pending: one.pick?.pending }))
+    await makeHolds().resume(RUN)
+    expect(resumes[0]?.request.chosen).toBeUndefined()
+    expect(landed).toEqual([{ runId: RESUMED, heading: 'Candidate 2', pending: [2] }])
   })
 
   it('sends a drawing pick with Direction and the hold note’s ticked canon', async () => {

@@ -178,6 +178,14 @@ describe('getRun', () => {
   })
 })
 
+describe('listForks', () => {
+  it('asks for the direct forks of the encoded source run', async () => {
+    engine.runs = [{ runId: 'fork-1', branchedFromRunId: 'source/1' }]
+    expect(await client.listForks('source/1')).toEqual(engine.runs)
+    expect(engine.requests.at(-1)?.path).toBe('/api/runs?branchedFromRunId=source%2F1')
+  })
+})
+
 describe('waitingRun', () => {
   const hold = { nodeId: 'pick', input: '', candidates: [], reachedAt: 'now' }
 

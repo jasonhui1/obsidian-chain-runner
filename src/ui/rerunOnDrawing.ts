@@ -1,4 +1,4 @@
-import type { RerunSurface } from './excalidraw'
+import type { DrawingView, RerunSurface } from './excalidraw'
 import { onDrawing } from './onDrawing'
 import type { OutputNotes } from './outputNotes'
 import { fillLiveOutputs, type LiveOutput } from './liveOutputs'
@@ -6,21 +6,22 @@ import { applyRunEvent, emptyRunState, type RunState } from '../run/session'
 import { lineCount } from '../run/panels'
 import { runIdOf, type LayoutPanel } from '../engine/types'
 import type { PickStream, RerunLanding } from '../run/rerunWatch'
+import { pickPanelIndexes } from '../run/pickPanels'
+import type { EngineClient } from '../engine/client'
+import type { RunMeta } from '../engine/types'
 
-/**
- * A landed rerun, followed on the drawing: each card of the old run is pointed
- * at a note filed under the new one, so the old notes stay the old run's record.
- * Only drawings open now can be reached.
- */
+/** Live pick rows and rerun cards on open drawings; later opens rebuild missing pick rows. */
 
 export interface RerunOnDrawingDeps {
   surface: RerunSurface
   notes: Pick<OutputNotes, 'write' | 'open'>
   notify: (message: string) => void
+  engine?: Pick<EngineClient, 'getRun' | 'listForks' | 'getLayout'>
 }
 
 export class RerunOnDrawing {
   private readonly picks = new Map<string, {
+    runId: string
     state: RunState
     outputs: LiveOutput<{ index: number; panel: LayoutPanel }>[]
     counts: string
@@ -28,11 +29,48 @@ export class RerunOnDrawing {
 
   constructor(private readonly deps: RerunOnDrawingDeps) {}
 
+  /** Rebuild rows made while the drawing was closed from the engine's run records. */
+  async rebuild(view: DrawingView): Promise<void> {
+    const { engine, surface, notes, notify } = this.deps
+    if (!engine || surface.unavailable()) return
+    let sources: ReturnType<ReturnType<RerunSurface['on']>['pickSources']>
+    try { sources = surface.on(view).pickSources() } catch { return }
+    for (const source of sources) {
+      try {
+        const origin = await engine.getRun(source.runId)
+        const forks = await engine.listForks(source.runId)
+        const runs = [origin, ...forks.filter(run =>
+          run.branchedFromRunId === source.runId && run.branchedFromNode === source.nodeId,
+        )]
+        for (const run of runs) {
+          if (source.placed.includes(run.runId) || run.status === 'running') continue
+          const heading = chosenAt(run, source.nodeId)
+          if (!heading) continue
+          const layout = await engine.getLayout(run.runId)
+          const pending = source.outputIndexes.length > 0 ? source.outputIndexes : pickPanelIndexes(origin, source.nodeId, layout.panels)
+          if (pending.length === 0) continue
+          const outputs: { index: number; panel: LayoutPanel; notePath: string }[] = []
+          for (const index of pending) {
+            const panel = layout.panels[index]
+            if (!panel) continue
+            const notePath = await notes.write(panel, { runId: run.runId, chainName: run.chainName })
+            if (notePath) outputs.push({ index, panel, notePath })
+          }
+          await onDrawing(() => surface.on(view).placePickRow({
+            from: [source.runId], runId: run.runId, chainName: run.chainName,
+            panels: layout.panels, pick: { nodeId: source.nodeId, heading, pending },
+          }, outputs), notify)
+        }
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'Could not rebuild pick rows')
+      }
+    }
+  }
+
   /** A resumed run's notes and cards start at run_start, then fill a line at a time. */
   async streamPick(stream: PickStream): Promise<void> {
     try {
       const runId = runIdOf(stream.event)
-      if (runId && runId !== stream.sourceRunId) return
       let live = this.picks.get(stream.sourceRunId)
       if (!live) {
         if (!runId) return
@@ -43,7 +81,7 @@ export class RerunOnDrawing {
           const note = await this.deps.notes.open(panel, { runId, chainName: stream.chainName })
           if (note) outputs.push({ index, place: { index, panel }, note, written: { text: '', state: 'pending' } })
         }
-        live = { state: emptyRunState(), outputs, counts: '' }
+        live = { runId, state: emptyRunState(), outputs, counts: '' }
         this.picks.set(stream.sourceRunId, live)
         const landing = { from: [stream.sourceRunId], runId, chainName: stream.chainName, panels: stream.sourcePanels, pick: stream.pick }
         const placed = outputs.map(one => ({ index: one.index, panel: one.place.panel, notePath: one.note.path }))
@@ -51,6 +89,7 @@ export class RerunOnDrawing {
           await onDrawing(() => this.deps.surface.on(view).placePickRow(landing, placed), this.deps.notify)
         }
       }
+      if (runId && runId !== live.runId) return
       live.state = applyRunEvent(live.state, stream.event)
       const panels = live.state.layout?.panels ?? stream.sourcePanels
       await fillLiveOutputs(live.outputs, {
@@ -69,7 +108,7 @@ export class RerunOnDrawing {
         }))
         for (const view of this.deps.surface.openViews()) {
           await onDrawing(() => this.deps.surface.on(view).updatePickCounts({
-            from: [stream.sourceRunId], runId: stream.sourceRunId, chainName: stream.chainName,
+            from: [stream.sourceRunId], runId: live.runId, chainName: stream.chainName,
             panels: current, pick: stream.pick,
           }), this.deps.notify)
         }
@@ -90,10 +129,11 @@ export class RerunOnDrawing {
 
   private async landFiles(landing: RerunLanding): Promise<void> {
     const { surface, notify } = this.deps
-    const live = landing.pick ? this.picks.get(landing.runId) : undefined
+    const sourceRunId = landing.from[0]
+    const live = landing.pick && sourceRunId ? this.picks.get(sourceRunId) : undefined
     if (live) {
       await fillLiveOutputs(live.outputs, { kind: 'timeline', panels: landing.panels }, true)
-      this.picks.delete(landing.runId)
+      if (sourceRunId) this.picks.delete(sourceRunId)
     }
     const filed = new Map<string, Promise<string | undefined>>()
     const noteFor = (output: string): Promise<string | undefined> => {
@@ -131,4 +171,9 @@ export class RerunOnDrawing {
     const panel = landing.panels.find(one => one.name === output)
     return panel && this.deps.notes.write(panel, { runId: landing.runId, chainName: landing.chainName })
   }
+}
+
+function chosenAt(run: RunMeta, nodeId: string): string | undefined {
+  const hold = [...(run.holds ?? [])].reverse().find(one => one.nodeId === nodeId && (one.chosen || one.custom))
+  return hold?.chosen ?? (hold?.custom ? 'Your own words' : undefined)
 }

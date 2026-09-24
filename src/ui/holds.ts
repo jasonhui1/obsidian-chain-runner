@@ -50,7 +50,9 @@ import { chatReply, repliesSoFar } from '../run/proposerChat'
 import { rerunRequest, runFork } from '../run/rerun'
 import { RerunProgressTracker } from '../run/rerunProgress'
 import type { RerunCause, RerunReport, RerunWatch } from '../run/rerunWatch'
+import type { RerunLanding } from '../run/rerunWatch'
 import { resumeRequest, runResume } from '../run/resume'
+import { pickPanelIndexes } from '../run/pickPanels'
 import { runReroll, UNSUPPORTED_REROLL } from '../run/reroll'
 import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
 import type { EngineClient } from '../engine/client'
@@ -621,11 +623,11 @@ export class Holds {
       delete request.custom
       if (pick.revision !== undefined) request.revision = pick.revision
     }
-    const before = request.chosen ? await this.deps.withEngine(() => this.deps.engine.getLayout(heading.runId)) : undefined
+    const before = request.chosen ? await this.deps.withEngine(() => fetchRun(this.deps.engine, heading.runId)) : undefined
     const picked = request.chosen ? {
       nodeId: request.holdId ?? waiting.find(one => one.chosen)?.nodeId ?? waiting.at(-1)?.nodeId ?? '',
       heading: request.chosen,
-      pending: before?.panels.flatMap((panel, index) => panel.state === 'pending' ? [index] : []) ?? [],
+      pending: before ? pickPanelIndexes(before.run, request.holdId ?? waiting.find(one => one.chosen)?.nodeId ?? waiting.at(-1)?.nodeId ?? '', before.layout.panels) : [],
     } : undefined
 
     let stale = false
@@ -636,7 +638,7 @@ export class Holds {
         sourceRunId: heading.runId,
         chainName: heading.chainName,
         pick: picked,
-        sourcePanels: before.panels,
+        sourcePanels: before.layout.panels,
         event: event as RunEvent,
       })
     }, () => (stale = true)))
@@ -651,7 +653,7 @@ export class Holds {
     const locked = await this.lockCanon(tickedCanonLines(direction), error)
     const url = this.deps.runUrl(runId)
     await this.rewrite(found, now => appendResumeLink(now, { runId, forked, ...(url ? { url } : {}) }))
-    const hold = forked ? await this.fork(heading, runId, report) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
+    const hold = forked ? await this.fork(heading, runId, report, picked) : ((error ? await this.read(runId) : await this.refresh(runId)) ?? this.refuse(NO_HOLD_NOTE(runId)))
     if (hold && !forked) {
       const layout = await this.deps.withEngine(() => this.deps.engine.getLayout(runId))
       if (layout) await report.land({
@@ -735,15 +737,24 @@ export class Holds {
     return refreshed
   }
 
-  /**
-   * A fork is a run of its own: its hold written, and the drawing moved on to it.
-   * The hold it forked from is answered either way, so it is refreshed (ADR-0013).
-   */
-  private async fork(origin: HoldHeading, runId: string, report: RerunReport): Promise<Hold | undefined> {
+  /** A fork gets its own hold note; the origin note is refreshed (ADR-0013). */
+  private async fork(origin: HoldHeading, runId: string, report: RerunReport, pick?: NonNullable<RerunLanding['pick']>): Promise<Hold | undefined> {
     const hold = await this.write(runId)
     await this.refresh(origin.runId)
-    const layout = hold && (await this.deps.withEngine(() => this.deps.engine.getLayout(runId)))
-    if (layout) await report.land({ runId, chainName: origin.chainName, panels: layout.panels })
+    const forked = hold && (await this.deps.withEngine(() => fetchRun(this.deps.engine, runId)))
+    if (forked) {
+      let chosen = pick
+      if (!chosen && forked.run.branchedFromNode) {
+        const record = forked.run.holds?.find(one => one.nodeId === forked.run.branchedFromNode && one.chosen)
+        const source = record && (await this.deps.withEngine(() => fetchRun(this.deps.engine, origin.runId)))
+        if (record?.chosen && source) chosen = {
+          nodeId: record.nodeId,
+          heading: record.chosen,
+          pending: pickPanelIndexes(source.run, record.nodeId, source.layout.panels),
+        }
+      }
+      await report.land({ runId, chainName: origin.chainName, panels: forked.layout.panels, ...(chosen ? { pick: chosen } : {}) })
+    }
     return hold
   }
 

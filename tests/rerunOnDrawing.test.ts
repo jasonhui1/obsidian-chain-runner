@@ -41,6 +41,7 @@ function makeFollower(): RerunOnDrawing {
       const name = names.get(view as DrawingView) as string
       bound.push(name)
       return {
+        pickSources: () => [],
         placePickRow: async () => true,
         updatePickCounts: async () => true,
         refreshHoldColumn: async () => true,
@@ -96,6 +97,7 @@ describe('RerunOnDrawing', () => {
         unavailable: () => undefined,
         openViews: () => [{ file: null }],
         on: () => ({
+          pickSources: () => [],
           placePickRow: async (_landing, outputs) => { placed.push(...outputs.map(one => one.notePath)); return true },
           updatePickCounts: async landing => { counts.push(landing.panels[0]?.lines ?? -1); return true },
           refreshHoldColumn: async () => true,
@@ -116,6 +118,73 @@ describe('RerunOnDrawing', () => {
     expect(counts).toContain(2)
     await picked.land({ from: [OLD], runId: OLD, chainName: 'creative-director', panels: [{ ...pending, text: 'First line\nSecond line', lines: 2, state: 'filled' }], pick: stream.pick })
     expect(filled.at(-1)).toBe('First line\nSecond line')
+    expect(notices).toEqual([])
+  })
+
+  it('streams a fork into its own row and keeps the earlier pick', async () => {
+    const rows: string[] = []
+    const writes: string[] = []
+    const pending: LayoutPanel = { name: 'World', node: 'world', text: '', lines: 0, state: 'pending' }
+    const picked = new RerunOnDrawing({
+      surface: {
+        unavailable: () => undefined, openViews: () => [{ file: null }],
+        on: () => ({
+          pickSources: () => [],
+          placePickRow: async (one, outputs) => {
+            const row = `${one.runId}:${one.pick?.heading}:${outputs[0]?.notePath}`
+            if (!rows.includes(row)) rows.push(row)
+            return true
+          },
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+        }),
+      },
+      notes: {
+        open: async (_panel, run) => ({ path: `runs/${run.runId}/World.md`, write: async panel => { writes.push(panel.text) } }),
+        write: async () => { throw new Error('fork stream must reuse its note') },
+      },
+      notify: message => void notices.push(message),
+    })
+    const pick = { nodeId: 'pick', heading: 'Candidate 2', pending: [0] }
+    const stream = { sourceRunId: OLD, chainName: 'creative-director', pick, sourcePanels: [pending] }
+    await picked.streamPick({ ...stream, event: started(NEW)[0]! })
+    await picked.streamPick({ ...stream, event: { type: 'token', nodeId: 'world', token: 'New route' } })
+    await picked.land({ from: [OLD], runId: NEW, chainName: 'creative-director', panels: [{ ...pending, state: 'filled', text: 'New route', lines: 1 }], pick })
+    expect(rows).toEqual([`${NEW}:Candidate 2:runs/${NEW}/World.md`])
+    expect(writes).toContain('New route')
+    expect(notices).toEqual([])
+  })
+
+  it('rebuilds an outside fork from engine records when a drawing is reopened', async () => {
+    const rows: string[] = []
+    const paths: string[] = []
+    const sourceHold = { nodeId: 'pick', input: '', reachedAt: 'now', candidates: [], chosen: 'Candidate 1' }
+    const origin = { runId: OLD, chainName: 'creative-director', seedPrompt: '', startedAt: 'now', agentOutputs: [], status: 'complete' as const, holds: [sourceHold] }
+    const fork = { runId: NEW, chainName: 'creative-director', seedPrompt: '', startedAt: 'now', agentOutputs: [], status: 'complete' as const,
+      branchedFromRunId: OLD, branchedFromNode: 'pick', holds: [{ ...sourceHold, chosen: 'Candidate 2' }] }
+    const view: DrawingView = { file: null }
+    const picked = new RerunOnDrawing({
+      surface: {
+        unavailable: () => undefined, openViews: () => [view],
+        on: () => ({
+          pickSources: () => [{ runId: OLD, nodeId: 'pick', outputIndexes: [1], placed: [OLD] }],
+          placePickRow: async (one, outputs) => { rows.push(`${one.from[0]}:${one.runId}:${one.pick?.heading}`); paths.push(...outputs.map(output => output.notePath)); return true },
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+        }),
+      },
+      notes: {
+        open: async () => undefined,
+        write: async (one, run) => `runs/${run.runId}/${one.name}.md`,
+      },
+      engine: {
+        getRun: async () => origin,
+        listForks: async () => [fork],
+        getLayout: async () => ({ kind: 'undeclared', panels: [panel('Before', 'old'), panel('World', 'new')] }),
+      },
+      notify: message => void notices.push(message),
+    })
+    await picked.rebuild(view)
+    expect(rows).toEqual([`${OLD}:${NEW}:Candidate 2`])
+    expect(paths).toEqual([`runs/${NEW}/World.md`])
     expect(notices).toEqual([])
   })
   it('points each card on an open drawing at its output’s note, filed under the new run', async () => {

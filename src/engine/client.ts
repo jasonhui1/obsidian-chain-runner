@@ -110,6 +110,11 @@ export class EngineClient {
     return this.getJson<RunMeta>(`/api/runs/${encodeURIComponent(runId)}`)
   }
 
+  /** Runs branched directly from one answered hold's run. */
+  async listForks(runId: string): Promise<RunMeta[]> {
+    return this.getJson<RunMeta[]>(`/api/runs?branchedFromRunId=${encodeURIComponent(runId)}`)
+  }
+
   /** The run, if it waits at a hold, with the holds it reached; `undefined` for a run that does not. */
   async waitingRun(runId: string): Promise<RunMeta | undefined> {
     const waiting = await this.getJson<RunMeta[]>('/api/runs?status=waiting')

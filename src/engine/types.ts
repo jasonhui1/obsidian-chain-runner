@@ -155,6 +155,7 @@ export interface RunMeta {
   holds?: HoldRecord[]
   graph?: RunGraph
   branchedFromRunId?: string
+  branchedFromNode?: string
   /** Membership in a repeated run of one chain with the same resolved inputs. */
   variance?: { groupId: string; index: number; size: number }
   [key: string]: unknown

@@ -102,6 +102,7 @@ export interface HoldStamp {
   nodeId: string
   heading: string
   revision?: number
+  outputIndexes?: number[]
   role: 'candidate' | 'continue' | 'column' | 'reroll'
 }
 
