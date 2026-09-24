@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { RerunOnDrawing, type RerunOnDrawingDeps } from '@/ui/rerunOnDrawing'
-import type { DrawingView, RerunSurface } from '@/ui/excalidraw'
+import type { DrawingView, RerunDrawing, RerunSurface } from '@/ui/excalidraw'
 import type { RerunLanding } from '@/run/rerunWatch'
 import type { RunProvenance } from '@/ui/outputNotes'
 import type { RunPanel } from '@/run/panels'
-import type { LayoutPanel } from '@/engine/types'
+import type { LayoutPanel, RunMeta } from '@/engine/types'
 import { started } from './engineFrames'
 
 /** A landed rerun, followed on every drawing open: which notes are filed, and what each drawing is asked to do. */
@@ -45,7 +45,7 @@ function makeFollower(engine?: RerunOnDrawingDeps['engine']): RerunOnDrawing {
         pickSources: () => [],
         placePickRow: async () => true,
         updatePickCounts: async () => true,
-        refreshHoldColumn: async () => true,
+        refreshHoldColumn: async () => true, placeRowHold: async () => false,
         followRerun: async (from, to, noteFor, title) => {
           const shown = drawings[name]
           if (shown === 'unreachable') throw new Error('That drawing went away')
@@ -118,7 +118,7 @@ describe('RerunOnDrawing', () => {
           pickSources: () => [],
           placePickRow: async (_landing, outputs) => { placed.push(...outputs.map(one => one.notePath)); return true },
           updatePickCounts: async landing => { counts.push(landing.panels[0]?.lines ?? -1); return true },
-          refreshHoldColumn: async () => true,
+          refreshHoldColumn: async () => true, placeRowHold: async () => false,
           followRerun: async () => false,
         }),
       },
@@ -153,7 +153,7 @@ describe('RerunOnDrawing', () => {
             if (!rows.includes(row)) rows.push(row)
             return true
           },
-          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, placeRowHold: async () => false, followRerun: async () => false,
         }),
       },
       notes: {
@@ -183,7 +183,7 @@ describe('RerunOnDrawing', () => {
         on: () => ({
           pickSources: () => [],
           placePickRow: async one => { if (!rows.includes(one.runId)) rows.push(one.runId); return true },
-          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, placeRowHold: async () => false, followRerun: async () => false,
         }),
       },
       notes: {
@@ -223,7 +223,7 @@ describe('RerunOnDrawing', () => {
             active--
             return true
           },
-          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, placeRowHold: async () => false, followRerun: async () => false,
         }),
       },
       notes: {
@@ -257,7 +257,7 @@ describe('RerunOnDrawing', () => {
         on: () => ({
           pickSources: () => [{ runId: OLD, nodeId: 'pick', outputIndexes: [1], placed: [OLD] }],
           placePickRow: async (one, outputs) => { rows.push(`${one.from[0]}:${one.runId}:${one.pick?.heading}`); paths.push(...outputs.map(output => output.notePath)); return true },
-          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, placeRowHold: async () => false, followRerun: async () => false,
         }),
       },
       notes: {
@@ -276,6 +276,63 @@ describe('RerunOnDrawing', () => {
     expect(paths).toEqual([`runs/${NEW}/World.md`])
     expect(notices).toEqual([])
   })
+  describe('a picked run that stops at another hold', () => {
+    const secondHold = { nodeId: 'hold-2', input: '', reachedAt: 'later', candidates: [{ heading: 'idea a', body: 'A world.' }] }
+    const graph = { nodes: [], edges: [
+      { fromNode: 'pick', toNode: 'world' }, { fromNode: 'world', toNode: 'hold-2' }, { fromNode: 'hold-2', toNode: 'verdict' },
+    ] }
+    const panels = [panel('Before', 'old'), panel('World', 'new'), { ...panel('Verdict', ''), node: 'verdict', state: 'pending' as const }]
+    const pick = { nodeId: 'pick', heading: 'Candidate 2', pending: [1, 2] }
+    const waiting = {
+      runId: NEW, chainName: 'creative-director', seedPrompt: '', startedAt: 'now', agentOutputs: [], status: 'waiting' as const,
+      branchedFromRunId: OLD, branchedFromNode: 'pick', graph,
+      holds: [{ nodeId: 'pick', input: '', reachedAt: 'now', candidates: [], chosen: 'Candidate 2', resolvedAt: 'now' }, secondHold],
+    } as unknown as RunMeta
+
+    function drawn(run: RunMeta, sources: ReturnType<RerunDrawing['pickSources']> = []): { calls: string[]; follower: RerunOnDrawing } {
+      const calls: string[] = []
+      const follower = new RerunOnDrawing({
+        surface: {
+          unavailable: () => undefined, openViews: () => [{ file: null }],
+          on: () => ({
+            pickSources: () => sources,
+            placePickRow: async one => { calls.push(`row ${one.runId}`); return true },
+            placeRowHold: async (one, hold, pending) => { calls.push(`hold ${one.runId} ${hold.nodeId} [${pending.join(',')}]`); return true },
+            updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+          }),
+        },
+        notes: { open: async () => undefined, write: async (one, meta) => `runs/${meta.runId}/${one.name}.md` },
+        engine: {
+          getRun: async runId => (runId === NEW ? run : { ...run, runId: OLD, holds: [{ nodeId: 'pick', input: '', reachedAt: 'now', candidates: [] }] }),
+          listForks: async () => [run],
+          getLayout: async () => ({ kind: 'undeclared', panels }),
+        },
+        notify: message => void notices.push(message),
+      })
+      return { calls, follower }
+    }
+
+    it('draws that hold at the end of its row, without the cards it has not reached', async () => {
+      const { calls, follower } = drawn(waiting)
+      await follower.land({ from: [OLD], runId: NEW, chainName: 'creative-director', panels, pick })
+      expect(calls).toEqual([`row ${NEW}`, `hold ${NEW} hold-2 [2]`])
+      expect(notices).toEqual([])
+    })
+
+    it('draws no hold for a run that finished', async () => {
+      const { calls, follower } = drawn({ ...waiting, status: 'complete' })
+      await follower.land({ from: [OLD], runId: NEW, chainName: 'creative-director', panels, pick })
+      expect(calls).toEqual([`row ${NEW}`])
+    })
+
+    it('draws it again when a drawing reopens on a row made while it was closed', async () => {
+      const { calls, follower } = drawn(waiting, [{ runId: OLD, nodeId: 'pick', outputIndexes: [1, 2], placed: [] }])
+      await follower.rebuild({ file: null })
+      expect(calls).toEqual([`row ${NEW}`, `hold ${NEW} hold-2 [2]`])
+      expect(notices).toEqual([])
+    })
+  })
+
   it('points each card on an open drawing at its output’s note, filed under the new run', async () => {
     drawings = { board: ['Verdict', 'World'] }
     await makeFollower().land(landing)

@@ -42,6 +42,7 @@ import {
 } from './proposal'
 import { buildDirectLabel, cardProposal, directLabelRunId, frameGeneratedName, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
 import { beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, type HoldColumn, type HoldStamp } from './holdColumn'
+import { roomBelow, rowHold, type SceneEdits } from './rowHold'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
@@ -308,6 +309,8 @@ export interface RerunDrawing {
   /** Adds the first in-place answer beside its candidate. */
   placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean>
   updatePickCounts(landing: RerunLanding): Promise<boolean>
+  /** Draws the hold a pick row's run stopped at, at the end of its row; `false` when there is no row, or it already shows one. */
+  placeRowHold(landing: RerunLanding, hold: HoldRecord, pending: readonly number[]): Promise<boolean>
   /** Replaces a rerolled candidate set in its reserved column. */
   refreshHoldColumn(runId: string, nodeId: string, hold: HoldRecord): Promise<boolean>
   /**
@@ -629,12 +632,13 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     }
     const canReroll = this.options?.canReroll?.() ?? false
     const next = buildHoldColumn(hold, column.x ?? 0, column.y ?? 0, { canReroll })
-    const frame = scene.find(element => element.id === column.frameId)
-    if (frame) {
-      ea.copyViewElementsToEAforEditing([frame])
-      const copy = ea.getElement(frame.id)
-      if (copy) copy.height = Math.max(copy.height ?? 0, next.box.y + next.box.height + 32 - (copy.y ?? 0))
-    }
+    const room = roomBelow(scene, {
+      frameId: column.frameId ?? undefined,
+      line: (column.y ?? 0) + (column.height ?? 0),
+      reach: next.box,
+      kept: () => false,
+    }, { removed: old.map(element => element.id), moved: new Map(), resized: new Map() })
+    applyEdits(ea, scene, { ...room, removed: [] })
     this.drawHoldColumn(ea, next, runId, hold, column.frameId ?? undefined, holdStamp(column)?.outputIndexes)
     await save(ea, false)
     return true
@@ -970,7 +974,9 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
           card.customData = { ...stampPick(stamp), chainRunnerPanel: { runId: landing.runId, index: output.index } }
           if (frame) card.frameId = frame.id
         }
-        mark(ea.getElement(ea.addText(step.x, step.y, output.panel.name)))
+        const name = ea.getElement(ea.addText(step.x, step.y, output.panel.name))
+        mark(name)
+        if (name) name.customData = { ...(name.customData as Record<string, unknown>), chainRunnerPickStep: output.index }
         const count = ea.getElement(ea.addText(length.x, length.y, `${output.panel.lines} lines`))
         mark(count)
         if (count) count.customData = { ...(count.customData as Record<string, unknown>), chainRunnerPickCount: output.index }
@@ -983,6 +989,26 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         if (frame) direct.frameId = frame.id
       }
     }
+    await save(ea, false)
+    return true
+  }
+
+  async placeRowHold(landing: RerunLanding, hold: HoldRecord, pending: readonly number[]): Promise<boolean> {
+    const pick = landing.pick
+    if (!pick) return false
+    const scene = this.ea.getViewElements()
+    const placed = rowHold(scene, {
+      sourceRunId: landing.from[0] ?? landing.runId,
+      runId: landing.runId,
+      pick,
+      hold,
+      pending,
+      canReroll: this.options?.canReroll?.() ?? false,
+    })
+    if (!placed) return false
+    const ea = this.emptied()
+    applyEdits(ea, scene, placed)
+    this.drawHoldColumn(ea, placed.column, landing.runId, hold, placed.frameId, [...pending])
     await save(ea, false)
     return true
   }
@@ -1008,6 +1034,29 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     }
     await save(ea, false)
     return true
+  }
+}
+
+/** Copies what `edits` touches onto the workbench and changes it there, for the one save that follows. */
+function applyEdits(ea: ExcalidrawAutomate, scene: readonly SceneElement[], edits: SceneEdits): void {
+  const touched = new Set([...edits.removed, ...edits.moved.keys(), ...edits.resized.keys()])
+  if (touched.size === 0) return
+  ea.copyViewElementsToEAforEditing(scene.filter(element => touched.has(element.id)))
+  for (const id of edits.removed) {
+    const copy = ea.getElement(id)
+    if (copy) copy.isDeleted = true
+  }
+  for (const [id, { dx, dy }] of edits.moved) {
+    const copy = ea.getElement(id)
+    if (!copy) continue
+    copy.x = (copy.x ?? 0) + dx
+    copy.y = (copy.y ?? 0) + dy
+  }
+  for (const [id, size] of edits.resized) {
+    const copy = ea.getElement(id)
+    if (!copy) continue
+    if (size.width !== undefined) copy.width = size.width
+    if (size.height !== undefined) copy.height = size.height
   }
 }
 

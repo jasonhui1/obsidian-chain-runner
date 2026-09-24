@@ -92,6 +92,12 @@ because it is an image element.
 - Scripted elements need their `frameId` when placed inside a frame. A new
   line in an existing node also needs the box's `groupIds`. Excalidraw does
   not infer those memberships on placement.
+- One write can move many elements, frames and embeddables included: move a
+  frame's members yourself, since a scripted move of a frame does not carry
+  them. Read from 2.26.4's `main.js` (#79): `addElements` swaps each copy in by
+  id in one `updateScene`, calls `refreshAllArrows()` when a written element has
+  `boundElements` or is a container, then saves once. So arrows bound to a moved
+  card should follow it; a live vault check of that is still owed.
 - Each write saves the drawing. Avoid writes on every drag frame or merely
   because a click occurred. A resize is handled on pointer release, with a
   stored laid-out width to skip unchanged nodes (ADR-0011).
