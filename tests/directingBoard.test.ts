@@ -318,6 +318,7 @@ const text = (): string => root.textContent ?? ''
 const header = (): string => root.querySelector('.chain-runner-directing-header')?.textContent ?? ''
 const headerTitle = (): HTMLElement | null => root.querySelector('.chain-runner-directing-title')
 const headerTooltip = (): string => headerTitle()?.title ?? ''
+const openMoreMenu = (): void => void root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
 const turns = (): string[] => Array.from(root.querySelectorAll('.chain-runner-directing-turn')).map(turn => turn.textContent ?? '')
 const composer = (placeholder: string): HTMLTextAreaElement => {
   const found = Array.from(root.querySelectorAll('textarea')).find(box => box.placeholder === placeholder)
@@ -387,7 +388,7 @@ describe('header', () => {
 
   it('offers the hold note in a tab from the ⋯ menu', async () => {
     open()
-    root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
+    openMoreMenu()
     menus[0]![0]!.click()
     await settled()
     expect(store.opened).toEqual([PATH])
@@ -395,7 +396,7 @@ describe('header', () => {
 
   it('offers opening the run on the engine from the ⋯ menu', () => {
     open()
-    root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
+    openMoreMenu()
     const engineItem = menus[0]?.find(item => item.title === 'Open this run on the engine')
     expect(engineItem?.icon).toBe('external-link')
     engineItem?.click()
@@ -405,7 +406,7 @@ describe('header', () => {
   it('omits opening the run on the engine when the run has no url', () => {
     engineUrlValid = false
     open()
-    root.querySelector<HTMLButtonElement>('[aria-label="More"]')?.click()
+    openMoreMenu()
     expect(menus[0]!.some(item => item.title === 'Open this run on the engine')).toBe(false)
   })
 })
@@ -484,7 +485,7 @@ describe('following the note', () => {
     const made = open()
     made.show(NONE, undefined)
     await touched()
-    expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
+    expect(text()).toContain('This run has no hold note yet.')
   })
 })
 
@@ -860,7 +861,7 @@ describe('a rerun going', () => {
     expect(timers.size).toBe(0)
     feed.end(...started(NEW), complete(NEW))
     await settled()
-    expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
+    expect(text()).toContain('This run has no hold note yet.')
   })
 })
 
@@ -1023,7 +1024,7 @@ describe('a proposal tab, chatting', () => {
   it('says which run a reply was revised as, and offers a reply not yet used', () => {
     open(talked, 'world')
     const shown = Array.from(root.querySelectorAll('.chain-runner-directing-turn'))
-    expect(shown[0]?.textContent).toContain('Used as the revision · run Xy9zW2')
+    expect(shown[0]?.textContent).toContain('Used as the revision')
     expect(Array.from(shown[0]!.querySelectorAll('button'))).toEqual([])
     expect(has('Use this reply as the revision & rerun')).toBe(true)
   })
@@ -1040,7 +1041,7 @@ describe('a proposal tab, chatting', () => {
     release()
     await settled()
     expect(headerTooltip()).toContain('Xy9zW2')
-    expect(text()).toContain('Used as the revision · run Xy9zW2')
+    expect(text()).toContain('Used as the revision')
   })
 
   it('sends what is typed to this proposal, on Send or Enter', async () => {
@@ -1168,7 +1169,8 @@ describe('a proposal tab, side quests', () => {
     expect(quests()[0]?.textContent).toContain('The test becomes an arena.')
     const link = quests()[0]?.querySelector('a')
     expect(link?.getAttribute('href')).toBe('http://engine/history/2026-09-16-quest1')
-    expect(link?.textContent).toContain('quest1')
+    expect(link?.textContent).toBe('→ open on the engine')
+    expect(link?.title).toBe('run 2026-09-16-quest1')
     expect(quests()[1]?.textContent).toContain('No result')
     expect(text()).not.toContain('Rotation lands.')
   })
@@ -1349,7 +1351,7 @@ describe('without a hold', () => {
 
   it('writes the hold for a run that has none, and shows it', async () => {
     board().show(NONE, undefined)
-    expect(text()).toContain(`Run ${NONE} has no hold note yet.`)
+    expect(text()).toContain('This run has no hold note yet.')
     button('✎ Direct this run').click()
     await settled()
     expect(notes[`Maestro/holds/${NONE}.md`]).toContain(`# Hold: run ${NONE}`)

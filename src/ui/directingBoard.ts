@@ -112,7 +112,7 @@ export class DirectingBoard {
     this.header()
     const body = (this.body = this.add(this.root, 'div', `${CLS}-body`))
     if (state.kind === 'idle') this.add(body, 'div', `${CLS}-empty`, 'Click a card, or a run’s ✎ Direct, on the drawing.')
-    if (state.kind === 'missing') this.missing(body, state.runId)
+    if (state.kind === 'missing') this.missing(body)
     if (state.kind === 'hold') {
       this.hold(body, state.hold)
       this.resumeBar(state.hold)
@@ -198,15 +198,14 @@ export class DirectingBoard {
     const runId = runIdOf(this.state)
     this.add(title, 'span', '', this.state.kind === 'hold' ? this.state.hold.chainName : 'Directing')
     titled(title, runId ? `run ${runId}` : undefined)
-    if (this.state.kind !== 'hold') return
+    if (this.state.kind !== 'hold' || !runId) return
     const more = this.button(header, '⋯', `${CLS}-more`)
     more.setAttribute('aria-label', 'More')
-    const { runId: activeRunId } = this.state.hold
     more.onclick = (event): void => {
       const items: MenuItem[] = [
-        { title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(activeRunId) },
+        { title: 'Open the hold note in a tab', icon: 'file-text', click: () => void this.deps.holds.open(runId) },
       ]
-      const url = this.deps.runUrl(activeRunId)
+      const url = this.deps.runUrl(runId)
       if (url) {
         items.push({
           title: 'Open this run on the engine',
@@ -218,8 +217,8 @@ export class DirectingBoard {
     }
   }
 
-  private missing(body: HTMLElement, runId: string): void {
-    this.add(body, 'div', `${CLS}-empty`, `Run ${runId} has no hold note yet.`)
+  private missing(body: HTMLElement): void {
+    this.add(body, 'div', `${CLS}-empty`, 'This run has no hold note yet.')
     this.button(body, '✎ Direct this run', 'mod-cta').onclick = (): void => void this.act(runId => this.deps.holds.write(runId))
   }
 
@@ -290,7 +289,7 @@ export class DirectingBoard {
   }
 
   private runLink(el: HTMLElement, runId: string): void {
-    const link = this.add(el, 'a', `${CLS}-run-link`, `→ run ${shortId(runId)}`)
+    const link = this.add(el, 'a', `${CLS}-run-link`, '→ open on the engine')
     link.title = `run ${runId}`
     const url = this.deps.runUrl(runId)
     if (!url) {
@@ -320,7 +319,10 @@ export class DirectingBoard {
       const shown = this.turn(el, turn.message)
       if (turn.reply === undefined) this.add(shown, 'div', `${CLS}-faint`, turn === sent ? `${name} is replying…` : 'No reply')
       else this.markdown(shown, turn.reply)
-      if (turn.revisedAs) this.add(shown, 'div', `${CLS}-faint`, `Used as the revision · run ${shortId(turn.revisedAs)}`)
+      if (turn.revisedAs) {
+        const revised = this.add(shown, 'div', `${CLS}-faint`, 'Used as the revision')
+        revised.title = `run ${turn.revisedAs}`
+      }
       else if (turn.reply !== undefined) {
         this.reviseButton(shown, hold, { name, message: turn.message, reply: turn.reply, ...(turn.turn !== undefined ? { turn: turn.turn } : {}) })
       }
@@ -722,9 +724,6 @@ function sentEntry<T>(entries: T[], pending: string | undefined, unanswered: (en
   return pending !== undefined && last !== undefined && unanswered(last) === oneLine(pending) ? last : undefined
 }
 
-function shortId(runId: string): string {
-  return runId.split('-').pop() ?? runId
-}
 
 function stateOf(hold: Hold | undefined, runId: string): DirectingState {
   return hold ? { kind: 'hold', hold } : { kind: 'missing', runId }
