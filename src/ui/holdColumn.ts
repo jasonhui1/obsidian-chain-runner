@@ -155,7 +155,11 @@ export function buildPickRow(candidate: Box, count: number): {
 }
 
 const PICK_STAMP = 'chainRunnerPick'
-export interface PickStamp { runId: string; nodeId: string; heading: string }
+/** `from` is the run whose candidate the row sits beside. */
+export interface PickStamp { runId: string; nodeId: string; heading: string; from?: string }
+/** The panel index a row's step name and line count are for. */
+export const PICK_STEP = 'chainRunnerPickStep'
+export const PICK_COUNT = 'chainRunnerPickCount'
 
 export function stampPick(data: PickStamp): Record<string, unknown> {
   return { [PICK_STAMP]: data }
@@ -168,5 +172,6 @@ export function pickStamp(element: { customData?: unknown }): PickStamp | undefi
   if (!value || typeof value !== 'object') return undefined
   const stamp = value as Record<string, unknown>
   return typeof stamp.runId === 'string' && typeof stamp.nodeId === 'string' && typeof stamp.heading === 'string'
+    && (stamp.from === undefined || typeof stamp.from === 'string')
     ? stamp as unknown as PickStamp : undefined
 }

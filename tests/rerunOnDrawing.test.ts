@@ -297,7 +297,7 @@ describe('RerunOnDrawing', () => {
           on: () => ({
             pickSources: () => sources,
             placePickRow: async one => { calls.push(`row ${one.runId}`); return true },
-            placeRowHold: async (one, hold, pending) => { calls.push(`hold ${one.runId} ${hold.nodeId} [${pending.join(',')}]`); return true },
+            placeRowHold: async (one, held) => { calls.push(`hold ${one.runId} ${held.holds.map(({ hold, pending }) => `${hold.nodeId} [${pending.join(',')}]`).join(' ')} drops [${held.unreached.join(',')}]`); return true },
             updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
           }),
         },
@@ -315,7 +315,7 @@ describe('RerunOnDrawing', () => {
     it('draws that hold at the end of its row, without the cards it has not reached', async () => {
       const { calls, follower } = drawn(waiting)
       await follower.land({ from: [OLD], runId: NEW, chainName: 'creative-director', panels, pick })
-      expect(calls).toEqual([`row ${NEW}`, `hold ${NEW} hold-2 [2]`])
+      expect(calls).toEqual([`row ${NEW}`, `hold ${NEW} hold-2 [2] drops [2]`])
       expect(notices).toEqual([])
     })
 
@@ -325,10 +325,16 @@ describe('RerunOnDrawing', () => {
       expect(calls).toEqual([`row ${NEW}`])
     })
 
+    it('draws only the hold when a drawing reopens on a row it already shows', async () => {
+      const { calls, follower } = drawn(waiting, [{ runId: OLD, nodeId: 'pick', outputIndexes: [1, 2], placed: [NEW] }])
+      await follower.rebuild({ file: null })
+      expect(calls).toEqual([`hold ${NEW} hold-2 [2] drops [2]`])
+    })
+
     it('draws it again when a drawing reopens on a row made while it was closed', async () => {
       const { calls, follower } = drawn(waiting, [{ runId: OLD, nodeId: 'pick', outputIndexes: [1, 2], placed: [] }])
       await follower.rebuild({ file: null })
-      expect(calls).toEqual([`row ${NEW}`, `hold ${NEW} hold-2 [2]`])
+      expect(calls).toEqual([`row ${NEW}`, `hold ${NEW} hold-2 [2] drops [2]`])
       expect(notices).toEqual([])
     })
   })

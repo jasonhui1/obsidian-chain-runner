@@ -136,7 +136,7 @@ describe('a hold inside a pick row, on the drawing', () => {
     const echoesWas = echoes.y
     const savesBefore = board.saves()
 
-    expect(await board.on.placeRowHold(row(FORK, 'Meta-Architect'), secondHold, [3])).toBe(true)
+    expect(await board.on.placeRowHold(row(FORK, 'Meta-Architect'), { holds: [{ hold: secondHold, pending: [3] }], unreached: [3] })).toBe(true)
 
     expect(board.saves() - savesBefore).toBe(1)
     const live = board.elements.filter(element => !element.isDeleted)
@@ -155,9 +155,9 @@ describe('a hold inside a pick row, on the drawing', () => {
 
   it('draws a row\'s hold once, and grows a pick of it into a row to its right', async () => {
     const board = await pickedTwice()
-    await board.on.placeRowHold(row(FORK, 'Meta-Architect'), secondHold, [3])
+    await board.on.placeRowHold(row(FORK, 'Meta-Architect'), { holds: [{ hold: secondHold, pending: [3] }], unreached: [3] })
     const saves = board.saves()
-    expect(await board.on.placeRowHold(row(FORK, 'Meta-Architect'), secondHold, [3])).toBe(false)
+    expect(await board.on.placeRowHold(row(FORK, 'Meta-Architect'), { holds: [{ hold: secondHold, pending: [3] }], unreached: [3] })).toBe(false)
     expect(board.saves()).toBe(saves)
 
     expect(await board.on.placePickRow(row('run-deeper', 'idea b', FORK, 'hold-2', [3]), outputs([3]))).toBe(true)
@@ -165,6 +165,35 @@ describe('a hold inside a pick row, on the drawing', () => {
     const card = board.elements.find(element => element.type === 'embeddable' && JSON.stringify(element.customData).includes('run-deeper'))!
     expect(card.x).toBeGreaterThan(candidate.x + candidate.width)
     expect(card.y).toBe(candidate.y)
+    expect(collisions(board.elements)).toEqual([])
+  })
+
+  it("keeps an enclosing candidate's lines and row in place when a hold three deep makes room", async () => {
+    const board = await pickedTwice()
+    await board.on.placeRowHold(row(FORK, 'Meta-Architect'), { holds: [{ hold: secondHold, pending: [3] }], unreached: [3] })
+    const deeper = row('run-deeper', 'idea a', FORK, 'hold-2', [3])
+    await board.on.placePickRow(deeper, outputs([3]))
+    const enclosing = board.elements.filter(element => {
+      const hold = holdStamp(element)
+      return (hold?.runId === SOURCE && hold.heading === 'Meta-Architect') || JSON.stringify(element.customData ?? {}).includes(`"runId":"${FORK}","nodeId":"hold-1"`)
+    })
+    const where = new Map(enclosing.map(element => [element.id, `${element.x},${element.y}`]))
+    expect(enclosing.some(element => holdStamp(element)?.role === 'continue')).toBe(true)
+
+    const thirdHold: HoldRecord = { ...secondHold, nodeId: 'hold-3', candidates: [{ heading: 'one', body: 'x' }, { heading: 'two', body: 'y' }] }
+    expect(await board.on.placeRowHold(deeper, { holds: [{ hold: thirdHold, pending: [] }], unreached: [3] })).toBe(true)
+
+    for (const element of board.elements.filter(one => where.has(one.id))) expect(`${element.x},${element.y}`).toBe(where.get(element.id))
+    expect(collisions(board.elements)).toEqual([])
+  })
+
+  it("stands two holds a row's run waits at side by side", async () => {
+    const board = await pickedTwice()
+    const otherHold: HoldRecord = { ...secondHold, nodeId: 'hold-2b' }
+    await board.on.placeRowHold(row(FORK, 'Meta-Architect'), { holds: [{ hold: secondHold, pending: [3] }, { hold: otherHold, pending: [] }], unreached: [3] })
+    const outlines = board.elements.filter(element => holdStamp(element)?.runId === FORK && holdStamp(element)?.role === 'column' && element.type === 'rectangle' && element.height > 200)
+    expect(outlines.map(element => holdStamp(element)?.nodeId)).toEqual(['hold-2', 'hold-2b'])
+    expect(outlines[1]!.x).toBeGreaterThan(outlines[0]!.x + outlines[0]!.width)
     expect(collisions(board.elements)).toEqual([])
   })
 })

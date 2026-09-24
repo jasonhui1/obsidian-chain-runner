@@ -9,7 +9,8 @@ import type { PickStream, RerunLanding } from '../run/rerunWatch'
 import { runName, runNameFromMeta } from '../run/runName'
 import { pickPanelIndexes } from '../run/pickPanels'
 import type { EngineClient } from '../engine/client'
-import { waitingHolds, type HoldRecord, type RunMeta } from '../engine/types'
+import type { RunMeta } from '../engine/types'
+import { heldInRow } from './rowHold'
 
 /** Live pick rows and rerun cards on open drawings; later opens rebuild missing pick rows. */
 
@@ -54,26 +55,30 @@ export class RerunOnDrawing {
           run.branchedFromRunId === source.runId && run.branchedFromNode === source.nodeId,
         )]
         for (const run of runs) {
-          if (source.placed.includes(run.runId) || run.status === 'running') continue
+          // A placed row can still be missing the hold its run reached after the drawing closed.
+          const placed = source.placed.includes(run.runId)
+          if (run.status === 'running' || (placed && run.status !== 'waiting')) continue
           const heading = chosenAt(run, source.nodeId)
           if (!heading) continue
           const layout = await engine.getLayout(run.runId)
           const pending = source.outputIndexes.length > 0 ? source.outputIndexes : pickPanelIndexes(origin, source.nodeId, layout.panels)
           if (pending.length === 0) continue
-          const outputs: { index: number; panel: LayoutPanel; notePath: string }[] = []
-          for (const index of pending) {
-            const panel = layout.panels[index]
-            if (!panel) continue
-            const notePath = await notes.write(panel, { runId: run.runId, chainName: run.chainName })
-            if (notePath) outputs.push({ index, panel, notePath })
-          }
           const landing = {
             from: [source.runId], runId: run.runId, chainName: run.chainName,
             panels: layout.panels, pick: { nodeId: source.nodeId, heading, pending },
           }
-          await this.writeDrawing(view, () => surface.on(view).placePickRow(landing, outputs))
+          if (!placed) {
+            const outputs: { index: number; panel: LayoutPanel; notePath: string }[] = []
+            for (const index of pending) {
+              const panel = layout.panels[index]
+              if (!panel) continue
+              const notePath = await notes.write(panel, { runId: run.runId, chainName: run.chainName })
+              if (notePath) outputs.push({ index, panel, notePath })
+            }
+            await this.writeDrawing(view, () => surface.on(view).placePickRow(landing, outputs))
+          }
           const held = heldInRow(run, landing.pick, layout.panels)
-          if (held) await this.writeDrawing(view, () => surface.on(view).placeRowHold(landing, held.hold, held.pending))
+          if (held) await this.writeDrawing(view, () => surface.on(view).placeRowHold(landing, held))
         }
       } catch (error) {
         notify(error instanceof Error ? error.message : 'Could not rebuild pick rows')
@@ -176,7 +181,7 @@ export class RerunOnDrawing {
       if (landing.pick) {
         await this.writeDrawing(view, () => surface.on(view).placePickRow(landing, pickOutputs))
         await this.writeDrawing(view, () => surface.on(view).updatePickCounts(landing))
-        if (held) await this.writeDrawing(view, () => surface.on(view).placeRowHold(landing, held.hold, held.pending))
+        if (held) await this.writeDrawing(view, () => surface.on(view).placeRowHold(landing, held))
       } else {
         await this.writeDrawing(view, () => surface.on(view).followRerun(landing.from, landing.runId, noteFor, toTitle))
       }
@@ -195,11 +200,3 @@ function chosenAt(run: RunMeta, nodeId: string): string | undefined {
   return hold?.chosen ?? (hold?.custom ? 'Your own words' : undefined)
 }
 
-/** The hold a picked run stopped at further on, and the row's panels it has not reached. */
-function heldInRow(run: RunMeta, pick: { nodeId: string; pending: readonly number[] }, panels: readonly LayoutPanel[]): { hold: HoldRecord; pending: number[] } | undefined {
-  if (run.status !== 'waiting') return undefined
-  const hold = waitingHolds(run.holds).filter(one => one.nodeId !== pick.nodeId).at(-1)
-  if (!hold) return undefined
-  const after = new Set(pickPanelIndexes(run, hold.nodeId, panels))
-  return { hold, pending: pick.pending.filter(index => after.has(index) || panels[index]?.node === hold.nodeId) }
-}

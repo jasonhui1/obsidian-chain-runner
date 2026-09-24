@@ -41,8 +41,8 @@ import {
   type ProposalRole,
 } from './proposal'
 import { buildDirectLabel, cardProposal, directLabelRunId, frameGeneratedName, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
-import { beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, type HoldColumn, type HoldStamp } from './holdColumn'
-import { roomBelow, rowHold, type SceneEdits } from './rowHold'
+import { beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, PICK_COUNT, PICK_STEP, type HoldColumn, type HoldStamp } from './holdColumn'
+import { roomBelow, rowHold, type HeldInRow, type SceneEdits } from './rowHold'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
@@ -309,8 +309,8 @@ export interface RerunDrawing {
   /** Adds the first in-place answer beside its candidate. */
   placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean>
   updatePickCounts(landing: RerunLanding): Promise<boolean>
-  /** Draws the hold a pick row's run stopped at, at the end of its row; `false` when there is no row, or it already shows one. */
-  placeRowHold(landing: RerunLanding, hold: HoldRecord, pending: readonly number[]): Promise<boolean>
+  /** Draws the holds a pick row's run stopped at, at the end of its row; `false` when there is no row, or it already shows them. */
+  placeRowHold(landing: RerunLanding, held: HeldInRow): Promise<boolean>
   /** Replaces a rerolled candidate set in its reserved column. */
   refreshHoldColumn(runId: string, nodeId: string, hold: HoldRecord): Promise<boolean>
   /**
@@ -624,21 +624,15 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       const stamp = holdStamp(element)
       return stamp?.runId === runId && stamp.nodeId === nodeId
     })
-    const ea = this.emptied()
-    ea.copyViewElementsToEAforEditing(old)
-    for (const element of old) {
-      const copy = ea.getElement(element.id)
-      if (copy) copy.isDeleted = true
-    }
     const canReroll = this.options?.canReroll?.() ?? false
     const next = buildHoldColumn(hold, column.x ?? 0, column.y ?? 0, { canReroll })
-    const room = roomBelow(scene, {
+    const ea = this.emptied()
+    applyEdits(ea, scene, roomBelow(scene, {
       frameId: column.frameId ?? undefined,
-      line: (column.y ?? 0) + (column.height ?? 0),
-      reach: next.box,
-      kept: () => false,
-    }, { removed: old.map(element => element.id), moved: new Map(), resized: new Map() })
-    applyEdits(ea, scene, { ...room, removed: [] })
+      from: (column.y ?? 0) + (column.height ?? 0),
+      clear: next.box,
+      stays: () => false,
+    }, { removed: old.map(element => element.id), moved: new Map(), resized: new Map() }))
     this.drawHoldColumn(ea, next, runId, hold, column.frameId ?? undefined, holdStamp(column)?.outputIndexes)
     await save(ea, false)
     return true
@@ -954,7 +948,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     if (chosen) chosen.strokeStyle = 'solid'
     const enclosing = frame ? ea.getElement(frame.id) : undefined
     if (enclosing) enclosing.width = Math.max(enclosing.width ?? 0, row.right + 32 - (enclosing.x ?? 0))
-    const stamp = { runId: landing.runId, nodeId: pick.nodeId, heading: pick.heading }
+    const stamp = { runId: landing.runId, nodeId: pick.nodeId, heading: pick.heading, from: sourceRunId }
     const mark = (element: SceneElement | undefined): void => {
       if (!element) return
       element.customData = { ...(typeof element.customData === 'object' && element.customData !== null ? element.customData : {}), ...stampPick(stamp) }
@@ -976,10 +970,10 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         }
         const name = ea.getElement(ea.addText(step.x, step.y, output.panel.name))
         mark(name)
-        if (name) name.customData = { ...(name.customData as Record<string, unknown>), chainRunnerPickStep: output.index }
+        if (name) name.customData = { ...(name.customData as Record<string, unknown>), [PICK_STEP]: output.index }
         const count = ea.getElement(ea.addText(length.x, length.y, `${output.panel.lines} lines`))
         mark(count)
-        if (count) count.customData = { ...(count.customData as Record<string, unknown>), chainRunnerPickCount: output.index }
+        if (count) count.customData = { ...(count.customData as Record<string, unknown>), [PICK_COUNT]: output.index }
       }
       ea.style.strokeColor = LINK_BLUE
       const direct = ea.getElement(ea.addText(row.direct.x, row.direct.y, '✎ Direct'))
@@ -993,7 +987,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return true
   }
 
-  async placeRowHold(landing: RerunLanding, hold: HoldRecord, pending: readonly number[]): Promise<boolean> {
+  async placeRowHold(landing: RerunLanding, held: HeldInRow): Promise<boolean> {
     const pick = landing.pick
     if (!pick) return false
     const scene = this.ea.getViewElements()
@@ -1001,14 +995,13 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       sourceRunId: landing.from[0] ?? landing.runId,
       runId: landing.runId,
       pick,
-      hold,
-      pending,
+      held,
       canReroll: this.options?.canReroll?.() ?? false,
     })
     if (!placed) return false
     const ea = this.emptied()
     applyEdits(ea, scene, placed)
-    this.drawHoldColumn(ea, placed.column, landing.runId, hold, placed.frameId, [...pending])
+    for (const { column, hold, pending } of placed.columns) this.drawHoldColumn(ea, column, landing.runId, hold, placed.frameId, pending)
     await save(ea, false)
     return true
   }
@@ -1017,7 +1010,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     const scene = this.ea.getViewElements()
     const changed = scene.filter(element => {
       const stamp = pickStamp(element)
-      const index = (element.customData as Record<string, unknown> | undefined)?.chainRunnerPickCount
+      const index = (element.customData as Record<string, unknown> | undefined)?.[PICK_COUNT]
       return stamp?.runId === landing.runId && typeof index === 'number'
         && element.rawText !== `${landing.panels[index]?.lines ?? 0} lines`
     })
@@ -1026,7 +1019,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     ea.copyViewElementsToEAforEditing(changed)
     for (const element of changed) {
       const copy = ea.getElement(element.id)
-      const index = (element.customData as Record<string, unknown>).chainRunnerPickCount as number
+      const index = (element.customData as Record<string, unknown>)[PICK_COUNT] as number
       if (!copy) continue
       const value = `${landing.panels[index]?.lines ?? 0} lines`
       copy.text = copy.originalText = copy.rawText = value

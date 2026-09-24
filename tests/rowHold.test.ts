@@ -60,7 +60,7 @@ function columnElements(column: HoldColumn, runId: string, nodeId: string, frame
 function rowElements(candidate: SceneBlock, runId: string, heading: string, indexes: number[], frameId: string): SceneBlock[] {
   const box = { x: candidate.x!, y: candidate.y!, width: candidate.width!, height: candidate.height! }
   const row = buildPickRow(box, indexes.length)
-  const stamp = stampPick({ runId, nodeId: 'hold-1', heading })
+  const stamp = stampPick({ runId, nodeId: 'hold-1', heading, from: SOURCE })
   const elements: SceneBlock[] = [
     { id: id('tick'), type: 'text', ...row.tick, width: 12, height: 20, frameId, customData: stamp },
     { id: id('heading'), type: 'text', ...row.heading, width: 120, height: 18, frameId, customData: stamp },
@@ -91,7 +91,8 @@ function drawing(): { scene: SceneBlock[]; frame: SceneBlock; lower: SceneBlock;
   return { scene, frame, lower, lowerCard }
 }
 
-const request = { sourceRunId: SOURCE, runId: FORK, pick: { nodeId: 'hold-1', heading: 'Meta-Architect' }, hold: secondHold, pending: [3, 4], canReroll: false }
+const held = (unreached: number[]) => ({ holds: [{ hold: secondHold, pending: [4] }], unreached })
+const request = { sourceRunId: SOURCE, runId: FORK, pick: { nodeId: 'hold-1', heading: 'Meta-Architect', pending: [2, 3, 4] }, held: held([3, 4]), canReroll: false }
 
 /** The scene as the write leaves it, with the new column's outline as one more block. */
 function applied(scene: readonly SceneBlock[], placed: RowHold): SceneBlock[] {
@@ -100,7 +101,7 @@ function applied(scene: readonly SceneBlock[], placed: RowHold): SceneBlock[] {
     const resized = placed.resized.get(element.id)
     return { ...element, x: (element.x ?? 0) + (moved?.dx ?? 0), y: (element.y ?? 0) + (moved?.dy ?? 0), ...resized }
   })
-  return [...after, { id: 'new-column', type: 'rectangle', ...placed.column.box, frameId: placed.frameId }]
+  return [...after, ...placed.columns.map(({ column }, at) => ({ id: `new-column-${at}`, type: 'rectangle', ...column.box, frameId: placed.frameId }))]
 }
 
 const overlaps = (one: SceneBlock, other: SceneBlock): boolean =>
@@ -128,10 +129,10 @@ describe('a hold reached inside a pick row', () => {
     expect(placed.removed.sort()).toEqual(unreached.map(element => element.id).sort())
     const candidate = scene.find(element => element.id.startsWith('candidate'))!
     const kept = buildPickRow({ x: candidate.x!, y: candidate.y!, width: candidate.width!, height: candidate.height! }, 1)
-    expect(placed.column.box).toMatchObject({ x: kept.right, y: candidate.y })
+    expect(placed.columns[0]!.column.box).toMatchObject({ x: kept.right, y: candidate.y })
     const direct = fork.find(element => element.id.startsWith('direct'))!
     expect(direct.x! + placed.moved.get(direct.id)!.dx).toBe(kept.direct.x)
-    expect(placed.column.candidates.map(one => one.heading)).toEqual(['idea a', 'idea b', 'idea c'])
+    expect(placed.columns[0]!.column.candidates.map(one => one.heading)).toEqual(['idea a', 'idea b', 'idea c'])
   })
 
   it('moves the rows below down so nothing overlaps, and grows the column and frame around it', () => {
@@ -165,16 +166,16 @@ describe('a hold reached inside a pick row', () => {
   it('draws a row\'s hold once', () => {
     const { scene } = drawing()
     const placed = rowHold(scene, request)!
-    const drawn = [...scene, { id: 'nested', type: 'rectangle', ...placed.column.box, frameId: 'frame', customData: stampHold({ runId: FORK, nodeId: 'hold-2', heading: '', role: 'column' }) }]
+    const drawn = [...scene, { id: 'nested', type: 'rectangle', ...placed.columns[0]!.column.box, frameId: 'frame', customData: stampHold({ runId: FORK, nodeId: 'hold-2', heading: '', role: 'column' }) }]
     expect(rowHold(drawn, request)).toBeUndefined()
     expect(rowHold(scene, { ...request, pick: { ...request.pick, heading: 'Nowhere' } })).toBeUndefined()
   })
 
   it('keeps the row when the hold comes before every card', () => {
     const { scene } = drawing()
-    const placed = rowHold(scene, { ...request, pending: [2, 3, 4] })!
+    const placed = rowHold(scene, { ...request, held: held([2, 3, 4]) })!
     const candidate = scene.find(element => element.id.startsWith('candidate'))!
-    expect(placed.column.box.x).toBe(buildPickRow({ x: candidate.x!, y: candidate.y!, width: candidate.width!, height: candidate.height! }, 0).right)
+    expect(placed.columns[0]!.column.box.x).toBe(buildPickRow({ x: candidate.x!, y: candidate.y!, width: candidate.width!, height: candidate.height! }, 0).right)
     expect(placed.removed).toHaveLength(9)
   })
 })
@@ -185,7 +186,7 @@ describe('room below a grown column', () => {
       { id: 'frame', type: 'frame', x: 0, y: 0, width: 800, height: 800 },
       { id: 'below', type: 'rectangle', x: 0, y: 600, width: 100, height: 100, frameId: 'frame' },
     ]
-    const edits = roomBelow(scene, { frameId: 'frame', line: 300, reach: { x: 0, y: 300, width: 100, height: 200 }, kept: () => false })
+    const edits = roomBelow(scene, { frameId: 'frame', from: 300, clear: { x: 0, y: 300, width: 100, height: 200 }, stays: () => false })
     expect(edits.moved.size).toBe(0)
     expect(edits.resized.size).toBe(0)
   })
