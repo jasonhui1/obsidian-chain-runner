@@ -25,6 +25,14 @@ export interface RerunLanding {
   pick?: { nodeId: string; heading: string; pending: number[] }
 }
 
+/** A drawing candidate running from a waiting source hold. */
+export interface IndependentGoing {
+  readonly heading: string
+  readonly runId?: string
+  readonly startedAt: number
+  readonly progress?: RerunProgress
+}
+
 export interface PickStream {
   sourceRunId: string
   runId: string
@@ -50,6 +58,7 @@ export type RerunLander = (landing: RerunLanding) => Promise<void>
 
 export class RerunWatch {
   private readonly reruns = new Map<string, GoingRerun>()
+  private readonly independentPicks = new Map<object, { from: readonly string[]; going: IndependentGoing }>()
   private readonly listeners = new Set<() => void>()
   private readonly landers = new Set<RerunLander>()
   private readonly streams = new Set<(pick: PickStream) => Promise<void>>()
@@ -58,18 +67,51 @@ export class RerunWatch {
   constructor(readonly now: () => number = Date.now) {}
 
   /** Report an independent pick without reserving its source run (#76). */
-  independent(from: readonly string[]): RerunReport {
+  independent(from: readonly string[], heading: string): RerunReport {
+    const key = {}
+    let going: IndependentGoing = { heading, startedAt: this.now() }
+    this.independentPicks.set(key, { from, going })
+    this.changed()
+    let ended = false
+    const record = (): void => {
+      this.independentPicks.set(key, { from, going })
+      this.changed()
+    }
     return {
-      widen: () => true,
-      hear: () => {},
+      widen: runIds => {
+        if (ended) return false
+        const runId = runIds[0]
+        if (runId && going.runId !== runId) {
+          going = { ...going, runId }
+          record()
+        }
+        return true
+      },
+      hear: progress => {
+        if (ended) return
+        going = { ...going, progress }
+        record()
+      },
       stream: async pick => {
         for (const listener of [...this.streams]) await listener(pick)
       },
       land: async landed => {
         for (const lander of [...this.landers]) await lander({ from, ...landed })
       },
-      end: () => {},
+      end: () => {
+        if (ended) return
+        ended = true
+        this.independentPicks.delete(key)
+        this.changed()
+      },
     }
+  }
+
+  /** The independent candidates still running from a source hold. */
+  independentGoing(sourceRunId: string): IndependentGoing[] {
+    return [...this.independentPicks.values()]
+      .filter(one => one.from.includes(sourceRunId))
+      .map(one => one.going)
   }
 
   /**

@@ -85,6 +85,24 @@ describe('RerunWatch', () => {
     expect(watch.begin([OLDER], { kind: 'resume' })).toBeDefined()
   })
 
+  it('tracks each independent pick without reserving the source run', () => {
+    const watch = new RerunWatch(() => 5000)
+    const first = watch.independent([OLD], 'Candidate 1')
+    const second = watch.independent([OLD], 'Candidate 2')
+    expect(watch.begin([OLD], EDITS)).toBeDefined()
+    first.widen([NEW])
+    second.widen([OLDER])
+    first.hear(writing)
+    expect(watch.independentGoing(OLD)).toEqual([
+      { heading: 'Candidate 1', runId: NEW, startedAt: 5000, progress: writing },
+      { heading: 'Candidate 2', runId: OLDER, startedAt: 5000 },
+    ])
+    first.end()
+    expect(watch.independentGoing(OLD).map(one => one.heading)).toEqual(['Candidate 2'])
+    second.end()
+    expect(watch.independentGoing(OLD)).toEqual([])
+  })
+
   it('widens a rerun to the runs its hold turns out to have been under, told to its listeners', () => {
     const watch = new RerunWatch()
     let heard = 0

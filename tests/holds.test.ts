@@ -1111,7 +1111,10 @@ describe('resume', () => {
 
   it('does not start an independent pick on an older engine', async () => {
     capabilities = { runResume: true }
-    expect(await makeHolds().resume(RUN, { nodeId: 'pick', heading: 'Candidate 1', revision: 2 })).toBeUndefined()
+    const holds = makeHolds()
+    for (const heading of ['Candidate 1', 'Candidate 2', 'Candidate 3']) {
+      expect(await holds.resume(RUN, { nodeId: 'pick', heading, revision: 2 })).toBeUndefined()
+    }
     expect(resumes).toEqual([])
     expect(notices).toEqual(['This engine cannot run candidates independently. Update maestro-playground.'])
   })
@@ -1165,12 +1168,14 @@ describe('resume', () => {
     const first = holds.resume(RUN, { nodeId: 'pick', heading: 'Candidate 1', revision: 2 })
     const second = holds.resume(RUN, { nodeId: 'pick', heading: 'Candidate 2', revision: 2 })
     await vi.waitFor(() => expect(resumes).toHaveLength(2))
+    expect(reruns.independentGoing(RUN).map(one => one.heading)).toEqual(['Candidate 1', 'Candidate 2'])
     expect(resumes.map(one => one.request)).toEqual([
       expect.objectContaining({ chosen: 'Candidate 1', fork: true }),
       expect.objectContaining({ chosen: 'Candidate 2', fork: true }),
     ])
     release()
     await Promise.all([first, second])
+    expect(reruns.independentGoing(RUN)).toEqual([])
     expect(landed.sort()).toEqual([`${NEW}:Candidate 1`, `${RESUMED}:Candidate 2`].sort())
     expect(notes[PATH]).toContain(`run ${NEW}`)
     expect(notes[PATH]).toContain(`run ${RESUMED}`)

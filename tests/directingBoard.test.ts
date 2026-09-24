@@ -1379,6 +1379,21 @@ describe('resume', () => {
     expect(button(RESUME)).toBeTruthy()
   })
 
+  it('shows separate progress for drawing candidates running from this hold', () => {
+    open()
+    const first = reruns.independent([RUN], 'Candidate 1')
+    const second = reruns.independent([RUN], 'Candidate 2')
+    first.widen([NEW])
+    first.hear({ verdict: true, proposals: [], cards: [], step: { name: 'creative-director', writesVerdict: true } })
+    expect(footer()).toContain('Candidate 1 · ⟳ Writing a new verdict…')
+    expect(footer()).toContain('Candidate 2 · ⟳ Starting the rerun…')
+    first.end()
+    expect(footer()).not.toContain('Candidate 1')
+    expect(footer()).toContain('Candidate 2')
+    second.end()
+    expect(footer()).not.toContain('Candidate 2')
+  })
+
   it('says so while the run goes, and takes no second press', async () => {
     holdEngine()
     open()

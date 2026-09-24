@@ -18,7 +18,7 @@ import type { GoingRerun, RerunWatch } from '../run/rerunWatch'
 export interface DirectingBoardDeps {
   holds: Holds
   /** Every rerun going, wherever it was started, and the time its start is told by. */
-  reruns: Pick<RerunWatch, 'going' | 'onChange' | 'now'>
+  reruns: Pick<RerunWatch, 'going' | 'independentGoing' | 'onChange' | 'now'>
   /** The chains a side quest can go through; none while the engine cannot say. */
   chains: () => Promise<string[]>
   /** Where a run is shown on the engine, as it is set now (ADR-0004). */
@@ -370,6 +370,10 @@ export class DirectingBoard {
     const button = this.button(bar, resuming ? 'Resuming…' : resumeLabel(hold.canon), 'mod-cta')
     button.disabled = this.going(hold) !== undefined
     button.onclick = (): void => void this.startResume(hold)
+    for (const pick of this.deps.reruns.independentGoing(hold.runId)) {
+      const line = this.add(bar, 'div', `${CLS}-progress`, `${pick.heading} · ${rerunDoing(pick.progress?.step)}`)
+      if (pick.runId) this.runLink(line, pick.runId)
+    }
     if (resuming) {
       if (resuming.progress?.step) this.add(bar, 'div', `${CLS}-progress`, rerunDoing(resuming.progress.step))
       return

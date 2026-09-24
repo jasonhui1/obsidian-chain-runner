@@ -194,6 +194,7 @@ interface LandingOptions {
 
 export class Holds {
   private readonly noteWrites = new Map<string, Promise<void>>()
+  private warnedIndependentPick = false
   private readonly panels: RunPanels
 
   constructor(private readonly deps: HoldsDeps) {
@@ -331,9 +332,20 @@ export class Holds {
   async resume(runId: string, pick?: DrawingPick): Promise<Resumed | undefined> {
     if (pick) {
       const capabilities = await this.deps.engine.capabilities()
-      if (!capabilities.resumeFork) return this.refuse(UNSUPPORTED_INDEPENDENT_PICK)
+      if (!capabilities.resumeFork) {
+        if (this.warnedIndependentPick) return undefined
+        this.warnedIndependentPick = true
+        return this.refuse(UNSUPPORTED_INDEPENDENT_PICK)
+      }
+      this.warnedIndependentPick = false
       const found = await this.locateOrRefuse(runId)
-      return found && this.resumed(found, this.deps.reruns.independent(found.runIds), pick)
+      if (!found) return undefined
+      const report = this.deps.reruns.independent(found.runIds, pick.heading)
+      try {
+        return await this.resumed(found, report, pick)
+      } finally {
+        report.end()
+      }
     }
     return this.exclusive(runId, { kind: 'resume' }, (found, report) => this.resumed(found, report))
   }
@@ -643,8 +655,9 @@ export class Holds {
     const progress = progressTo(report)
     let streamRunId: string | undefined
     const resumed = await this.deps.withEngine(() => runResume(this.deps.engine, heading.runId, request, async event => {
-      progress(event)
       streamRunId = runIdOf(event as RunEvent) ?? streamRunId
+      if (pick && streamRunId) report.widen([streamRunId])
+      progress(event)
       if (picked && before && streamRunId) await report.stream({
         sourceRunId: heading.runId,
         runId: streamRunId,
@@ -792,8 +805,8 @@ export class Holds {
   }
 
   private async queueNoteWrite(path: string, write: () => Promise<void>): Promise<void> {
-    const previous = this.noteWrites.get(path) ?? Promise.resolve()
-    const current = previous.catch(() => {}).then(write)
+    const previous = this.noteWrites.get(path)
+    const current = previous ? previous.catch(() => {}).then(write) : write()
     this.noteWrites.set(path, current)
     try { await current } finally {
       if (this.noteWrites.get(path) === current) this.noteWrites.delete(path)
