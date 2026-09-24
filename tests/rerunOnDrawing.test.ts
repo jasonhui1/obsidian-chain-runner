@@ -276,6 +276,40 @@ describe('RerunOnDrawing', () => {
     expect(paths).toEqual([`runs/${NEW}/World.md`])
     expect(notices).toEqual([])
   })
+
+  it('rebuilds a pick row for a fork with a custom candidate using the first line', async () => {
+    const rows: string[] = []
+    const paths: string[] = []
+    const sourceHold = { nodeId: 'pick', input: '', reachedAt: 'now', candidates: [], chosen: 'Candidate 1' }
+    const origin = { runId: OLD, chainName: 'creative-director', seedPrompt: '', startedAt: 'now', agentOutputs: [], status: 'complete' as const, holds: [sourceHold] }
+    const fork = { runId: NEW, chainName: 'creative-director', seedPrompt: '', startedAt: 'now', agentOutputs: [], status: 'complete' as const,
+      branchedFromRunId: OLD, branchedFromNode: 'pick', holds: [{ ...sourceHold, chosen: undefined, custom: 'My own candidate\nwith more detail' }] }
+    const view: DrawingView = { file: null }
+    const picked = new RerunOnDrawing({
+      surface: {
+        unavailable: () => undefined, openViews: () => [view],
+        on: () => ({
+          pickSources: () => [{ runId: OLD, nodeId: 'pick', outputIndexes: [1], placed: [OLD] }],
+          placePickRow: async (one, outputs) => { rows.push(`${one.from[0]}:${one.runId}:${one.pick?.heading}`); paths.push(...outputs.map(output => output.notePath)); return true },
+          updatePickCounts: async () => true, refreshHoldColumn: async () => true, followRerun: async () => false,
+        }),
+      },
+      notes: {
+        open: async () => undefined,
+        write: async (one, run) => `runs/${run.runId}/${one.name}.md`,
+      },
+      engine: {
+        getRun: async () => origin,
+        listForks: async () => [fork],
+        getLayout: async () => ({ kind: 'undeclared', panels: [panel('Before', 'old'), panel('World', 'new')] }),
+      },
+      notify: message => void notices.push(message),
+    })
+    await picked.rebuild(view)
+    expect(rows).toEqual([`${OLD}:${NEW}:My own candidate`])
+    expect(paths).toEqual([`runs/${NEW}/World.md`])
+    expect(notices).toEqual([])
+  })
   it('points each card on an open drawing at its output’s note, filed under the new run', async () => {
     drawings = { board: ['Verdict', 'World'] }
     await makeFollower().land(landing)

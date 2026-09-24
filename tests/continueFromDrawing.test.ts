@@ -87,7 +87,7 @@ describe('Continue on a drawing', () => {
       surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
       holds: {
         read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
-        resume: async (_runId, pick) => { calls.push(pick!.heading); await gate; return undefined },
+        resume: async (_runId, pick) => { calls.push(pick?.heading ?? ''); await gate; return undefined },
       },
       notify: message => void calls.push(message), now: () => now,
       refreshColumn: async () => {},
@@ -102,5 +102,98 @@ describe('Continue on a drawing', () => {
     expect(calls).toEqual(['Candidate 1', 'Candidate 2', 'Candidate 3'])
     release()
     await settle()
+  })
+
+  it('notifies to type something first when the custom card is empty or unchanged', async () => {
+    const actions: string[] = []
+    let now = 100
+    let customText: string | undefined = '✎ Your own'
+    const customStamp = { runId: RUN, nodeId: 'pick', heading: '', revision: 2, role: 'continue' as const, custom: true }
+    const customElement = { customData: stampHold(customStamp) }
+    const continueFromDrawing = new ContinueFromDrawing({
+      surface: {
+        unavailable: () => undefined,
+        selectedRun: () => undefined,
+        cardProposal: () => undefined,
+        on: () => ({
+          selectedContinue: () => undefined,
+          selectedReroll: () => undefined,
+          customCandidate: () => customText,
+        }),
+      },
+      holds: {
+        read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
+        resume: async () => { actions.push('resumed'); return undefined },
+      },
+      notify: message => void actions.push(message),
+      now: () => now,
+      refreshColumn: async () => {},
+    })
+
+    continueFromDrawing.handleSelection(customElement, view)
+    continueFromDrawing.handleDoubleClick()
+    await settle()
+    expect(actions).toEqual(['Type something first'])
+
+    now += 1500
+    customText = '   '
+    continueFromDrawing.handleSelection(customElement, view)
+    continueFromDrawing.handleDoubleClick()
+    await settle()
+    expect(actions).toEqual(['Type something first', 'Type something first'])
+  })
+
+  it('continues a custom card with typed words and sends them as custom', async () => {
+    const resumed: unknown[] = []
+    const customStamp = { runId: RUN, nodeId: 'pick', heading: '', revision: 2, role: 'continue' as const, custom: true }
+    const customElement = { customData: stampHold(customStamp) }
+    const continueFromDrawing = new ContinueFromDrawing({
+      surface: {
+        unavailable: () => undefined,
+        selectedRun: () => undefined,
+        cardProposal: () => undefined,
+        on: () => ({
+          selectedContinue: () => undefined,
+          selectedReroll: () => undefined,
+          customCandidate: () => 'A theme park.\nWith rollercoasters.',
+        }),
+      },
+      holds: {
+        read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
+        resume: async (_runId, pick) => { resumed.push(pick); return undefined },
+      },
+      notify: () => {},
+      now: () => 100,
+      refreshColumn: async () => {},
+    })
+
+    continueFromDrawing.handleSelection(customElement, view)
+    continueFromDrawing.handleDoubleClick()
+    await settle()
+    expect(resumed).toEqual([{
+      nodeId: 'pick',
+      heading: 'A theme park.',
+      custom: 'A theme park.\nWith rollercoasters.',
+      revision: 2,
+    }])
+  })
+
+  it('does not resume when editing the custom card’s text', async () => {
+    const actions: string[] = []
+    const customCardElement = { customData: stampHold({ runId: RUN, nodeId: 'pick', heading: '', role: 'custom' as const }) }
+    const continueFromDrawing = new ContinueFromDrawing({
+      surface: { unavailable: () => undefined, selectedRun: () => undefined, cardProposal: () => undefined },
+      holds: {
+        read: async () => ({ holds: [] }) as unknown as Awaited<ReturnType<Holds['read']>>,
+        resume: async () => { actions.push('resumed'); return undefined },
+      },
+      notify: message => void actions.push(message),
+      now: () => 100,
+      refreshColumn: async () => {},
+    })
+
+    continueFromDrawing.handleTextEdit(customCardElement, view)
+    await settle()
+    expect(actions).toEqual([])
   })
 })

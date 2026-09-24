@@ -1,7 +1,8 @@
-import { holdStamp, type HoldStamp } from './holdColumn'
+import { firstLine, holdStamp, type HoldStamp } from './holdColumn'
 import type { DrawingView, SelectionSurface } from './excalidraw'
 import type { Holds } from './holds'
 import { UNREACHABLE_DRAWING } from './onDrawing'
+export const TYPE_FIRST = 'Type something first'
 
 /** A Continue line uses the same two-click drill-in as a node's Run line. */
 const DOUBLE_CLICK_MS = 1000
@@ -59,7 +60,7 @@ export class ContinueFromDrawing {
   }
 
   private start(stamp: HoldStamp, view: DrawingView): void {
-    const key = `${stamp.runId}:${stamp.nodeId}:${stamp.heading}`
+    const key = `${stamp.runId}:${stamp.nodeId}:${stamp.custom ? 'custom' : stamp.heading}`
     const now = this.deps.now()
     if (this.going.has(key)) return
     if (now - (this.startedAt.get(key) ?? -Infinity) < DOUBLE_CLICK_MS) return
@@ -70,6 +71,28 @@ export class ContinueFromDrawing {
 
   private async pick(stamp: HoldStamp, view: DrawingView): Promise<void> {
     try {
+      if (stamp.custom) {
+        const text = this.deps.surface.on?.(view).customCandidate?.(stamp.runId, stamp.nodeId)
+        const clean = text?.trim()
+        if (!clean || clean === '✎ Your own') {
+          this.deps.notify(TYPE_FIRST)
+          return
+        }
+        const heading = firstLine(clean)
+        const resumed = await this.deps.holds.resume(stamp.runId, {
+          nodeId: stamp.nodeId,
+          heading,
+          custom: clean,
+          revision: stamp.revision,
+        })
+        if (!resumed) {
+          const refreshed = await this.deps.holds.read(stamp.runId)
+          if (refreshed?.holds.find(hold => hold.nodeId === stamp.nodeId)?.revision !== stamp.revision) {
+            await this.deps.refreshColumn(stamp.runId, stamp.nodeId, view)
+          }
+        }
+        return
+      }
       const resumed = await this.deps.holds.resume(stamp.runId, { nodeId: stamp.nodeId, heading: stamp.heading, revision: stamp.revision })
       if (!resumed) {
         const refreshed = await this.deps.holds.read(stamp.runId)

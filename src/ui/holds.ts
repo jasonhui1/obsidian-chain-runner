@@ -1,5 +1,6 @@
 import { normalizePath } from 'obsidian'
 import { folderOf, type NoteStore } from './noteStore'
+import { firstLine } from './holdColumn'
 import { RunPanels } from './runPanels'
 import { ensureFolder, guardWrite } from './vaultWrite'
 import { launch, type Answer, type OnEvent } from '../run/answer'
@@ -118,7 +119,7 @@ export type CanonOutcome = 'written' | 'held-back' | 'none'
 export type Resumed = Landing & { canon: CanonOutcome }
 
 /** A card's stamped answer, even when a reroll has since replaced its heading. */
-export interface DrawingPick { nodeId: string; heading: string; revision?: number }
+export interface DrawingPick { nodeId: string; heading?: string; revision?: number; custom?: string }
 
 /** Whether a send made a revise and landed, rather than answering under its line. */
 export function isLanding(sent: Hold | Landing): sent is Landing {
@@ -346,7 +347,8 @@ export class Holds {
       this.warnedIndependentPick = false
       const found = await this.locateOrRefuse(runId)
       if (!found) return undefined
-      const report = this.deps.reruns.independent(found.runIds, pick.heading)
+      const heading = pick.heading ?? (pick.custom ? firstLine(pick.custom) : '')
+      const report = this.deps.reruns.independent(found.runIds, heading)
       try {
         return await this.resumed(found, report, pick)
       } finally {
@@ -644,16 +646,24 @@ export class Holds {
     const waiting = waitingHoldsIn(content)
     const request = resumeRequest({ direction, said: directionLines(direction), holds: waiting, ...(canon !== undefined ? { canon } : {}) })
     if (pick) {
-      request.chosen = pick.heading
-      request.holdId = pick.nodeId
-      request.fork = true
-      delete request.custom
+      if (pick.custom !== undefined) {
+        request.custom = pick.custom
+        request.holdId = pick.nodeId
+        request.fork = true
+        delete request.chosen
+      } else {
+        request.chosen = pick.heading
+        request.holdId = pick.nodeId
+        request.fork = true
+        delete request.custom
+      }
       if (pick.revision !== undefined) request.revision = pick.revision
     }
-    const before = request.chosen ? await this.deps.withEngine(() => fetchRun(this.deps.engine, heading.runId)) : undefined
-    const picked = request.chosen ? {
+    const before = (request.chosen || request.custom) ? await this.deps.withEngine(() => fetchRun(this.deps.engine, heading.runId)) : undefined
+    const pickedHeading = pick?.custom !== undefined ? (pick.heading ?? firstLine(pick.custom)) : request.chosen
+    const picked = (request.chosen || request.custom) ? {
       nodeId: request.holdId ?? waiting.find(one => one.chosen)?.nodeId ?? waiting.at(-1)?.nodeId ?? '',
-      heading: request.chosen,
+      heading: pickedHeading ?? '',
       pending: before ? pickPanelIndexes(before.run, request.holdId ?? waiting.find(one => one.chosen)?.nodeId ?? waiting.at(-1)?.nodeId ?? '', before.layout.panels) : [],
     } : undefined
 
@@ -776,11 +786,11 @@ export class Holds {
     if (forked) {
       let chosen = pick
       if (!chosen && forked.run.branchedFromNode) {
-        const record = forked.run.holds?.find(one => one.nodeId === forked.run.branchedFromNode && one.chosen)
+        const record = forked.run.holds?.find(one => one.nodeId === forked.run.branchedFromNode && (one.chosen || one.custom))
         const source = record && (await this.deps.withEngine(() => fetchRun(this.deps.engine, origin.runId)))
-        if (record?.chosen && source) chosen = {
+        if ((record?.chosen || record?.custom) && source) chosen = {
           nodeId: record.nodeId,
-          heading: record.chosen,
+          heading: record.chosen ?? (record.custom ? firstLine(record.custom) : ''),
           pending: pickPanelIndexes(source.run, record.nodeId, source.layout.panels),
         }
       }

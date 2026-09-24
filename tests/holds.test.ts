@@ -1148,6 +1148,16 @@ describe('resume', () => {
     expect(pending).toContainEqual([2])
   })
 
+  it('resumes with custom candidate words, sending custom instead of chosen and labelling with the first line', async () => {
+    const landed: { runId: string; heading?: string }[] = []
+    reruns.onLanding(async one => void landed.push({ runId: one.runId, heading: one.pick?.heading }))
+    resumeFrames = [...started(RESUMED), { type: 'run_complete', runId: RESUMED }]
+    await makeHolds().resume(RUN, { nodeId: 'pick', custom: 'A theme park.\nWith rollercoasters.', revision: 2 })
+    expect(resumes[0]?.request).toMatchObject({ holdId: 'pick', custom: 'A theme park.\nWith rollercoasters.', fork: true, revision: 2 })
+    expect(resumes[0]?.request.chosen).toBeUndefined()
+    expect(landed).toEqual([{ runId: RESUMED, heading: 'A theme park.' }])
+  })
+
   it('runs two drawing picks together and lands both rows', async () => {
     const candidate: HoldRecord = {
       nodeId: 'pick', input: '## Candidate 1\nAlpha\n\n## Candidate 2\nBeta',

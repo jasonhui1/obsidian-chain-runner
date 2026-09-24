@@ -7,7 +7,7 @@ export interface HoldColumn {
   box: Box
   prompt: { text: string; box: Box }
   candidates: { heading: string; text: string; box: Box; continueAt: { x: number; y: number } }[]
-  custom: Box
+  custom: Box & { continueAt: { x: number; y: number } }
   rerollAt?: { x: number; y: number }
 }
 
@@ -30,9 +30,14 @@ function wrappedLines(text: string, width: number): number {
   return text.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / chars)), 0)
 }
 
+/** The first line of candidate text labels its pick row and reports. */
+export function firstLine(text: string): string {
+  return text.trim().split('\n')[0]?.trim() ?? ''
+}
+
 /** A generic numbered heading gives way to the candidate's first line. */
 export function candidateWords(heading: string, body: string): string {
-  const first = body.trim().split('\n')[0]?.trim()
+  const first = firstLine(body)
   if (!/^Candidate\s+\d+$/i.test(heading.trim()) || !first) return `${heading}\n${body}`.trim()
   return body.trim()
 }
@@ -60,7 +65,13 @@ export function buildHoldColumn(hold: HoldRecord, x: number, y: number, options?
       continueAt: { x: box.x + PADDING, y: box.y + height - CONTINUE_HEIGHT - PADDING / 2 },
     }
   })
-  const custom = { x: x + PADDING, y: top, width: HOLD_COLUMN_WIDTH - PADDING * 2, height: OUTPUT_HEIGHT }
+  const custom = {
+    x: x + PADDING,
+    y: top,
+    width: HOLD_COLUMN_WIDTH - PADDING * 2,
+    height: OUTPUT_HEIGHT,
+    continueAt: { x: x + PADDING * 2, y: top + OUTPUT_HEIGHT - CONTINUE_HEIGHT - PADDING / 2 },
+  }
   const canReroll = options?.canReroll === true && !hold.resolvedAt && !hold.chosen && !hold.custom
   const rerollAt = canReroll ? { x: x + PADDING, y: custom.y + custom.height + GAP } : undefined
   const bottom = rerollAt ? rerollAt.y + CONTINUE_HEIGHT : custom.y + custom.height
@@ -103,7 +114,8 @@ export interface HoldStamp {
   heading: string
   revision?: number
   outputIndexes?: number[]
-  role: 'candidate' | 'continue' | 'column' | 'reroll'
+  role: 'candidate' | 'continue' | 'column' | 'reroll' | 'custom'
+  custom?: boolean
 }
 
 export function stampHold(data: HoldStamp): Record<string, unknown> {
@@ -117,7 +129,8 @@ export function holdStamp(element: { customData?: unknown }): HoldStamp | undefi
   if (!stamp || typeof stamp !== 'object') return undefined
   const value = stamp as Record<string, unknown>
   if (typeof value.runId !== 'string' || typeof value.nodeId !== 'string' || typeof value.heading !== 'string') return undefined
-  if (value.role !== 'candidate' && value.role !== 'continue' && value.role !== 'column' && value.role !== 'reroll') return undefined
+  if (value.role !== 'candidate' && value.role !== 'continue' && value.role !== 'column' && value.role !== 'reroll' && value.role !== 'custom') return undefined
+  if (value.custom !== undefined && typeof value.custom !== 'boolean') return undefined
   return stamp as HoldStamp
 }
 
@@ -151,6 +164,24 @@ export function buildPickRow(candidate: Box, count: number): {
     tick: { x: candidate.x + candidate.width - 30, y: candidate.y + 8 },
     direct: { x: right - 105, y: candidate.y + 4 },
     right,
+  }
+}
+
+/** A fresh empty "Your own" card added below a picked custom card. */
+export function freshCustomCard(candidate: Box): {
+  box: Box
+  containerHeight: number
+  continueAt: { x: number; y: number }
+  columnBottom: number
+} {
+  const y = candidate.y + Math.max(candidate.height, PICK_CARD_HEIGHT) + GAP
+  const containerHeight = OUTPUT_HEIGHT - CONTINUE_HEIGHT - PADDING / 2
+  const continueAt = { x: candidate.x + PADDING, y: y + containerHeight }
+  return {
+    box: { x: candidate.x, y, width: candidate.width, height: OUTPUT_HEIGHT },
+    containerHeight,
+    continueAt,
+    columnBottom: continueAt.y + CONTINUE_HEIGHT + PADDING,
   }
 }
 

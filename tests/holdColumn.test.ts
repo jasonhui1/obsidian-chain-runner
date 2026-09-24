@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { beforeHoldRow, buildHoldColumn, buildPickRow, candidateWords, holdStamp, pickRowBoxes, pickStamp, stampHold, stampPick, waitingFrameBox } from '@/ui/holdColumn'
+import { beforeHoldRow, buildHoldColumn, buildPickRow, candidateWords, freshCustomCard, holdStamp, pickRowBoxes, pickStamp, stampHold, stampPick, waitingFrameBox } from '@/ui/holdColumn'
 import type { HoldRecord } from '@/engine/types'
 import type { RunFrame } from '@/run/runFrame'
 
@@ -26,6 +26,7 @@ describe('a waiting hold column', () => {
     expect(column.candidates.every(candidate => candidate.box.height >= 160)).toBe(true)
     expect(column.candidates[1]!.box.y).toBeGreaterThan(column.candidates[0]!.box.y + column.candidates[0]!.box.height)
     expect(column.custom.y).toBeGreaterThan(column.candidates[1]!.box.y + column.candidates[1]!.box.height)
+    expect(column.custom.continueAt.y).toBeGreaterThan(column.custom.y)
   })
 
   it('gives long text a taller fixed slot before any pick is drawn', () => {
@@ -101,6 +102,17 @@ describe('a waiting hold column', () => {
 
     const stamp = { runId: 'run-1', nodeId: hold.nodeId, heading: '', revision: 3, role: 'reroll' as const }
     expect(holdStamp({ customData: stampHold(stamp) })).toEqual(stamp)
+  })
+
+  it('places a fresh empty custom card below the picked candidate with its own continue line', () => {
+    const candidate = { x: 200, y: 300, width: 320, height: 124 }
+    const fresh = freshCustomCard(candidate)
+    expect(fresh.box.x).toBe(candidate.x)
+    expect(fresh.box.y).toBe(candidate.y + 160 + 12)
+    expect(fresh.box.width).toBe(candidate.width)
+    expect(fresh.containerHeight).toBe(124)
+    expect(fresh.continueAt).toEqual({ x: candidate.x + 16, y: fresh.box.y + 124 })
+    expect(fresh.columnBottom).toBe(fresh.continueAt.y + 28 + 16)
   })
 })
 

@@ -41,7 +41,7 @@ import {
   type ProposalRole,
 } from './proposal'
 import { buildDirectLabel, cardProposal, directLabelRunId, frameGeneratedName, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
-import { beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, type HoldColumn, type HoldStamp } from './holdColumn'
+import { beforeHoldRow, buildHoldColumn, buildPickRow, freshCustomCard, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, type HoldColumn, type HoldStamp } from './holdColumn'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
@@ -358,6 +358,7 @@ export interface SelectionSurface extends Reachable {
 export interface PickDrawing {
   selectedContinue(): MaybeNodeElement | undefined
   selectedReroll(): MaybeNodeElement | undefined
+  customCandidate?(runId: string, nodeId: string): string | undefined
 }
 
 /** Excalidraw, in every role this plugin gives it. */
@@ -640,6 +641,37 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return true
   }
 
+  private drawCustomCard(
+    ea: ExcalidrawAutomate,
+    box: { x: number; y: number; width: number; height: number },
+    continueAt: { x: number; y: number },
+    stamp: HoldStamp,
+    frameId?: string,
+  ): void {
+    ea.style.strokeColor = GREY
+    ea.style.strokeStyle = 'dashed'
+    const id = ea.addText(box.x, box.y, '✎ Your own', {
+      box: 'box', boxPadding: 12, width: box.width, textAlign: 'left',
+    })
+    const container = ea.getElement(id)
+    const bound = ea.getElements().find(element => element.type === 'text' && element.containerId === id)
+    for (const element of [container, bound]) {
+      if (!element) continue
+      element.customData = stampHold(stamp)
+      element.link = 'chain-runner://hold'
+      if (frameId) element.frameId = frameId
+    }
+    if (container) container.height = box.height
+    if (bound) bound.text = bound.originalText = bound.rawText = '✎ Your own'
+    ea.style.strokeColor = LINK_BLUE
+    ea.style.strokeStyle = 'solid'
+    const continueText = ea.getElement(ea.addText(continueAt.x, continueAt.y, '▶ Continue'))
+    if (continueText) {
+      continueText.customData = stampHold({ ...stamp, role: 'continue', custom: true })
+      if (frameId) continueText.frameId = frameId
+    }
+  }
+
   private drawHoldColumn(ea: ExcalidrawAutomate, column: HoldColumn, runId: string, hold: HoldRecord, frameId?: string, outputIndexes?: number[]): void {
     const columnStamp: HoldStamp = { runId, nodeId: hold.nodeId, heading: '', revision: hold.revision, outputIndexes, role: 'column' }
     ea.style.strokeColor = INK
@@ -681,16 +713,13 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
         if (frameId) continueText.frameId = frameId
       }
     }
-    ea.style.strokeColor = GREY
-    ea.style.strokeStyle = 'dashed'
-    const custom = ea.getElement(ea.addText(column.custom.x, column.custom.y, 'Write your own', {
-      box: 'box', boxPadding: 12, width: column.custom.width,
-    }))
-    if (custom) {
-      custom.customData = stampHold(columnStamp)
-      custom.height = column.custom.height
-      if (frameId) custom.frameId = frameId
-    }
+    this.drawCustomCard(
+      ea,
+      { x: column.custom.x, y: column.custom.y, width: column.custom.width, height: column.custom.height - 36 },
+      column.custom.continueAt,
+      { ...columnStamp, role: 'custom' },
+      frameId,
+    )
     if (column.rerollAt) {
       ea.style.strokeColor = LINK_BLUE
       ea.style.strokeStyle = 'solid'
@@ -899,6 +928,17 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     return this.selectedHoldRole('reroll')
   }
 
+  customCandidate(runId: string, nodeId: string): string | undefined {
+    const scene = this.ea.getViewElements()
+    const found = scene.find(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'custom' && stamp.runId === runId && stamp.nodeId === nodeId && element.type === 'text' && !stamp.heading
+    })
+    return (found as { rawText?: string; originalText?: string; text?: string })?.rawText
+      ?? (found as { rawText?: string; originalText?: string; text?: string })?.originalText
+      ?? (found as { rawText?: string; originalText?: string; text?: string })?.text
+  }
+
   pickSources(): { runId: string; nodeId: string; outputIndexes: number[]; placed: string[] }[] {
     const scene = this.ea.getViewElements()
     const placed = new Map<string, Set<string>>()
@@ -931,25 +971,94 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       const stamp = holdStamp(element)
       return stamp?.role === 'candidate' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
         && stamp.heading === pick.heading && element.type !== 'text'
+    }) ?? scene.find(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'custom' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
+        && !stamp.heading && element.type !== 'text'
+    }) ?? scene.find(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'custom' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
+        && stamp.heading === pick.heading && element.type !== 'text'
     })
     if (!candidate) return false
+    const isCustom = holdStamp(candidate)?.role === 'custom'
     const frame = scene.find(element => element.type === 'frame' && element.id === candidate.frameId)
     const reroll = scene.find(element => {
       const stamp = holdStamp(element)
       return stamp?.role === 'reroll' && (stamp.runId === landing.runId || landing.from.includes(stamp.runId)) && stamp.nodeId === pick.nodeId
     })
+    const candidateBound = isCustom
+      ? scene.find(element => element.type === 'text' && element.containerId === candidate.id)
+      : undefined
+    const customContinue = isCustom
+      ? scene.find(element => {
+          const stamp = holdStamp(element)
+          return stamp?.role === 'continue' && stamp.custom && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId
+        })
+      : undefined
+    const columnRect = isCustom
+      ? scene.find(element => {
+          const stamp = holdStamp(element)
+          return stamp?.role === 'column' && stamp.runId === sourceRunId && stamp.nodeId === pick.nodeId && element.type === 'rectangle'
+        })
+      : undefined
     const row = buildPickRow({ x: candidate.x ?? 0, y: candidate.y ?? 0, width: candidate.width ?? 0, height: candidate.height ?? 0 }, outputs.length)
     const ea = this.emptied()
-    const edited = [candidate, ...(frame ? [frame] : []), ...(reroll ? [reroll] : [])]
+    const edited = [
+      candidate,
+      ...(candidateBound ? [candidateBound] : []),
+      ...(frame ? [frame] : []),
+      ...(reroll ? [reroll] : []),
+      ...(customContinue ? [customContinue] : []),
+      ...(columnRect ? [columnRect] : []),
+    ]
     ea.copyViewElementsToEAforEditing(edited)
     if (reroll) {
       const copy = ea.getElement(reroll.id)
       if (copy) copy.isDeleted = true
     }
+    if (customContinue) {
+      const copy = ea.getElement(customContinue.id)
+      if (copy) copy.isDeleted = true
+    }
     const chosen = ea.getElement(candidate.id)
-    if (chosen) chosen.strokeStyle = 'solid'
+    if (chosen) {
+      chosen.strokeStyle = 'solid'
+      if (isCustom) {
+        const stamp = holdStamp(candidate)
+        if (stamp) chosen.customData = stampHold({ ...stamp, heading: pick.heading })
+      }
+    }
+    if (candidateBound) {
+      const boundCopy = ea.getElement(candidateBound.id)
+      const stamp = holdStamp(candidateBound)
+      if (boundCopy && stamp) {
+        boundCopy.customData = stampHold({ ...stamp, heading: pick.heading })
+        if (!boundCopy.rawText || boundCopy.rawText === '✎ Your own') {
+          boundCopy.text = boundCopy.originalText = boundCopy.rawText = pick.heading
+        }
+      }
+    }
     const enclosing = frame ? ea.getElement(frame.id) : undefined
     if (enclosing) enclosing.width = Math.max(enclosing.width ?? 0, row.right + 32 - (enclosing.x ?? 0))
+    if (isCustom) {
+      const fresh = freshCustomCard({ x: candidate.x ?? 0, y: candidate.y ?? 0, width: candidate.width ?? 0, height: candidate.height ?? 0 })
+      const columnStamp = holdStamp(candidate)
+      const freshStamp: HoldStamp = {
+        runId: sourceRunId,
+        nodeId: pick.nodeId,
+        heading: '',
+        revision: columnStamp?.revision,
+        outputIndexes: columnStamp?.outputIndexes,
+        role: 'custom',
+      }
+      this.drawCustomCard(ea, { ...fresh.box, height: fresh.containerHeight }, fresh.continueAt, freshStamp, frame?.id)
+      if (columnRect) {
+        const copy = ea.getElement(columnRect.id)
+        if (copy) copy.height = Math.max(copy.height ?? 0, fresh.columnBottom - (copy.y ?? 0))
+      }
+      if (enclosing) enclosing.height = Math.max(enclosing.height ?? 0, fresh.columnBottom + 32 - (enclosing.y ?? 0))
+    }
     const stamp = { runId: landing.runId, nodeId: pick.nodeId, heading: pick.heading }
     const mark = (element: SceneElement | undefined): void => {
       if (!element) return

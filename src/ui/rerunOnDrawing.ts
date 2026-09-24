@@ -1,4 +1,5 @@
 import type { DrawingView, RerunSurface } from './excalidraw'
+import { firstLine } from './holdColumn'
 import { onDrawing } from './onDrawing'
 import type { OutputNotes } from './outputNotes'
 import { fillLiveOutputs, type LiveOutput } from './liveOutputs'
@@ -187,5 +188,5 @@ export class RerunOnDrawing {
 
 function chosenAt(run: RunMeta, nodeId: string): string | undefined {
   const hold = [...(run.holds ?? [])].reverse().find(one => one.nodeId === nodeId && (one.chosen || one.custom))
-  return hold?.chosen ?? (hold?.custom ? 'Your own words' : undefined)
+  return hold?.chosen ?? (hold?.custom ? firstLine(hold.custom) || 'Your own words' : undefined)
 }
