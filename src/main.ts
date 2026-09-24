@@ -24,6 +24,7 @@ import { Expand, newProposalId } from './ui/expand'
 import { PointerClicks } from './ui/pointerClicks'
 import { DirectFromDrawing } from './ui/directFromDrawing'
 import { ContinueFromDrawing } from './ui/continueFromDrawing'
+import { RerollFromDrawing } from './ui/rerollFromDrawing'
 import { directRun, rerollCandidatesCommand, rerunDownstreamFront, resumeFront, sendFront } from './ui/holdCommands'
 import { Holds } from './ui/holds'
 import { KeepMarks } from './ui/keepMarks'
@@ -161,7 +162,7 @@ export default class ChainRunnerPlugin extends Plugin {
     // A run outlives the command that started it; unloading the plugin ends it.
     this.register(() => this.quickRun.stop())
 
-    const surface = createExcalidrawSurface(this.app)
+    const surface = createExcalidrawSurface(this.app, { canReroll: () => this.holdRerollAdvertised })
     const upgradeOpenRunCounts = (): void => {
       for (const view of surface.openViews()) {
         void surface.on(view).upgradeRunCounts().catch(() => {})
@@ -205,6 +206,7 @@ export default class ChainRunnerPlugin extends Plugin {
     // instead (ADR-0010).
     clicks.onDouble(() => nodes.handleDoubleClick())
     clicks.onDouble(() => continueFromDrawing.handleDoubleClick())
+    clicks.onDouble(() => rerollFromDrawing.handleDoubleClick())
 
     const nodes = (this.nodes = new ChainNodes({
       app: this.app,
@@ -261,16 +263,24 @@ export default class ChainRunnerPlugin extends Plugin {
       ...sharedDeps,
       clickSpot: settled => clicks.onSettled(settled),
     })
+    const refreshColumn = async (runId: string, nodeId: string, view: DrawingView): Promise<void> => {
+      const run = await this.engine.getRun(runId)
+      const hold = run.holds?.find(one => one.nodeId === nodeId)
+      if (hold) await (surface as RerunSurface).on(view).refreshHoldColumn(runId, nodeId, hold)
+    }
     const continueFromDrawing = new ContinueFromDrawing({
       surface,
       holds,
       notify,
       now: () => Date.now(),
-      refreshColumn: async (runId, nodeId, view) => {
-        const run = await this.engine.getRun(runId)
-        const hold = run.holds?.find(one => one.nodeId === nodeId)
-        if (hold) await (surface as RerunSurface).on(view).refreshHoldColumn(runId, nodeId, hold)
-      },
+      refreshColumn,
+    })
+    const rerollFromDrawing = new RerollFromDrawing({
+      surface,
+      holds,
+      notify,
+      now: () => Date.now(),
+      refreshColumn,
     })
 
     // The hook lives on Excalidraw's plugin instance, which may not be loaded
@@ -299,10 +309,12 @@ export default class ChainRunnerPlugin extends Plugin {
           nodes.handleSelection(element, view)
           directFromDrawing.handleSelection(element, view)
           continueFromDrawing.handleSelection(element, view)
+          rerollFromDrawing.handleSelection(element, view)
         },
         editing: (element, view) => {
           nodes.handleTextEdit(element, view)
           continueFromDrawing.handleTextEdit(element, view)
+          rerollFromDrawing.handleTextEdit(element, view)
         },
       })
       // The toolbar button is a file in the vault, and Excalidraw names the folder.

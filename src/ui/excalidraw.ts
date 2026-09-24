@@ -354,6 +354,7 @@ export interface SelectionSurface extends Reachable {
 
 export interface PickDrawing {
   selectedContinue(): MaybeNodeElement | undefined
+  selectedReroll(): MaybeNodeElement | undefined
 }
 
 /** Excalidraw, in every role this plugin gives it. */
@@ -394,14 +395,18 @@ export function createDrawingSurface(app: App): DrawingSurface {
 /** Said when a chain-node action cannot find the drawing it is meant to act on. */
 export const NOT_A_DRAWING = 'Open the Excalidraw drawing as its own tab to do that.'
 
-export function createExcalidrawSurface(app: App): ExcalidrawSurface {
+export interface ExcalidrawSurfaceOptions {
+  canReroll?: () => boolean
+}
+
+export function createExcalidrawSurface(app: App, options?: ExcalidrawSurfaceOptions): ExcalidrawSurface {
   /** The one place a gesture reaches Excalidraw. A click's own view wins: a drawing embedded in a note is not a tab. */
   const bind = (view?: DrawingView): BoundDrawing => {
     const ea = automate(app)
     if (!ea) throw new Error(NO_EXCALIDRAW)
     const drawing = view ?? activeDrawing(app)
     if (!drawing) throw new Error(NOT_A_DRAWING)
-    return new BoundDrawing(app, ea.getAPI(drawing), drawing)
+    return new BoundDrawing(app, ea.getAPI(drawing), drawing, options)
   }
 
   return {
@@ -426,11 +431,12 @@ export function createExcalidrawSurface(app: App): ExcalidrawSurface {
  * One drawing, bound once for one gesture. Its own EA instance rather than the
  * shared one, whose binding any other action or tab can move while this one awaits.
  */
-class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDrawing {
+class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDrawing, PickDrawing {
   constructor(
     private readonly app: App,
     private readonly ea: ExcalidrawAutomate,
     private readonly view: DrawingView,
+    private readonly options?: ExcalidrawSurfaceOptions,
   ) {}
 
   /** The instance, its workbench emptied so a write carries only its own elements. */
@@ -557,7 +563,8 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       ...reached.map(panel => panel.box.x + panel.box.width),
       ...prior.map(element => (element.x ?? 0) + (element.width ?? 0)),
     )
-    const column = buildHoldColumn(hold, right + 24, frame.box.y + 32)
+    const canReroll = this.options?.canReroll?.() ?? false
+    const column = buildHoldColumn(hold, right + 24, frame.box.y + 32, { canReroll })
     const nextBox = waitingFrameBox(frame.box, reached.map(panel => panel.box), [
       column.box,
       ...prior.map(element => ({ x: element.x ?? 0, y: element.y ?? 0, width: element.width ?? 0, height: element.height ?? 0 })),
@@ -604,6 +611,7 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       return stamp?.role === 'column' && stamp.runId === runId && stamp.nodeId === nodeId && element.type === 'rectangle'
     })
     if (!column) return false
+    if (!hold.candidates || hold.candidates.length === 0) return false
     const old = scene.filter(element => {
       const stamp = holdStamp(element)
       return stamp?.runId === runId && stamp.nodeId === nodeId
@@ -614,7 +622,8 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       const copy = ea.getElement(element.id)
       if (copy) copy.isDeleted = true
     }
-    const next = buildHoldColumn(hold, column.x ?? 0, column.y ?? 0)
+    const canReroll = this.options?.canReroll?.() ?? false
+    const next = buildHoldColumn(hold, column.x ?? 0, column.y ?? 0, { canReroll })
     const frame = scene.find(element => element.id === column.frameId)
     if (frame) {
       ea.copyViewElementsToEAforEditing([frame])
@@ -676,6 +685,15 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       custom.customData = stampHold(columnStamp)
       custom.height = column.custom.height
       if (frameId) custom.frameId = frameId
+    }
+    if (column.rerollAt) {
+      ea.style.strokeColor = LINK_BLUE
+      ea.style.strokeStyle = 'solid'
+      const rerollText = ea.getElement(ea.addText(column.rerollAt.x, column.rerollAt.y, '⟳ Reroll'))
+      if (rerollText) {
+        rerollText.customData = stampHold({ ...columnStamp, role: 'reroll' })
+        if (frameId) rerollText.frameId = frameId
+      }
     }
   }
 
@@ -853,10 +871,18 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
       ?? selectedRunId(selected, noteFrontmatter(this.app, this.view))
   }
 
-  selectedContinue(): MaybeNodeElement | undefined {
+  private selectedHoldRole(role: HoldStamp['role']): MaybeNodeElement | undefined {
     const selected = selectedElements(this.ea)
     const only = selected.length === 1 ? selected[0] : undefined
-    return only && holdStamp(only)?.role === 'continue' ? only : undefined
+    return only && holdStamp(only)?.role === role ? only : undefined
+  }
+
+  selectedContinue(): MaybeNodeElement | undefined {
+    return this.selectedHoldRole('continue')
+  }
+
+  selectedReroll(): MaybeNodeElement | undefined {
+    return this.selectedHoldRole('reroll')
   }
 
   async placePickRow(landing: RerunLanding, outputs: readonly { index: number; panel: LayoutPanel; notePath: string }[]): Promise<boolean> {
@@ -874,10 +900,18 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     })
     if (!candidate) return false
     const frame = scene.find(element => element.type === 'frame' && element.id === candidate.frameId)
+    const reroll = scene.find(element => {
+      const stamp = holdStamp(element)
+      return stamp?.role === 'reroll' && (stamp.runId === landing.runId || landing.from.includes(stamp.runId)) && stamp.nodeId === pick.nodeId
+    })
     const row = buildPickRow({ x: candidate.x ?? 0, y: candidate.y ?? 0, width: candidate.width ?? 0, height: candidate.height ?? 0 }, outputs.length)
     const ea = this.emptied()
-    const edited = [candidate, ...(frame ? [frame] : [])]
+    const edited = [candidate, ...(frame ? [frame] : []), ...(reroll ? [reroll] : [])]
     ea.copyViewElementsToEAforEditing(edited)
+    if (reroll) {
+      const copy = ea.getElement(reroll.id)
+      if (copy) copy.isDeleted = true
+    }
     const chosen = ea.getElement(candidate.id)
     if (chosen) chosen.strokeStyle = 'solid'
     const enclosing = frame ? ea.getElement(frame.id) : undefined

@@ -8,6 +8,7 @@ export interface HoldColumn {
   prompt: { text: string; box: Box }
   candidates: { heading: string; text: string; box: Box; continueAt: { x: number; y: number } }[]
   custom: Box
+  rerollAt?: { x: number; y: number }
 }
 
 export const HOLD_COLUMN_WIDTH = 360
@@ -36,7 +37,7 @@ export function candidateWords(heading: string, body: string): string {
   return body.trim()
 }
 
-export function buildHoldColumn(hold: HoldRecord, x: number, y: number): HoldColumn {
+export function buildHoldColumn(hold: HoldRecord, x: number, y: number, options?: { canReroll?: boolean }): HoldColumn {
   const prompt = hold.prompt?.trim() || 'Pick an idea or write your own'
   const promptText = `${hold.nodeId} · ${prompt}`
   const promptWidth = HOLD_COLUMN_WIDTH - PADDING * 2
@@ -60,11 +61,15 @@ export function buildHoldColumn(hold: HoldRecord, x: number, y: number): HoldCol
     }
   })
   const custom = { x: x + PADDING, y: top, width: HOLD_COLUMN_WIDTH - PADDING * 2, height: OUTPUT_HEIGHT }
+  const canReroll = options?.canReroll === true && !hold.resolvedAt && !hold.chosen && !hold.custom
+  const rerollAt = canReroll ? { x: x + PADDING, y: custom.y + custom.height + GAP } : undefined
+  const bottom = rerollAt ? rerollAt.y + CONTINUE_HEIGHT : custom.y + custom.height
   return {
-    box: { x, y, width: HOLD_COLUMN_WIDTH, height: custom.y + custom.height + PADDING - y },
+    box: { x, y, width: HOLD_COLUMN_WIDTH, height: bottom + PADDING - y },
     prompt: { text: promptText, box: promptBox },
     candidates,
     custom,
+    ...(rerollAt ? { rerollAt } : {}),
   }
 }
 
@@ -97,7 +102,7 @@ export interface HoldStamp {
   nodeId: string
   heading: string
   revision?: number
-  role: 'candidate' | 'continue' | 'column'
+  role: 'candidate' | 'continue' | 'column' | 'reroll'
 }
 
 export function stampHold(data: HoldStamp): Record<string, unknown> {
@@ -111,7 +116,7 @@ export function holdStamp(element: { customData?: unknown }): HoldStamp | undefi
   if (!stamp || typeof stamp !== 'object') return undefined
   const value = stamp as Record<string, unknown>
   if (typeof value.runId !== 'string' || typeof value.nodeId !== 'string' || typeof value.heading !== 'string') return undefined
-  if (value.role !== 'candidate' && value.role !== 'continue' && value.role !== 'column') return undefined
+  if (value.role !== 'candidate' && value.role !== 'continue' && value.role !== 'column' && value.role !== 'reroll') return undefined
   return stamp as HoldStamp
 }
 

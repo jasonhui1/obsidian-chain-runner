@@ -82,4 +82,25 @@ describe('a waiting hold column', () => {
     expect(row.direct.x).toBeGreaterThan(cards[1]!.x + cards[1]!.width)
     expect(row.right).toBeGreaterThan(row.direct.x)
   })
+
+  it('places a reroll affordance at the foot of the column only while the hold is open and reroll is advertised', () => {
+    const columnWithout = buildHoldColumn(hold, 500, 100)
+    expect(columnWithout.rerollAt).toBeUndefined()
+
+    const columnWith = buildHoldColumn(hold, 500, 100, { canReroll: true })
+    expect(columnWith.rerollAt).toBeDefined()
+    expect(columnWith.rerollAt!.x).toBe(columnWith.custom.x)
+    expect(columnWith.rerollAt!.y).toBeGreaterThan(columnWith.custom.y + columnWith.custom.height)
+    expect(columnWith.box.height).toBeGreaterThan(columnWithout.box.height)
+
+    const answered = { ...hold, chosen: 'Candidate 1' }
+    expect(buildHoldColumn(answered, 500, 100, { canReroll: true }).rerollAt).toBeUndefined()
+
+    const resolved = { ...hold, resolvedAt: 'now' }
+    expect(buildHoldColumn(resolved, 500, 100, { canReroll: true }).rerollAt).toBeUndefined()
+
+    const stamp = { runId: 'run-1', nodeId: hold.nodeId, heading: '', revision: 3, role: 'reroll' as const }
+    expect(holdStamp({ customData: stampHold(stamp) })).toEqual(stamp)
+  })
 })
+
