@@ -146,7 +146,7 @@ export default class ChainRunnerPlugin extends Plugin {
     )
     // A run watched live writes its hold note as it reaches each hold.
     const holdReached = async (runId: string, nodeId: string): Promise<void> => {
-      if (await holds.write(runId)) notify(`Run ${runId} is waiting at ${nodeId}: its hold note is written`)
+      if (await holds.write(runId)) notify(`This run is waiting at ${nodeId}: its hold note is written`)
     }
     this.quickRun = new QuickRunner({
       app: this.app,

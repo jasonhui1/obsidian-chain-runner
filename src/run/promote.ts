@@ -45,8 +45,8 @@ export function runPromote(engine: EngineClient, promote: PromotedReply, onEvent
     refusals: {
       endpoint: 'nodePromote',
       unsupported: UNSUPPORTED_PROMOTE,
-      running: () => `Run ${runId} is still running — use ${name}'s reply once it stops`,
-      gone: `Run ${runId} no longer has a node for ${name}`,
+      running: () => `This run is still running — use ${name}'s reply once it stops`,
+      gone: `This run no longer has a node for ${name}`,
       // A node inside a loop, a `turn` out of range and a node that is no proposer all come back as 400.
       invalid: said => `${name}'s reply cannot be used as the revision: ${said}`,
     },

@@ -145,7 +145,7 @@ const questRun: RunMeta = {
   runId: QUEST,
   chainName: 'combat lab',
   seedPrompt: '',
-  startedAt: '',
+  startedAt: '2026-09-16T00:41:00',
   status: 'complete',
   agentOutputs: [output('sparring', 'A first pass.'), output('combat-report', 'Rotation lands as a rhythm.\n\nKeep it.')],
 }
@@ -194,7 +194,7 @@ const theRun = (runId: string): RunMeta => {
     runId,
     chainName: 'creative-director',
     seedPrompt: 'a combat trial',
-    startedAt: '',
+    startedAt: '2026-09-16T00:41:00',
     status: 'complete',
     agentOutputs: [
       transcript ? { ...gameplay, conversation: transcript } : gameplay,
@@ -808,7 +808,7 @@ describe('sideQuest', () => {
     chainFrames = [...started(QUEST), { type: 'error', error: 'the model refused' }]
     const hold = await makeHolds().sideQuest(RUN, 'gameplay', 'combat lab')
     expect(notes[PATH]).toBe(`${HOLD}\nside quest: @gameplay combat lab\n`)
-    expect(notices).toEqual([`Side quest run ${QUEST} failed: the model refused`])
+    expect(notices).toEqual(['Side quest failed: the model refused'])
     expect(hold?.pending).toEqual({ kind: 'quest', name: 'gameplay', chain: 'combat lab' })
   })
 
@@ -870,7 +870,7 @@ describe('the panel and the palette write the same note', () => {
   it('for a side quest', async () => {
     const [fromPanel, fromPalette] = await both(holds => holds.sideQuest(RUN, 'world', 'combat lab'), '\nside quest: @world combat lab\n', 'quest')
     expect(fromPalette).toBe(fromPanel)
-    expect(notices).toEqual([`Side quest ran as ${QUEST}`])
+    expect(notices).toEqual(['Side quest ran as combat lab · 00:41'])
   })
 
   it('for a revise', async () => {
@@ -941,7 +941,7 @@ describe('rerun', () => {
     const landing = await holds.rerun(RUN)
     expect(landing).toMatchObject({ forked: true, hold: { runId: NEW, earlierRuns: [RUN, '2026-09-14-old'] } })
     expect(Object.keys(notes)).toEqual([NEW_PATH])
-    expect(notices).toEqual([`Reran downstream as run ${NEW}`])
+    expect(notices).toEqual(['Reran downstream as creative-director · 00:41'])
   })
 
   it('tells the watch it landed, whether or not the caller listens', async () => {
@@ -965,7 +965,7 @@ describe('rerun', () => {
     await holds.editProposal(RUN, 'world', 'The world is real.')
     expect(await holds.rerun(RUN)).toBeUndefined()
     expect(Object.keys(notes)).toEqual([PATH])
-    expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
+    expect(notices).toEqual(['Rerun failed: the chain broke'])
   })
 
   it('tells the watch it has started, what it writes again, then each step the engine starts', async () => {
@@ -1042,7 +1042,7 @@ describe('revise', () => {
     rerunFrames = [...started(NEW), { type: 'error', error: 'the chain broke' }]
     expect(await makeHolds().revise(RUN, turn)).toBeUndefined()
     expect(notes[PATH]).toBe(HOLD)
-    expect(notices).toEqual([`Run ${NEW} failed after using world's reply: the chain broke`])
+    expect(notices).toEqual([`This run failed after using world's reply: the chain broke`])
   })
 })
 
@@ -1287,14 +1287,14 @@ describe('the palette', () => {
     store.inFront = { path: PATH }
     resumeFrames = started(RESUMED)
     await resumeFront(makeHolds(), notify)
-    expect(notices).toEqual([`Resumed — forked as run ${RESUMED}`])
+    expect(notices).toEqual(['Resumed — forked as creative-director · 00:41'])
   })
 
   it('reruns the note in front', async () => {
     notes[PATH] = HOLD.replace('Rotate abilities mid-fight.', 'Rotate stances.')
     store.inFront = { path: PATH }
     await rerunDownstreamFront(makeHolds(), notify)
-    expect(notices).toEqual([`Reran downstream as run ${NEW}`])
+    expect(notices).toEqual(['Reran downstream as creative-director · 00:41'])
   })
 
   it('rerolls the engine open hold in the note in front', async () => {
@@ -1329,7 +1329,7 @@ describe('the palette', () => {
   it('directs the run on screen: writes its hold note and opens it', async () => {
     await directRun(makeHolds(), notify, { runId: NEW, chainName: 'creative-director', status: 'complete' } as never)
     expect(store.opened).toEqual([NEW_PATH])
-    expect(notices).toEqual([`Wrote the hold note for run ${NEW}`])
+    expect(notices).toEqual(['Wrote the hold note for this run'])
   })
 
   it('has no run to direct while nothing finished is on screen', async () => {

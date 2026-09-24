@@ -149,7 +149,7 @@ describe('runResume', () => {
     const engine = refusingEngine(new EngineHttpError(409, '/resume', '{"error":"run is running"}'), RESUMES)
     expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
-      said: 'Run 2026-09-15-Ab3dE1 cannot be resumed yet: run is running',
+      said: 'This run cannot be resumed yet: run is running',
     })
   })
 
@@ -173,7 +173,7 @@ describe('runResume', () => {
     const engine = refusingEngine(new EngineHttpError(404, '/resume', 'no such hold'), RESUMES)
     expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
-      said: 'Run 2026-09-15-Ab3dE1 no longer has the hold this note answers',
+      said: 'This run no longer has the hold this note answers',
     })
   })
 
@@ -181,7 +181,7 @@ describe('runResume', () => {
     const engine = refusingEngine(new EngineHttpError(400, '/resume', '{"error":"chosen and custom are exclusive"}'), RESUMES)
     expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
-      said: 'The engine would not resume run 2026-09-15-Ab3dE1: chosen and custom are exclusive',
+      said: 'The engine would not resume this run: chosen and custom are exclusive',
     })
   })
 
@@ -199,7 +199,7 @@ describe('runResume', () => {
     const engine = refusingEngine(new EngineHttpError(404, '/resume', 'Not Found'), {})
     expect(await runResume(engine, '2026-09-15-Ab3dE1', request)).toEqual({
       kind: 'refused',
-      said: 'Run 2026-09-15-Ab3dE1 no longer has the hold this note answers — or this engine cannot resume a hold. Update maestro-playground if so.',
+      said: 'This run no longer has the hold this note answers — or this engine cannot resume a hold. Update maestro-playground if so.',
     })
   })
 

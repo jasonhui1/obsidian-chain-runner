@@ -343,7 +343,8 @@ describe('outputs that fill in place', () => {
   it('places the frame once, however many frames arrive', async () => {
     await start()
     expect(framed).toHaveLength(1)
-    expect(framed[0].frame.name).toBe(`Relay · ${RUN_ID}`)
+    expect(framed[0].frame.runId).toBe(RUN_ID)
+    expect(framed[0].frame.name).toMatch(/^Relay · \d\d:\d\d$/)
     expect(framed[0].notes).toEqual([FIRST, SURVIVOR])
   })
 
@@ -583,9 +584,13 @@ describe('variance runs', () => {
     expect(varianceRequests).toEqual([
       { chainName: 'Relay', seedPrompt: 'a premise', paramValue: 'engineers', count: 2 },
     ])
+    expect(framed.map(one => one.frame.runId).sort()).toEqual([
+      RUN_ID,
+      SECOND_RUN_ID,
+    ])
     expect(framed.map(one => one.frame.name).sort()).toEqual([
-      `Relay · ${RUN_ID}`,
-      `Relay · ${SECOND_RUN_ID}`,
+      'Relay · engineers (run 1 of 2)',
+      'Relay · engineers (run 2 of 2)',
     ])
     expect(vault[`chains/runs/${RUN_ID}/First.md`]).toContain('First said something')
     expect(vault[`chains/runs/${SECOND_RUN_ID}/Second.md`]).toContain('Second said something')
@@ -704,7 +709,11 @@ describe('an output run again', () => {
 
     // The note's provenance is the vault's bookkeeping, not the chain's argument.
     expect(launched[1].seedPrompt).toBe('Survivor said something')
-    expect(framed.map(one => one.frame.name)).toEqual([`Relay · ${RUN_ID}`, `Relay · ${SECOND_RUN}`])
+    expect(framed.map(one => one.frame.runId)).toEqual([RUN_ID, SECOND_RUN])
+    expect(framed.map(one => one.frame.name)).toEqual([
+      expect.stringMatching(/^Relay · \d\d:\d\d$/),
+      expect.stringMatching(/^Relay · \d\d:\d\d$/),
+    ])
     expect(vault[`chains/runs/${SECOND_RUN}/Survivor.md`]).toContain('Survivor said something')
   })
 })

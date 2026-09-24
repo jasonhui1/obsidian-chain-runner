@@ -181,4 +181,34 @@ describe('variance summary', () => {
     root.querySelector<HTMLButtonElement>('[data-open-variance-group]')!.click()
     expect(openedGroups).toEqual(['group-1'])
   })
+
+  it('names runs for readers across progress, samples, members and member view', () => {
+    board.showProgress({
+      chainName: 'Relay',
+      expectedRunCount: 3,
+      members: [{ instance: 0, runId: 'r0', status: 'running', outputCount: 0 }],
+    })
+    const progressItem = root.querySelector('.chain-runner-variance-member') as HTMLElement
+    expect(progressItem.textContent).toBe('Relay · run 1 of 3 · running')
+    expect(progressItem.title).toBe('run r0')
+
+    board.showGroup(group())
+
+    const left = root.querySelector<HTMLSelectElement>('[aria-label="First run"]')!
+    expect(left.options[0]?.textContent).toBe('Relay · run 1 of 3')
+    expect(left.options[0]?.title).toBe('run r0')
+
+    const sampleTitle = root.querySelector('.chain-runner-variance-sample-title') as HTMLElement
+    expect(sampleTitle.textContent).toBe('Relay · run 1 of 3')
+    expect(sampleTitle.title).toBe('run r0')
+
+    const memberButton = root.querySelector('.chain-runner-variance-member-open') as HTMLButtonElement
+    expect(memberButton.textContent).toBe('Open Relay · run 1 of 3')
+    expect(memberButton.title).toBe('run r0')
+
+    memberButton.click()
+    const memberTitle = root.querySelector('.chain-runner-variance-title') as HTMLElement
+    expect(memberTitle.textContent).toBe('Relay · run 1 of 3')
+    expect(memberTitle.title).toBe('run r0')
+  })
 })

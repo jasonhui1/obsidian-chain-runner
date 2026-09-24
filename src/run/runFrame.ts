@@ -1,5 +1,8 @@
 import type { RunLayout, RunPanel } from './panels'
 import type { Box } from '../ui/nodeScene'
+import { NAME_SEPARATOR, runName, type RunGroupPosition } from './runName'
+
+export { NAME_SEPARATOR }
 
 /** Initial placement for a run's outputs. The engine decides what the panels are (ADR-0001). */
 
@@ -36,44 +39,67 @@ const SHRINK = 0.82
 /** Below this a panel is a sliver rather than something to read. */
 const MIN_WIDTH = 160
 
-const NAME_SEPARATOR = ' · '
-
-/** A frame's title, as the reader sees it. */
-function runFrameName(chainName: string, runId: string): string {
-  return `${chainName}${NAME_SEPARATOR}${runId}`
-}
-
 /** A waiting run's title names its state without exposing the engine's id on the drawing. */
 export function waitingRunFrameName(name: string, runId: string): string {
   const suffix = `${NAME_SEPARATOR}${runId}`
   return name.endsWith(suffix) ? `${name.slice(0, -suffix.length)}${NAME_SEPARATOR}waiting` : name
 }
 
-/** A title `buildRunFrame` wrote for one of `from`, naming `to` instead; `undefined` for a title the reader chose. */
-export function renameRunFrame(name: string, from: readonly string[], to: string, stampedRunId?: string): string | undefined {
-  const old = from.find(runId => name.endsWith(`${NAME_SEPARATOR}${runId}`))
-  if (old) return runFrameName(name.slice(0, -(NAME_SEPARATOR.length + old.length)), to)
-  const waiting = `${NAME_SEPARATOR}waiting`
-  return stampedRunId && from.includes(stampedRunId) && name.endsWith(waiting)
-    ? runFrameName(name.slice(0, -waiting.length), to)
-    : undefined
+export function uniqueRunFrameName(name: string, existing: readonly string[], previousName?: string): string {
+  const priorSuffix = previousName?.startsWith(name) ? previousName.slice(name.length) : undefined
+  const priorCopy = priorSuffix === '' ? 1 : /^ \((\d+)\)$/.exec(priorSuffix ?? '')?.[1]
+  if (!existing.includes(name) && priorCopy === undefined) return name
+  let copy = priorCopy === undefined ? 2 : Number(priorCopy) + 1
+  while (existing.includes(`${name} (${copy})`)) copy++
+  return `${name} (${copy})`
 }
 
-/** The frame for a run, to the right of the node that produced it and top-aligned with it. */
-export function buildRunFrame(input: {
+/** A generated title for an earlier run; `undefined` for a title the reader chose. */
+export function renameRunFrame(name: string, input: {
+  fromRunIds: readonly string[]
+  toTitle: string
+  stampedRunId?: string
+  generatedName?: string
+}): string | undefined {
+  const { fromRunIds, toTitle, stampedRunId, generatedName } = input
+  if (generatedName && stampedRunId && fromRunIds.includes(stampedRunId)) {
+    return name === generatedName ? toTitle : undefined
+  }
+  if (fromRunIds.some(runId => name.endsWith(`${NAME_SEPARATOR}${runId}`))) return toTitle
+  if (stampedRunId && fromRunIds.includes(stampedRunId) && name.endsWith(`${NAME_SEPARATOR}waiting`)) return toTitle
+  return undefined
+}
+
+export interface BuildRunFrameInput {
   layout: RunLayout
   chainName: string
   runId: string
   node: Box
-}): RunFrame {
+  candidate?: string
+  dropdownValue?: string
+  group?: RunGroupPosition
+  startTime?: Date | string | number
+  name?: string
+}
+
+/** The frame for a run, to the right of the node that produced it and top-aligned with it. */
+export function buildRunFrame(input: BuildRunFrameInput): RunFrame {
   const { layout, chainName, runId, node } = input
   const placed = arrange(layout)
 
   const origin = { x: node.x + node.width + NODE_GAP, y: node.y }
   const bounds = extent(placed.map(one => one.box))
 
+  const title = input.name ?? runName({
+    chainName,
+    candidate: input.candidate,
+    dropdownValue: input.dropdownValue,
+    group: input.group,
+    startTime: input.startTime,
+  })
+
   return {
-    name: runFrameName(chainName, runId),
+    name: title,
     runId,
     box: {
       x: origin.x,

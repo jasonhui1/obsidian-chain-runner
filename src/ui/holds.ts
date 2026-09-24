@@ -54,6 +54,7 @@ import type { RerunLanding } from '../run/rerunWatch'
 import { resumeRequest, runResume } from '../run/resume'
 import { pickPanelIndexes } from '../run/pickPanels'
 import { runReroll, UNSUPPORTED_REROLL } from '../run/reroll'
+import { runNameFromMeta } from '../run/runName'
 import { appendSideQuestResult, appendSideQuestTrigger, type SideQuestRun, type SideQuestTurn } from '../run/sideQuest'
 import type { EngineClient } from '../engine/client'
 import { engineFailureMessage, engineSaid } from '../engine/guard'
@@ -71,7 +72,7 @@ export { DIRECTION_VERBS, type DirectionVerb } from '../run/holdNote'
 /** Which trigger line a palette send answers. */
 export type TriggerKind = 'chat' | 'room' | 'quest'
 
-export const NO_HOLD_NOTE = (runId: string): string => `Run ${runId} has no hold note yet`
+export const NO_HOLD_NOTE = (_runId: string): string => 'This run has no hold note yet'
 export const NO_SUCH_PROPOSAL = (name: string): string => `This hold has no proposal named ${name}`
 export const NOTHING_TYPED = 'Nothing to write in the hold note'
 export const PROPOSAL_HEADING = 'A proposal cannot hold a “### ” heading: the hold note starts the next proposal there'
@@ -157,9 +158,9 @@ interface FetchedRun {
 
 /** How the notices name what a landing call fired; any caveat is added after the stem. */
 interface LandingWording {
-  landed: (runId: string, forked: boolean) => string
+  landed: (name: string, forked: boolean) => string
   /** The run landed, but the note could not be folded onto it. */
-  heldBack: (runId: string) => string
+  heldBack: (name: string) => string
   /** `runId` only once the engine had named a run, and `error` only if it said why. */
   failed: (runId: string | undefined, error: string | undefined) => string
 }
@@ -167,18 +168,18 @@ interface LandingWording {
 const CANON_NOTE = normalizePath(CANON_PATH)
 
 const RERUN_DOWNSTREAM_WORDING: LandingWording = {
-  landed: runId => `Reran downstream as run ${runId}`,
-  heldBack: runId => `Reran as run ${runId}`,
-  failed: (runId, error) => (runId ? `Rerun ${runId} failed: ${error}` : error ? `Rerun failed: ${error}` : 'Rerun produced no run'),
+  landed: name => `Reran downstream as ${name}`,
+  heldBack: name => `Reran as ${name}`,
+  failed: (_runId, error) => error ? `Rerun failed: ${error}` : 'Rerun produced no run',
 }
 
 function reviseWording(name: string): LandingWording {
   const became = `${name}'s reply is now the proposal`
   return {
-    landed: (runId, forked) => (forked ? `${became} — forked as run ${runId}` : `${became} — run ${runId} reran`),
-    heldBack: runId => `${became}, and run ${runId} reran`,
+    landed: (runTitle, forked) => (forked ? `${became} — forked as ${runTitle}` : `${became} — ${runTitle} reran`),
+    heldBack: runTitle => `${became}, and ${runTitle} reran`,
     failed: (runId, error) => {
-      if (runId) return `Run ${runId} failed after using ${name}'s reply: ${error}`
+      if (runId) return `This run failed after using ${name}'s reply: ${error}`
       return error ? `Using ${name}'s reply as the revision failed: ${error}` : `Using ${name}'s reply as the revision produced no run`
     },
   }
@@ -205,6 +206,11 @@ export class Holds {
   async read(runId: string): Promise<Hold | undefined> {
     const found = await this.locate(runId)
     return found && this.reading(found)
+  }
+
+  async nameOf(runId: string): Promise<string | undefined> {
+    const run = await this.deps.withEngine(() => this.deps.engine.getRun(runId))
+    return run ? runNameFromMeta(run) : undefined
   }
 
   /** The hold note in front of the reader; `undefined`, quietly, for any other note. */
@@ -565,7 +571,7 @@ export class Holds {
     if (answered.kind === 'refused') return this.refuse(answered.said)
     const ran = answered.runId
     if (!ran) return this.refuse(answered.error ? `Side quest failed: ${answered.error}` : 'Side quest produced no run')
-    if (answered.error) return this.refuse(`Side quest run ${ran} failed: ${answered.error}`)
+    if (answered.error) return this.refuse(`Side quest failed: ${answered.error}`)
 
     const landed = await this.deps.withEngine(() => engine.getRun(ran))
     if (!landed) return undefined
@@ -804,11 +810,17 @@ export class Holds {
     return wrote !== undefined
   }
 
-  private async queueNoteWrite(path: string, write: () => Promise<void>): Promise<void> {
-    const previous = this.noteWrites.get(path)
-    const current = previous ? previous.catch(() => {}).then(write) : write()
+  private async queueNoteWrite<T>(path: string, write: () => Promise<T>): Promise<T> {
+    const previous = this.noteWrites.get(path) ?? Promise.resolve()
+    let result: T
+    const current = previous.catch(() => {}).then(async () => {
+      result = await write()
+    })
     this.noteWrites.set(path, current)
-    try { await current } finally {
+    try {
+      await current
+      return result!
+    } finally {
       if (this.noteWrites.get(path) === current) this.noteWrites.delete(path)
     }
   }
@@ -835,13 +847,14 @@ export class Holds {
     const { wording } = options
     const landedRun = await this.deps.withEngine(() => fetchRun(engine, newRunId))
     if (!landedRun) return undefined
-    const said = wording.landed(newRunId, forked)
+    const runTitle = runNameFromMeta(landedRun.run)
+    const said = wording.landed(runTitle, forked)
 
-    const folded = await this.guarded('the hold note', async (): Promise<{ notice: string; moved?: true }> => {
+    const folded = await this.guarded('the hold note', () => this.queueNoteWrite(path, async (): Promise<{ notice: string; moved?: true }> => {
       // Read again: the human may have written in the note while the call went.
       const current = (await store.read(path)) ?? ''
       const kept = editsToCarry(current, { ...options.edits, landed: landedRun.layout.panels })
-      if (!kept) return { notice: `${wording.heldBack(newRunId)}, but proposals changed meanwhile — note left as is` }
+      if (!kept) return { notice: `${wording.heldBack(runTitle)}, but proposals changed meanwhile — note left as is` }
       const marked = options.beforeRefresh?.(current, newRunId) ?? current
       // An edit to a proposal the rerun only replayed is put back, so it can go in the next rerun.
       const refreshed = Object.entries(kept.carried).reduce(
@@ -857,7 +870,7 @@ export class Holds {
       }
       const replaced = kept.replaced.length > 0 ? ` — it wrote ${kept.replaced.join(', ')} again, over your edits` : ''
       return { notice: `${said}${replaced}`, moved: true }
-    })
+    }))
     if (!folded || !('notice' in folded)) return undefined
     this.deps.notify(folded.notice)
     if (!folded.moved) return undefined

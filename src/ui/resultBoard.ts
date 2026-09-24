@@ -7,6 +7,7 @@ import { panelKeys } from './panelKeys'
 import type { LayoutPanel, PanelState } from '../engine/types'
 import type { RunPanel } from '../run/panels'
 import { seedLine, type RunResult, type RunStatus } from '../run/session'
+import { runName } from '../run/runName'
 
 /**
  * The result view's elements, drawn by key: a panel keeps the element it had and
@@ -197,13 +198,26 @@ export class ResultBoard {
   private drawHeader(result: RunResult): void {
     const parts = (this.header ??= this.buildHeader())
     if (this.root.firstElementChild !== parts.el) this.root.prepend(parts.el)
-    parts.name.textContent = result.chainName
+    if (result.runId) {
+      parts.name.textContent = runName({
+        chainName: result.chainName,
+        dropdownValue: result.parameter?.value,
+        startTime: result.startedAt,
+      })
+      parts.name.title = 'run ' + result.runId
+      parts.runId.textContent = ''
+      parts.runId.title = 'run ' + result.runId
+    } else {
+      parts.name.textContent = result.chainName
+      parts.name.title = ''
+      parts.runId.textContent = ''
+      parts.runId.title = ''
+    }
     parts.status.textContent = STATUS_LABEL[result.status]
     modifiers(parts.status, 'chain-runner-run-status', STATUSES, result.status)
     parts.moment.textContent = result.moment
     parts.seed.textContent = seedLine(result.seed)
     parts.parameter.textContent = result.parameter ? `${result.parameter.name}: ${result.parameter.value}` : ''
-    parts.runId.textContent = result.runId ?? ''
     parts.error.textContent = result.error ?? ''
     // A chain that declared no layout is not a broken one; say which is being shown.
     const undeclared = result.layout.kind === 'undeclared' && result.layout.panels.length > 0
@@ -223,7 +237,7 @@ export class ResultBoard {
       moment,
       seed: span('', meta),
       parameter: span('', meta),
-      runId: span('', meta),
+      runId: span('chain-runner-run-id', meta),
       error: div('chain-runner-run-error', el),
       note: div('chain-runner-run-note', el),
     }

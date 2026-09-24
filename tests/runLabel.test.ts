@@ -77,7 +77,7 @@ describe('cardProposal', () => {
 describe('rerunScene', () => {
   const OLD = '2026-09-15-old'
   const OLDER = '2026-09-14-older'
-  const NEW = '2026-09-16-new'
+  const NEW_TITLE = 'creative-director · 00:45'
   const fronts: Record<string, unknown> = {
     'runs/old/Verdict.md': { run: OLD, output: 'Verdict' },
     'runs/old/World.md': { run: OLD, output: 'World' },
@@ -92,7 +92,7 @@ describe('rerunScene', () => {
 
   it('finds the cards of any run the hold was under, by the output each shows', () => {
     const scene = [card('a', 'runs/old/Verdict.md'), card('b', 'runs/older/World.md'), card('c', 'runs/other/World.md')]
-    const found = rerunScene(scene, [OLD, OLDER], NEW, noteRun)
+    const found = rerunScene(scene, [OLD, OLDER], NEW_TITLE, noteRun)
     expect(found?.cards.map(one => [one.element.id, one.output])).toEqual([
       ['a', 'Verdict'],
       ['b', 'World'],
@@ -100,28 +100,48 @@ describe('rerunScene', () => {
   })
 
   it('finds the Direct labels of those runs', () => {
-    const found = rerunScene([label(OLD), label('another')], [OLD], NEW, noteRun)
+    const found = rerunScene([label(OLD), label('another')], [OLD], NEW_TITLE, noteRun)
     expect(found?.labels.map(one => one.id)).toEqual([`label-${OLD}`])
   })
 
   it('renames the frame those sit in to the new run, and no other frame', () => {
     const scene = [runFrame(`creative-director · ${OLD}`), runFrame(`creative-director · ${OLD}`, 'elsewhere'), card('a', 'runs/old/Verdict.md')]
-    expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([{ element: scene[0], name: `creative-director · ${NEW}` }])
+    expect(rerunScene(scene, [OLD], NEW_TITLE, noteRun)?.frames).toEqual([{ element: scene[0], name: NEW_TITLE }])
   })
 
   it('renames a stamped waiting frame when its run lands elsewhere', () => {
     const waiting = { ...runFrame('creative-director · waiting'), customData: { chainRunnerFrame: { runId: OLD } } }
     const scene = [waiting, label(OLD)]
-    expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([{ element: waiting, name: `creative-director · ${NEW}` }])
+    expect(rerunScene(scene, [OLD], NEW_TITLE, noteRun)?.frames).toEqual([{ element: waiting, name: NEW_TITLE }])
+  })
+
+  it('renames a frame whose title carries no run id', () => {
+    const frameEl = { ...runFrame('creative-director · 00:41'), customData: { chainRunnerFrame: { runId: OLD, name: 'creative-director · 00:41' } } }
+    const scene = [frameEl, label(OLD)]
+    expect(rerunScene(scene, [OLD], 'creative-director · 00:45', noteRun)?.frames).toEqual([
+      { element: frameEl, name: 'creative-director · 00:45' },
+    ])
   })
 
   it('leaves a frame the reader renamed as it is', () => {
     const scene = [runFrame('my best run'), card('a', 'runs/old/Verdict.md')]
-    expect(rerunScene(scene, [OLD], NEW, noteRun)?.frames).toEqual([])
+    expect(rerunScene(scene, [OLD], NEW_TITLE, noteRun)?.frames).toEqual([])
+  })
+
+  it('keeps a custom stamped title while moving its run stamp', () => {
+    const frameEl = { ...runFrame('My favorite outcome'), customData: { chainRunnerFrame: { runId: OLD, name: 'creative-director · 00:41' } } }
+    expect(rerunScene([frameEl], [OLD], 'creative-director · 00:45', noteRun)?.frames).toEqual([{ element: frameEl }])
+  })
+
+  it('finds a stamped frame even when it has no output card or label yet', () => {
+    const frameEl = { ...runFrame('creative-director · 00:41'), customData: { chainRunnerFrame: { runId: OLD, name: 'creative-director · 00:41' } } }
+    expect(rerunScene([frameEl], [OLD], 'creative-director · 00:45', noteRun)?.frames).toEqual([
+      { element: frameEl, name: 'creative-director · 00:45' },
+    ])
   })
 
   it('is undefined for a drawing that shows none of the runs', () => {
-    expect(rerunScene([card('c', 'runs/other/World.md'), label('another')], [OLD], NEW, noteRun)).toBeUndefined()
+    expect(rerunScene([card('c', 'runs/other/World.md'), label('another')], [OLD], NEW_TITLE, noteRun)).toBeUndefined()
   })
 })
 

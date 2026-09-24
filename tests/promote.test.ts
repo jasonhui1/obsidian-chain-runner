@@ -68,8 +68,8 @@ describe('runPromote', () => {
   })
 
   it.each([
-    [409, 'run is running', `Run ${RUN} is still running — use gameplay-director's reply once it stops`],
-    [404, 'unknown node', `Run ${RUN} no longer has a node for gameplay-director`],
+    [409, 'run is running', `This run is still running — use gameplay-director's reply once it stops`],
+    [404, 'unknown node', `This run no longer has a node for gameplay-director`],
     [400, 'node is inside a loop', "gameplay-director's reply cannot be used as the revision: node is inside a loop"],
     [400, 'turn 4 is out of range', "gameplay-director's reply cannot be used as the revision: turn 4 is out of range"],
     [400, 'node is not a proposer', "gameplay-director's reply cannot be used as the revision: node is not a proposer"],

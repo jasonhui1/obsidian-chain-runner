@@ -43,8 +43,8 @@ export async function runFork(engine: EngineClient, runId: string, request: Fork
     refusals: {
       endpoint: 'runFork',
       unsupported: UNSUPPORTED_FORK,
-      running: said => `Run ${runId} cannot be forked yet: ${said}`,
-      gone: `Run ${runId} or a revised node no longer exists`,
+      running: said => `This run cannot be forked yet: ${said}`,
+      gone: 'This run or a revised node no longer exists',
       invalid: said => `The engine would not rerun downstream: ${said}`,
     },
   })

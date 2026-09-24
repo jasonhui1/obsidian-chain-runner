@@ -104,9 +104,18 @@ export function frameRunId(element: { customData?: unknown }): string | undefine
   return typeof runId === 'string' ? runId : undefined
 }
 
-export function reframe(custom: unknown, runId: string): Record<string, unknown> {
+export function frameGeneratedName(element: { customData?: unknown }): string | undefined {
+  const custom = element.customData
+  if (!custom || typeof custom !== 'object') return undefined
+  const stamp = (custom as Record<string, unknown>).chainRunnerFrame
+  if (!stamp || typeof stamp !== 'object') return undefined
+  const name = (stamp as Record<string, unknown>).name
+  return typeof name === 'string' ? name : undefined
+}
+
+export function reframe(custom: unknown, runId: string, name?: string): Record<string, unknown> {
   const rest = typeof custom === 'object' && custom !== null ? (custom as Record<string, unknown>) : {}
-  return { ...rest, chainRunnerFrame: { runId } }
+  return { ...rest, chainRunnerFrame: { runId, ...(name ? { name } : {}) } }
 }
 
 /** An element as a rerun's landing reads it: a frame has a name, and anything may sit in one. */
@@ -119,7 +128,7 @@ export interface FramedShape extends SceneShape {
 export interface RerunScene<E> {
   cards: { element: E; output: string }[]
   labels: E[]
-  frames: { element: E; name: string }[]
+  frames: { element: E; name?: string }[]
 }
 
 /**
@@ -129,7 +138,7 @@ export interface RerunScene<E> {
 export function rerunScene<E extends FramedShape>(
   scene: readonly E[],
   from: readonly string[],
-  to: string,
+  toTitle: string,
   frontmatter: NoteFrontmatter,
 ): RerunScene<E> | undefined {
   const fromRuns = (runId: string | undefined): boolean => runId !== undefined && from.includes(runId)
@@ -138,13 +147,14 @@ export function rerunScene<E extends FramedShape>(
     return card && fromRuns(card.runId) ? [{ element, output: card.proposal }] : []
   })
   const labels = scene.filter(element => fromRuns(directLabelRunId(element)))
-  if (cards.length === 0 && labels.length === 0) return undefined
-
   const framed = new Set([...cards.map(card => card.element), ...labels].map(element => element.frameId))
   const frames = scene.flatMap(element => {
-    if (element.type !== 'frame' || !framed.has(element.id)) return []
-    const name = element.name && renameRunFrame(element.name, from, to, frameRunId(element))
-    return name ? [{ element, name }] : []
+    if (element.type !== 'frame' || (!framed.has(element.id) && !fromRuns(frameRunId(element)))) return []
+    const name = element.name && renameRunFrame(element.name, {
+      fromRunIds: from, toTitle, stampedRunId: frameRunId(element), generatedName: frameGeneratedName(element),
+    })
+    return name || fromRuns(frameRunId(element)) ? [{ element, ...(name ? { name } : {}) }] : []
   })
+  if (cards.length === 0 && labels.length === 0 && frames.length === 0) return undefined
   return { cards, labels, frames }
 }

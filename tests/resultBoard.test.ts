@@ -205,6 +205,22 @@ describe('what the board says around the panels', () => {
     expect(noticeText(panelEls()[0]!)).toBe('never ran')
   })
 
+  it('names the run for readers and holds the run id in tooltips', () => {
+    const view = board()
+    view.draw({
+      result: run([filled()], {
+        runId: '2026-09-23-Wgvfl8',
+        parameter: { name: 'role', value: 'engineers' },
+      }),
+    })
+    const nameEl = root.querySelector('.chain-runner-run-name') as HTMLElement
+    const runIdEl = root.querySelector('.chain-runner-run-id') as HTMLElement
+    expect(nameEl.textContent).toBe('Relay · engineers')
+    expect(nameEl.title).toBe('run 2026-09-23-Wgvfl8')
+    expect(runIdEl.textContent).toBe('')
+    expect(runIdEl.title).toBe('run 2026-09-23-Wgvfl8')
+  })
+
   it('identifies a no-hint launch without presenting the source note as its seed', () => {
     const view = board()
     view.draw({ result: run([], { seed: { note: 'empty.md', from: 'none' } }) })

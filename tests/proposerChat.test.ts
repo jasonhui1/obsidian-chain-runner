@@ -47,11 +47,11 @@ describe('chatReply', () => {
   })
 
   it('says the run is still going on a 409', async () => {
-    expect(await refused(409)).toBe('Run 2026-09-15-Ab3dE1 is still running — chat with gameplay-director once it stops')
+    expect(await refused(409)).toBe('This run is still running — chat with gameplay-director once it stops')
   })
 
   it('says the node is gone on a 404, when the engine claims the endpoint', async () => {
-    expect(await refused(404)).toBe('Run 2026-09-15-Ab3dE1 no longer has a node for gameplay-director')
+    expect(await refused(404)).toBe('This run no longer has a node for gameplay-director')
   })
 
   it('passes on what the engine refused a 400 with', async () => {

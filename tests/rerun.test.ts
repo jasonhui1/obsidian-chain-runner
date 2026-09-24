@@ -95,7 +95,7 @@ describe('runFork', () => {
     [400, 'revising a hold; use resume', 'The engine would not rerun downstream: revising a hold; use resume'],
     [400, 'node inside a loop', 'The engine would not rerun downstream: node inside a loop'],
     [400, 'node has no output', 'The engine would not rerun downstream: node has no output'],
-    [404, 'unknown node', 'Run source or a revised node no longer exists'],
+    [404, 'unknown node', 'This run or a revised node no longer exists'],
   ])('shows the engine refusal for %i', async (status, said, notice) => {
     const engine = refusingEngine(new EngineHttpError(status, 'http://engine/fork', JSON.stringify({ error: said })), { runFork: true })
     expect(await runFork(engine, 'source', request)).toEqual({ kind: 'refused', said: notice })

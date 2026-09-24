@@ -36,7 +36,7 @@ export async function runReroll(
     if (!(error instanceof EngineHttpError)) throw error
     const reason = engineSaid(error) ?? engineFailureMessage(error) ?? `engine error ${error.status}`
     if (error.status === 409) return { kind: 'stale', said: reason }
-    if (error.status === 404) return { kind: 'refused', said: `Run ${runId} no longer has the open hold ${holdId}` }
+    if (error.status === 404) return { kind: 'refused', said: `This run no longer has the open hold ${holdId}` }
     if (error.status === 400) return { kind: 'refused', said: `The engine would not reroll hold ${holdId}: ${reason}` }
     return { kind: 'refused', said: reason }
   }

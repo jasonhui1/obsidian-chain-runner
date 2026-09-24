@@ -806,7 +806,7 @@ describe('a rerun going', () => {
     await rerunning(undefined, waitingOn('creative-director'), stepOn('creative-director'))
     feed!.end({ type: 'error', error: 'the chain broke' })
     await settled()
-    expect(notices).toEqual([`Rerun ${NEW} failed: the chain broke`])
+    expect(notices).toEqual(['Rerun failed: the chain broke'])
     expect(progress()).toEqual([])
     expect(stale('.chain-runner-directing-verdict')).toBe(false)
     expect(timers.size).toBe(0)

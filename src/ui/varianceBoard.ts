@@ -1,4 +1,5 @@
 import type { RunMeta, VarianceGroup, VarianceNode, VarianceSample } from '../engine/types'
+import { runName, runNameFromMeta } from '../run/runName'
 import type { VarianceProgress } from '../run/varianceProgress'
 
 export interface VarianceBoardDeps {
@@ -58,10 +59,15 @@ export class VarianceBoard {
     this.add('p', 'chain-runner-variance-completion', `Running ${progress.expectedRunCount} times`)
     const list = this.add('ol', 'chain-runner-variance-members')
     for (const member of progress.members) {
-      const label = [`Run ${member.instance + 1}`, member.runId, member.status, member.currentNode, member.outputCount ? `${member.outputCount} outputs` : undefined]
+      const name = runName({
+        chainName: progress.chainName,
+        group: { index: member.instance, count: progress.expectedRunCount },
+      })
+      const label = [name, member.status, member.currentNode, member.outputCount ? `${member.outputCount} outputs` : undefined]
         .filter(Boolean)
         .join(' · ')
-      this.add('li', 'chain-runner-variance-member', label, list)
+      const item = this.add('li', 'chain-runner-variance-member', label, list)
+      if (member.runId) item.title = 'run ' + member.runId
     }
   }
 
@@ -139,8 +145,9 @@ export class VarianceBoard {
     const select = this.add('select', '', undefined, field) as HTMLSelectElement
     select.setAttribute('aria-label', label)
     for (const sample of samples) {
-      const option = this.add('option', '', `Run ${sample.runIndex + 1} · ${sample.runId}`, select) as HTMLOptionElement
+      const option = this.add('option', '', this.sampleName(sample), select) as HTMLOptionElement
       option.value = sample.runId
+      option.title = 'run ' + sample.runId
       option.selected = sample.runId === selected.runId
     }
     select.addEventListener('change', () => {
@@ -151,7 +158,8 @@ export class VarianceBoard {
 
   private drawSample(sample: VarianceSample, side: 'left' | 'right', parent: HTMLElement): void {
     const article = this.add('article', 'chain-runner-variance-sample', undefined, parent)
-    this.add('h4', 'chain-runner-variance-sample-title', `Run ${sample.runIndex + 1} · ${sample.runId}`, article)
+    const title = this.add('h4', 'chain-runner-variance-sample-title', this.sampleName(sample), article)
+    title.title = 'run ' + sample.runId
     const output = this.add('pre', `chain-runner-variance-output chain-runner-variance-output--${side}`, sample.output, article)
     output.setAttribute('aria-label', `${side === 'left' ? 'First' : 'Second'} run output`)
   }
@@ -159,9 +167,11 @@ export class VarianceBoard {
   private drawMembers(group: VarianceGroup): void {
     this.add('h3', 'chain-runner-variance-section-title', 'Member runs')
     const list = this.add('ul', 'chain-runner-variance-members')
-    for (const [index, run] of group.runs.entries()) {
+    for (const run of group.runs) {
       const item = this.add('li', 'chain-runner-variance-member', undefined, list)
-      const button = this.add('button', 'chain-runner-variance-member-open', `Open run ${run.variance?.index !== undefined ? run.variance.index + 1 : index + 1} · ${run.runId}`, item) as HTMLButtonElement
+      const name = runNameFromMeta(run)
+      const button = this.add('button', 'chain-runner-variance-member-open', `Open ${name}`, item) as HTMLButtonElement
+      button.title = 'run ' + run.runId
       button.type = 'button'
       button.dataset['memberRun'] = run.runId
       button.addEventListener('click', () => {
@@ -172,7 +182,8 @@ export class VarianceBoard {
   }
 
   private drawMember(run: RunMeta, group: VarianceGroup): void {
-    this.add('h2', 'chain-runner-variance-title', `Run ${run.variance ? run.variance.index + 1 : ''} · ${run.runId}`)
+    const heading = this.add('h2', 'chain-runner-variance-title', runNameFromMeta(run))
+    heading.title = 'run ' + run.runId
     const marker = run.variance
     if (marker?.groupId) {
       const button = this.add('button', 'chain-runner-variance-open-group', 'Open variance group') as HTMLButtonElement
@@ -198,6 +209,15 @@ export class VarianceBoard {
 
   private sampleById(samples: VarianceSample[], runId: string | undefined): VarianceSample | undefined {
     return runId === undefined ? undefined : samples.find(sample => sample.runId === runId)
+  }
+
+  private sampleName(sample: VarianceSample): string {
+    const group = this.currentGroup()
+    const run = group.runs.find(one => one.runId === sample.runId)
+    return run ? runNameFromMeta(run) : runName({
+      chainName: group.chainName,
+      group: { index: sample.runIndex, count: group.expectedRunCount },
+    })
   }
 
   private add<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string, parent = this.root): HTMLElementTagNameMap[K] {

@@ -39,8 +39,8 @@ export function chatReply(engine: EngineClient, chat: ProposerChat): Promise<Ans
       // never claimed the endpoint is the route missing, not the node (#54).
       endpoint: 'proposerChat',
       unsupported: UNSUPPORTED_CHAT,
-      running: () => `Run ${runId} is still running — chat with ${name} once it stops`,
-      gone: `Run ${runId} no longer has a node for ${name}`,
+      running: () => `This run is still running — chat with ${name} once it stops`,
+      gone: `This run no longer has a node for ${name}`,
       invalid: said => `${name} cannot be chatted with: ${said}`,
       unprocessable: `${name}'s agent file is gone from the workspace`,
     },

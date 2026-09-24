@@ -131,6 +131,7 @@ export interface RunResult {
   /** Why it failed: the first hop that failed, or what stopped the run starting. */
   error?: string
   runId?: string
+  startedAt?: Date | string | number
   layout: RunLayout
 }
 
@@ -148,8 +149,9 @@ export function buildRunResult(input: {
   state: RunState
   /** What the chain's dropdown was set to; ignored by a chain that declares none. */
   paramValue?: string
+  startedAt?: Date | string | number
 }): RunResult {
-  const { chain, seed, state, paramValue } = input
+  const { chain, seed, state, paramValue, startedAt } = input
   const error = runFailure(state)
 
   const result: RunResult = {
@@ -161,6 +163,7 @@ export function buildRunResult(input: {
   }
   if (error) result.error = error
   if (state.runId) result.runId = state.runId
+  if (startedAt !== undefined) result.startedAt = startedAt
   if (chain.parameter && paramValue) result.parameter = { name: chain.parameter.name, value: paramValue }
   return result
 }

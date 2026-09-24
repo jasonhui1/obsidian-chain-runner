@@ -61,7 +61,7 @@ export function resumeRequest(source: ResumeSource): ResumeRequest {
  * back as words to show; only an unreachable engine still throws.
  */
 export function runResume(engine: EngineClient, runId: string, request: ResumeRequest, onEvent?: OnEvent, onConflict?: () => void): Promise<Answer> {
-  const gone = `Run ${runId} no longer has the hold this note answers`
+  const gone = 'This run no longer has the hold this note answers'
   return answer(engine, {
     open: () => engine.resumeRun(runId, request),
     calledOn: runId,
@@ -71,9 +71,9 @@ export function runResume(engine: EngineClient, runId: string, request: ResumeRe
       unsupported: UNSUPPORTED_RESUME,
       // The run id is the note's own, so either the run or the route may be what is missing.
       missingRoute: `${gone} — or this engine cannot resume a hold. Update maestro-playground if so.`,
-      running: said => `Run ${runId} cannot be resumed yet: ${said}`,
+      running: said => `This run cannot be resumed yet: ${said}`,
       gone,
-      invalid: said => `The engine would not resume run ${runId}: ${said}`,
+      invalid: said => `The engine would not resume this run: ${said}`,
       onConflict,
     },
   })

@@ -40,13 +40,13 @@ import {
   type ProposalIdentity,
   type ProposalRole,
 } from './proposal'
-import { buildDirectLabel, cardProposal, directLabelRunId, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
+import { buildDirectLabel, cardProposal, directLabelRunId, frameGeneratedName, frameRunId, reframe, relabel, rerunScene, selectedRunId, type CardProposal, type NoteFrontmatter } from './runLabel'
 import { beforeHoldRow, buildHoldColumn, buildPickRow, holdStamp, pickStamp, stampHold, stampPick, waitingFrameBox, type HoldColumn, type HoldStamp } from './holdColumn'
 import { GREY, INK, LINK_BLUE } from './ink'
 import { SelectionClicks, type SelectedIds } from './selectionClick'
 import { DEFAULT_SCRIPT_FOLDER, type ScriptVault } from './toolScript'
 import type { ChainSummary, HoldRecord } from '../engine/types'
-import { RUN_FRAME_GAP, waitingRunFrameName, type FramedPanel, type RunFrame } from '../run/runFrame'
+import { RUN_FRAME_GAP, uniqueRunFrameName, waitingRunFrameName, type FramedPanel, type RunFrame } from '../run/runFrame'
 import type { RerunLanding } from '../run/rerunWatch'
 import type { LayoutPanel } from '../engine/types'
 
@@ -319,6 +319,7 @@ export interface RerunDrawing {
     from: readonly string[],
     to: string,
     noteFor: (output: string) => Promise<string | undefined>,
+    toTitle: string,
   ): Promise<boolean>
 }
 
@@ -511,11 +512,13 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
 
   async placeRun(frame: RunFrame, outputs: readonly PlacedOutput[]): Promise<boolean> {
     const ea = this.emptied()
+    const existing = this.ea.getViewElements().filter(element => element.type === 'frame' && element.name).map(element => element.name as string)
+    frame.name = uniqueRunFrameName(frame.name, existing)
 
     // First, so the panels can name it as their container.
     const frameId = ea.addFrame?.(frame.box.x, frame.box.y, frame.box.width, frame.box.height, frame.name)
     const madeFrame = frameId ? ea.getElement(frameId) : undefined
-    if (madeFrame) madeFrame.customData = reframe(madeFrame.customData, frame.runId)
+    if (madeFrame) madeFrame.customData = reframe(madeFrame.customData, frame.runId, frame.name)
 
     for (const { placed, notePath } of outputs) {
       ea.style.strokeWidth = placed.emphasis ? EMPHASIS_STROKE : PLAIN_STROKE
@@ -728,9 +731,14 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     from: readonly string[],
     to: string,
     noteFor: (output: string) => Promise<string | undefined>,
+    toTitle: string,
   ): Promise<boolean> {
-    const found = rerunScene(this.ea.getViewElements(), from, to, noteFrontmatter(this.app, this.view))
+    const scene = this.ea.getViewElements()
+    const found = rerunScene(scene, from, toTitle, noteFrontmatter(this.app, this.view))
     if (!found) return false
+    const renaming = new Set(found.frames.filter(frame => frame.name).map(frame => frame.element.id))
+    const occupied = scene.filter(element => element.type === 'frame' && element.name && !renaming.has(element.id))
+      .map(element => element.name as string)
     const notePaths = new Map<SceneElement, string>()
     for (const card of found.cards) {
       const notePath = await noteFor(card.output)
@@ -751,8 +759,12 @@ class BoundDrawing implements NodeDrawing, RunDrawing, RerunDrawing, ProposalDra
     for (const { element, name } of found.frames) {
       const frame = copy(element)
       if (frame) {
-        frame.name = name
-        if (frameRunId(frame)) frame.customData = reframe(frame.customData, to)
+        const title = name ? uniqueRunFrameName(name, occupied, element.name ?? undefined) : undefined
+        if (title) {
+          frame.name = title
+          occupied.push(title)
+        }
+        if (frameRunId(frame)) frame.customData = reframe(frame.customData, to, title ?? frameGeneratedName(frame))
       }
     }
     await save(ea, false)

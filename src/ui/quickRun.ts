@@ -150,10 +150,11 @@ export class QuickRunner {
     this.inFlight = controller
 
     let state = emptyRunState()
+    const startedAt = Date.now()
     // The header names the note, not the seed text, which has gone to the engine.
     const show = (): void =>
       view.show(
-        buildRunResult({ chain, seed: { note: source.name, from: seed.from }, state, paramValue }),
+        buildRunResult({ chain, seed: { note: source.name, from: seed.from }, state, paramValue, startedAt }),
         source.path,
       )
     show()

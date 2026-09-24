@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { RerunOnDrawing } from '@/ui/rerunOnDrawing'
+import { RerunOnDrawing, type RerunOnDrawingDeps } from '@/ui/rerunOnDrawing'
 import type { DrawingView, RerunSurface } from '@/ui/excalidraw'
 import type { RerunLanding } from '@/run/rerunWatch'
 import type { RunProvenance } from '@/ui/outputNotes'
@@ -30,8 +30,9 @@ let notices: string[]
 let refused: string[]
 /** Each drawing bound, by name, in the order it was. */
 let bound: string[]
+let titles: (string | undefined)[]
 
-function makeFollower(): RerunOnDrawing {
+function makeFollower(engine?: RerunOnDrawingDeps['engine']): RerunOnDrawing {
   /** Each open drawing's view, known here by its name. */
   const names = new Map<DrawingView, string>(Object.keys(drawings).map(name => [{ file: null }, name]))
   const surface: RerunSurface = {
@@ -45,13 +46,14 @@ function makeFollower(): RerunOnDrawing {
         placePickRow: async () => true,
         updatePickCounts: async () => true,
         refreshHoldColumn: async () => true,
-        followRerun: async (from, to, noteFor) => {
+        followRerun: async (from, to, noteFor, title) => {
           const shown = drawings[name]
           if (shown === 'unreachable') throw new Error('That drawing went away')
           if (!shown) return false
           const notes: Record<string, string | undefined> = {}
           for (const output of shown) notes[output] = await noteFor(output)
           followed.push({ view: name, from, to, notes })
+          titles.push(title)
           return true
         },
       }
@@ -68,6 +70,7 @@ function makeFollower(): RerunOnDrawing {
       },
     },
     notify: message => void notices.push(message),
+    engine,
   })
 }
 
@@ -79,9 +82,24 @@ beforeEach(() => {
   notices = []
   refused = []
   bound = []
+  titles = []
 })
 
 describe('RerunOnDrawing', () => {
+  it('uses the recorded run name when moving an existing frame', async () => {
+    drawings['A'] = ['World']
+    const run = {
+      runId: NEW, chainName: 'creative-director', seedPrompt: '', startedAt: '2026-09-16T00:41:00',
+      status: 'complete' as const, agentOutputs: [],
+    }
+    await makeFollower({
+      getRun: async () => run,
+      listForks: async () => [],
+      getLayout: async () => ({ kind: 'timeline', panels: [] }),
+    }).land(landing)
+    expect(titles).toEqual(['creative-director · 00:41'])
+  })
+
   it('files an in-place pick output even when its drawing is closed', async () => {
     await makeFollower().land({ ...landing, from: [NEW], pick: { nodeId: 'pick', heading: 'Candidate 1', pending: [0] } })
     expect(written.map(one => one.panel.name)).toEqual(['World'])

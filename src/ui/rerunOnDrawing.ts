@@ -6,6 +6,7 @@ import { applyRunEvent, emptyRunState, type RunState } from '../run/session'
 import { lineCount } from '../run/panels'
 import type { LayoutPanel } from '../engine/types'
 import type { PickStream, RerunLanding } from '../run/rerunWatch'
+import { runName, runNameFromMeta } from '../run/runName'
 import { pickPanelIndexes } from '../run/pickPanels'
 import type { EngineClient } from '../engine/client'
 import type { RunMeta } from '../engine/types'
@@ -165,12 +166,14 @@ export class RerunOnDrawing {
       for (const panel of landing.panels) await noteFor(panel.name)
     }
     if (surface.unavailable()) return
+    const run = landing.pick ? undefined : await this.deps.engine?.getRun(landing.runId).catch(() => undefined)
+    const toTitle = run ? runNameFromMeta(run) : runName({ chainName: landing.chainName, startTime: Date.now() })
     for (const view of surface.openViews()) {
       if (landing.pick) {
         await this.writeDrawing(view, () => surface.on(view).placePickRow(landing, pickOutputs))
         await this.writeDrawing(view, () => surface.on(view).updatePickCounts(landing))
       } else {
-        await this.writeDrawing(view, () => surface.on(view).followRerun(landing.from, landing.runId, noteFor))
+        await this.writeDrawing(view, () => surface.on(view).followRerun(landing.from, landing.runId, noteFor, toTitle))
       }
     }
   }

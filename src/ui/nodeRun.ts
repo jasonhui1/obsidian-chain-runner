@@ -15,6 +15,7 @@ import { runIntoNotes, type ChainRunOutcome } from './chainRun'
 import { openLiveOutputs, type LiveOutput } from './liveOutputs'
 import type { RunLayout } from '../run/panels'
 import { buildRunFrame, RUN_FRAME_GAP, type FramedPanel, type RunFrame } from '../run/runFrame'
+import type { RunGroupPosition } from '../run/runName'
 import { seedFromInputs } from './inputSeed'
 import { onDrawing, readDrawing, UNREACHABLE_DRAWING } from './onDrawing'
 import { runFailure } from '../run/session'
@@ -267,6 +268,7 @@ export class NodeRun {
 
     const members = queues.map((events, instance) => {
       let frame: RunFrame | undefined
+      const group = { index: instance, count }
       return runIntoNotes({
         engine: this.deps.engine,
         chain: plan.chain,
@@ -280,7 +282,7 @@ export class NodeRun {
             frame = placed
             stacked.push(placed)
             nextFrameY = placed.box.y + placed.box.height + RUN_FRAME_GAP
-          })
+          }, group)
           if (frame) await plan.touch(async drawing => { await drawing.placeHold(frame!, hold, pendingIndexes(layout)); return true })
         },
         onProgress: model => {
@@ -292,7 +294,7 @@ export class NodeRun {
             frame = placed
             stacked.push(placed)
             nextFrameY = placed.box.y + placed.box.height + RUN_FRAME_GAP
-          }),
+          }, group),
       })
     })
     const allMembers = Promise.allSettled(members)
@@ -361,8 +363,17 @@ export class NodeRun {
     plan: NodeRunPlan,
     node: Box = plan.node,
     onFrame?: (frame: RunFrame) => void,
+    group?: RunGroupPosition,
   ): Promise<LiveOutput<FramedPanel>[]> {
-    const frame = buildRunFrame({ layout, chainName: plan.chain.name, runId, node })
+    const frame = buildRunFrame({
+      layout,
+      chainName: plan.chain.name,
+      runId,
+      node,
+      dropdownValue: plan.parameterValue,
+      group,
+      startTime: Date.now(),
+    })
     onFrame?.(frame)
     return this.openFrame(frame, plan)
   }

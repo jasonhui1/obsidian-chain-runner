@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRunFrame, waitingRunFrameName } from '@/run/runFrame'
+import { buildRunFrame, uniqueRunFrameName, waitingRunFrameName } from '@/run/runFrame'
 import type { RunLayout, RunPanel } from '@/run/panels'
 import type { Box } from '@/ui/nodeScene'
 
@@ -16,19 +16,48 @@ const panel = (name: string, over: Partial<RunPanel> = {}): RunPanel => ({
   ...over,
 })
 
-const frameOf = (layout: RunLayout): ReturnType<typeof buildRunFrame> =>
-  buildRunFrame({ layout, chainName: 'Five Personas', runId: '2026-09-02-ab12c', node })
+const frameOf = (
+  layout: RunLayout,
+  over: Partial<Parameters<typeof buildRunFrame>[0]> = {},
+): ReturnType<typeof buildRunFrame> =>
+  buildRunFrame({
+    layout,
+    chainName: 'Five Personas',
+    runId: '2026-09-02-ab12c',
+    node,
+    startTime: '00:41',
+    ...over,
+  })
 
 /** Everything the frame holds, as `name → box`. */
 const boxes = (frame: ReturnType<typeof buildRunFrame>): Record<string, Box> =>
   Object.fromEntries(frame.panels.map(one => [one.panel.name, one.box]))
 
 describe('buildRunFrame', () => {
+  it('keeps frame titles distinct when two ordinary runs start in one minute', () => {
+    const name = 'Five Personas · 00:41'
+    expect(uniqueRunFrameName(name, [])).toBe(name)
+    expect(uniqueRunFrameName(name, [name])).toBe(`${name} (2)`)
+    expect(uniqueRunFrameName(name, [name, `${name} (2)`])).toBe(`${name} (3)`)
+    expect(uniqueRunFrameName(name, [], name)).toBe(`${name} (2)`)
+    expect(uniqueRunFrameName(name, [], `${name} (2)`)).toBe(`${name} (3)`)
+  })
   it('titles a waiting frame without exposing the run id', () => {
     expect(waitingRunFrameName('Five Personas · run-1', 'run-1')).toBe('Five Personas · waiting')
+    expect(waitingRunFrameName('Five Personas · 00:41', 'run-1')).toBe('Five Personas · 00:41')
   })
-  it('titles the frame with the chain and the run', () => {
-    expect(frameOf({ kind: 'timeline', panels: [panel('Draft')] }).name).toBe('Five Personas · 2026-09-02-ab12c')
+
+  it('titles the frame with the chain and what makes the run different', () => {
+    expect(frameOf({ kind: 'timeline', panels: [panel('Draft')] }).name).toBe('Five Personas · 00:41')
+    expect(frameOf({ kind: 'timeline', panels: [panel('Draft')] }, { candidate: 'Meta-Architect' }).name).toBe(
+      'Five Personas · Meta-Architect',
+    )
+    expect(frameOf({ kind: 'timeline', panels: [panel('Draft')] }, { dropdownValue: 'engineers' }).name).toBe(
+      'Five Personas · engineers',
+    )
+    expect(frameOf({ kind: 'timeline', panels: [panel('Draft')] }, { group: { index: 1, count: 3 } }).name).toBe(
+      'Five Personas · run 2 of 3',
+    )
   })
 
   it('puts the frame beside the node, top-aligned with it', () => {
